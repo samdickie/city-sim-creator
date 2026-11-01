@@ -41,10 +41,13 @@ const TILE_NAMES := {
 
 const TILE_COLOURS := {
 	Tile.ROAD: Color(0.23, 0.23, 0.25),
-	Tile.HOMES: Color(0.30, 0.72, 0.36),
+	Tile.HOMES: Color(0.86, 0.36, 0.30),   # brick red: stands out on green land
 	Tile.SHOPS: Color(0.26, 0.58, 0.92),
 	Tile.INDUSTRY: Color(0.96, 0.70, 0.15),
 }
+
+const LEVEL_FILL := [0.22, 0.55, 0.8, 1.0]   # how solid a zone looks at levels 0-3
+const FLASH_SECONDS := 1.5
 
 const WATER_COLOUR := Color(0.18, 0.42, 0.66)
 const LOW_LAND := Color(0.62, 0.74, 0.46)
@@ -81,6 +84,8 @@ var info_label: Label
 var stats_label: Label
 var message_label: Label
 var message_timer := 0.0
+var flash_tiles := PackedInt32Array()  # plots that grew this month
+var flash_time := 0.0
 var confirm_new: ConfirmationDialog
 var date_label: Label
 var money_label: Label
@@ -182,6 +187,7 @@ func _draw() -> void:
 
 	var tiles := sim.tiles
 	var levels := sim.levels
+	var reach := sim.road_reach_map()
 	for y in map_h:
 		for x in map_w:
 			var i := _index(x, y)
@@ -195,14 +201,25 @@ func _draw() -> void:
 				continue
 			var plot := r.grow(-1.0)   # small gap so plots read as separate
 			var lv := levels[i]
+			# The whole plot gets bolder as it grows, so growth shows at any zoom:
+			# faint outline (empty) -> light -> medium -> solid with a dark block.
+			draw_rect(plot, Color(c, LEVEL_FILL[lv]))
 			if lv == 0:
-				# Zoned but nothing built yet: a faint outlined plot.
-				draw_rect(plot, Color(c, 0.30))
-				draw_rect(plot, Color(c, 0.85), false, 1.0)
+				draw_rect(plot, Color(c, 0.9), false, 1.0)
 			else:
-				# Built up: solid plot with a building that grows each level.
-				draw_rect(plot, c)
-				draw_rect(r.grow(-(7.0 - lv * 2.0)), c.darkened(0.45))
+				draw_rect(r.grow(-(7.0 - lv * 2.0)), c.darkened(0.5))
+			if reach[i] > Settings.ROAD_REACH:
+				# No road close enough: cross it out so it's clear why it isn't growing.
+				draw_line(plot.position, plot.end, Color(0, 0, 0, 0.6), 1.5)
+				draw_line(Vector2(plot.end.x, plot.position.y),
+					Vector2(plot.position.x, plot.end.y), Color(0, 0, 0, 0.6), 1.5)
+
+	# Plots that grew this month flash white, then fade.
+	if flash_time > 0.0:
+		var a := flash_time / FLASH_SECONDS
+		for i in flash_tiles:
+			var fr := Rect2((i % map_w) * TILE, (i / map_w) * TILE, TILE, TILE)
+			draw_rect(fr.grow(TILE * 0.35 * a), Color(1, 1, 1, 0.85 * a))
 
 	# Faint grid once zoomed in enough to see individual tiles.
 	if camera and camera.zoom.x >= 1.0:
@@ -332,8 +349,14 @@ func _process(delta: float) -> void:
 		if clock >= Settings.MONTH_SECONDS:
 			clock = 0.0
 			sim.tick()
+			flash_tiles = sim.grew
+			flash_time = FLASH_SECONDS
 			_refresh_hud()
 			queue_redraw()
+
+	if flash_time > 0.0:
+		flash_time -= delta
+		queue_redraw()
 
 	if message_timer > 0.0:
 		message_timer -= delta
@@ -573,7 +596,8 @@ func _build_tools_panel(layer: CanvasLayer) -> void:
 	var help := Label.new()
 	help.text = "Left-drag: build   ·   Right-drag, WASD or two fingers: move\n" \
 		+ "Scroll or pinch: zoom   ·   1-5: tools   ·   Space: pause   ·   F: fast\n" \
-		+ "Zones grow when a road is within %d tiles   ·   Cmd+S save, Cmd+L load" % Settings.ROAD_REACH
+		+ "Zones fill in as they grow; crossed out = no road within %d tiles\n" % Settings.ROAD_REACH \
+		+ "Cmd+S save, Cmd+L load"
 	help.add_theme_font_size_override("font_size", 12)
 	help.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	box.add_child(help)
@@ -680,7 +704,8 @@ func _refresh_hud() -> void:
 	budget_label.text = "%s%s last month   (taxes %s, roads %s)" % [
 		"+" if net >= 0 else "", _money_text(net),
 		_money_text(sim.last_income), _money_text(sim.last_upkeep)]
-	city_label.text = "Population %d   ·   Jobs %d" % [sim.population, sim.jobs()]
+	city_label.text = "Population %d   ·   Jobs %d\nLast month: %d plots grew, %d shrank" % [
+		sim.population, sim.jobs(), sim.grew.size(), sim.shrank.size()]
 	tax_label.text = "Tax rate %d%%" % roundi(sim.tax_rate * 100.0)
 	demand_box.queue_redraw()
 	_update_stats()
@@ -710,10 +735,7 @@ func _tile_text(i: int) -> String:
 	if t < Tile.HOMES:
 		return TILE_NAMES[t]
 	var lv := sim.levels[i]
-	var text := "%s, level %d of %d" % [TILE_NAMES[t], lv, Settings.MAX_LEVEL]
-	if not sim.has_road_access(i):
-		text += " (needs a road within %d tiles)" % Settings.ROAD_REACH
-	return text
+	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, Settings.MAX_LEVEL, sim.zone_status(i)]
 
 
 func _update_stats() -> void:

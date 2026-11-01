@@ -27,6 +27,8 @@ var road_tiles := 0
 var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var last_income := 0
 var last_upkeep := 0
+var grew := PackedInt32Array()        # plots that grew last month
+var shrank := PackedInt32Array()      # plots that shrank last month
 
 var _road_dist := PackedByteArray()   # tiles to the nearest road (255 = far)
 var _roads_dirty := true
@@ -50,6 +52,8 @@ func reset() -> void:
 	tax_rate = Settings.DEFAULT_TAX_RATE
 	last_income = 0
 	last_upkeep = 0
+	grew.clear()
+	shrank.clear()
 	_roads_dirty = true
 	_rng.randomize()
 	recount()
@@ -68,6 +72,30 @@ func set_tile(i: int, t: int) -> void:
 func has_road_access(i: int) -> bool:
 	_update_road_distance()
 	return _road_dist[i] <= Settings.ROAD_REACH
+
+
+func road_reach_map() -> PackedByteArray:
+	# Tiles to the nearest road for every map tile (255 = far away).
+	_update_road_distance()
+	return _road_dist
+
+
+func zone_status(i: int) -> String:
+	# A plain-English reason for what a zone plot is doing.
+	var t := tiles[i]
+	if not has_road_access(i):
+		return "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH
+	if levels[i] >= Settings.MAX_LEVEL:
+		return "fully grown"
+	if demand[t] < _capacity_per_level(t) * 0.5:
+		match t:
+			Tile.HOMES:
+				return "waiting, the town needs more jobs first"
+			Tile.SHOPS:
+				return "waiting, the town needs more residents first"
+			Tile.INDUSTRY:
+				return "waiting, the town needs more workers first"
+	return "growing"
 
 
 func change_tax(step: float) -> void:
@@ -93,6 +121,8 @@ func _grow() -> void:
 			zones.append(i)
 	zones.shuffle()                   # no corner of the map gets first pick
 
+	grew.clear()
+	shrank.clear()
 	var wanted := demand.duplicate()
 	for i in zones:
 		var t := tiles[i]
@@ -103,10 +133,12 @@ func _grow() -> void:
 				and _rng.randf() < Settings.GROWTH_CHANCE:
 			levels[i] = lv + 1
 			wanted[t] -= size
+			grew.append(i)
 		elif lv > 0 and (not connected or wanted[t] < -size * 2.0) \
 				and _rng.randf() < Settings.DECLINE_CHANCE:
 			levels[i] = lv - 1
 			wanted[t] += size
+			shrank.append(i)
 
 
 func _collect_taxes() -> void:
@@ -241,5 +273,7 @@ func from_save(data: Dictionary) -> void:
 	money = int(data.get("money", Settings.START_MONEY))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
+	grew.clear()
+	shrank.clear()
 	_roads_dirty = true
 	recount()
