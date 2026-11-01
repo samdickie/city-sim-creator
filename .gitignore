@@ -1,0 +1,4 @@
+# Godot's cache folder, rebuilt automatically
+.godot/
+*.tmp
+.DS_Store
