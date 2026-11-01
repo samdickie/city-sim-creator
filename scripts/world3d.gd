@@ -15,6 +15,10 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE }   # s
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
 const SEA_FLOOR := -4.0        # how far the ground dips under the sea
+const KERB_HALF_WIDTH := 0.85  # pavement width at junctions, halved
+const ROAD_NORMAL := Vector2(0.0, 1.0)   # road texture: pavement, tarmac, pavement
+const ROAD_PLAIN := Vector2(0.5, 0.5)    # tarmac only
+const ROAD_KERB := Vector2(0.0, 0.0)     # pavement only
 
 # Optional photo textures. Drop files here and they're used automatically.
 const TEXTURE_DIR := "res://assets/textures/"
@@ -58,6 +62,12 @@ var warn_image: Image
 var warn_texture: ImageTexture
 
 var road_instance := MeshInstance3D.new()
+# Road mesh being built (kept as members so appending doesn't copy them).
+var _rv := PackedVector3Array()
+var _rn := PackedVector3Array()
+var _ruv := PackedVector2Array()
+var _ruv2 := PackedVector2Array()
+var _ri := PackedInt32Array()
 var road_material: ShaderMaterial
 var walls := MultiMeshInstance3D.new()
 var roofs := MultiMeshInstance3D.new()
@@ -499,74 +509,125 @@ func tile_centre(tile: Vector2i) -> Vector2:
 # -------------------------------------------------------------------- roads
 
 func _build_roads(tiles: PackedByteArray) -> void:
-	var verts := PackedVector3Array()
-	var normals := PackedVector3Array()
-	var uvs := PackedVector2Array()
-	var uv2s := PackedVector2Array()
-	var indices := PackedInt32Array()
-	var dirs := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+	# Roads are drawn as joined-up streets: straight runs pass right through a tile,
+	# corners become smooth bends, and junctions are open tarmac with pavements
+	# only on the sides with no road. Each piece starts and ends at the middle of a
+	# tile edge, so neighbouring tiles line up exactly.
+	_rv.clear()
+	_rn.clear()
+	_ruv.clear()
+	_ruv2.clear()
+	_ri.clear()
+	var half := cell * 0.5
+	var hw := ROAD_HALF_WIDTH
 	for y in map_h:
 		for x in map_w:
 			if tiles[y * map_w + x] != Tile.ROAD:
 				continue
 			var c := tile_centre(Vector2i(x, y))
-			var links: Array[Vector2i] = []
-			for d: Vector2i in dirs:
+			var links: Array[Vector2] = []
+			for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = Vector2i(x, y) + d
 				if n.x >= 0 and n.y >= 0 and n.x < map_w and n.y < map_h \
 						and tiles[n.y * map_w + n.x] == Tile.ROAD:
-					links.append(d)
-			var straight := links.size() == 2 and links[0] + links[1] == Vector2i.ZERO
+					links.append(Vector2(d))
+
 			if links.is_empty():
-				# A lone road tile: a short stub so it's still visible.
-				links.append(Vector2i(1, 0))
-				links.append(Vector2i(-1, 0))
-				straight = true
-			# Centre square, then an arm towards each joined neighbour.
-			var along := Vector2(links[0])
-			_road_strip(c - along * ROAD_HALF_WIDTH, c + along * ROAD_HALF_WIDTH,
-				1.0 if straight else 0.0, verts, normals, uvs, uv2s, indices)
-			for d: Vector2i in links:
-				var dir := Vector2(d)
-				_road_strip(c + dir * ROAD_HALF_WIDTH, c + dir * (cell * 0.5),
-					1.0, verts, normals, uvs, uv2s, indices)
-	if verts.is_empty():
+				# A lone tile: a short stretch of road.
+				_road_path(_line_points(c - Vector2(half * 0.6, 0), c + Vector2(half * 0.6, 0)),
+					hw, ROAD_NORMAL, 1.0)
+			elif links.size() == 1:
+				# Dead end: from the tile edge to just past the middle.
+				var d := links[0]
+				_road_path(_line_points(c + d * half, c - d * hw), hw, ROAD_NORMAL, 1.0)
+			elif links.size() == 2 and links[0] + links[1] == Vector2.ZERO:
+				# Straight through.
+				_road_path(_line_points(c + links[0] * half, c + links[1] * half), hw, ROAD_NORMAL, 1.0)
+			elif links.size() == 2:
+				# A corner: a quarter-circle bend between the two edges.
+				_road_path(_bend_points(c, links[0], links[1]), hw, ROAD_NORMAL, 1.0)
+			else:
+				# Junction: an open square of tarmac, an arm to each road, and
+				# pavement along any side without a road.
+				_road_path(_line_points(c - Vector2(hw, 0), c + Vector2(hw, 0)), hw, ROAD_PLAIN, 0.0)
+				for d: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+					if d in links:
+						_road_path(_line_points(c + d * half, c + d * hw), hw, ROAD_NORMAL, 1.0)
+					else:
+						var edge := c + d * (hw - KERB_HALF_WIDTH)
+						var along := Vector2(-d.y, d.x) * hw
+						_road_path(_line_points(edge - along, edge + along), KERB_HALF_WIDTH,
+							ROAD_KERB, 0.0, 0.08)   # raised kerb, sits on the tarmac
+
+	if _rv.is_empty():
 		road_instance.mesh = null
 		return
 	var arrays := []
 	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_TEX_UV2] = uv2s
-	arrays[Mesh.ARRAY_INDEX] = indices
+	arrays[Mesh.ARRAY_VERTEX] = _rv
+	arrays[Mesh.ARRAY_NORMAL] = _rn
+	arrays[Mesh.ARRAY_TEX_UV] = _ruv
+	arrays[Mesh.ARRAY_TEX_UV2] = _ruv2
+	arrays[Mesh.ARRAY_INDEX] = _ri
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	road_instance.mesh = mesh
 
 
-func _road_strip(from: Vector2, to: Vector2, centre_line: float, verts: PackedVector3Array,
-		normals: PackedVector3Array, uvs: PackedVector2Array, uv2s: PackedVector2Array,
-		indices: PackedInt32Array) -> void:
-	# A strip of road that follows the ground, split into short pieces.
-	var length := from.distance_to(to)
-	if length < 0.01:
-		return
-	var dir := (to - from) / length
-	var side := Vector2(-dir.y, dir.x) * ROAD_HALF_WIDTH
-	var steps := maxi(1, ceili(length / 4.0))
-	var start := verts.size()
+func _line_points(from: Vector2, to: Vector2) -> PackedVector2Array:
+	# Points every few metres along a straight line, so the road follows the ground.
+	var pts := PackedVector2Array()
+	var steps := maxi(1, ceili(from.distance_to(to) / 4.0))
 	for k in steps + 1:
-		var p := from.lerp(to, float(k) / steps)
+		pts.append(from.lerp(to, float(k) / steps))
+	return pts
+
+
+func _bend_points(c: Vector2, a: Vector2, b: Vector2) -> PackedVector2Array:
+	# A quarter circle from the middle of edge a to the middle of edge b,
+	# curving around the tile corner between them.
+	var half := cell * 0.5
+	var corner := c + (a + b) * half
+	var from := c + a * half - corner
+	var to := c + b * half - corner
+	var a0 := from.angle()
+	var turn := wrapf(to.angle() - a0, -PI, PI)
+	var pts := PackedVector2Array()
+	const STEPS := 14
+	for k in STEPS + 1:
+		pts.append(corner + Vector2.from_angle(a0 + turn * float(k) / STEPS) * half)
+	return pts
+
+
+func _road_path(points: PackedVector2Array, half_width: float, across: Vector2,
+		centre_line: float, lift: float = 0.0) -> void:
+	# A ribbon of road along the points. "across" is the texture position at the
+	# left and right edges: (0, 1) = full road with pavements, (0.5, 0.5) = plain
+	# tarmac, (0, 0) = pavement only.
+	var count := points.size()
+	var start := _rv.size()
+	var dist := 0.0
+	for k in count:
+		var dir: Vector2
+		if k == 0:
+			dir = points[1] - points[0]
+		elif k == count - 1:
+			dir = points[k] - points[k - 1]
+		else:
+			dir = points[k + 1] - points[k - 1]
+		dir = dir.normalized()
+		if k > 0:
+			dist += points[k].distance_to(points[k - 1])
+		var side := Vector2(-dir.y, dir.x) * half_width
 		for s in [-1.0, 1.0]:
-			var q: Vector2 = p + side * s
-			verts.append(Vector3(q.x, maxf(height_at(q.x, q.y), 0.0) + 0.35, q.y))
-			normals.append(Vector3.UP)
-			uvs.append(Vector2(0.0 if s < 0.0 else 1.0, length * float(k) / steps))
-			uv2s.append(Vector2(centre_line, 0.0))
-	for k in steps:
+			var q: Vector2 = points[k] + side * s
+			_rv.append(Vector3(q.x, maxf(height_at(q.x, q.y), 0.0) + 0.35 + lift, q.y))
+			_rn.append(Vector3.UP)
+			_ruv.append(Vector2(across.x if s < 0.0 else across.y, dist))
+			_ruv2.append(Vector2(centre_line, 0.0))
+	for k in count - 1:
 		var a := start + k * 2
-		indices.append_array([a, a + 2, a + 1, a + 1, a + 2, a + 3])   # clockwise from above
+		_ri.append_array([a, a + 2, a + 1, a + 1, a + 2, a + 3])   # clockwise from above
 
 
 # -------------------------------------------------------------- power lines

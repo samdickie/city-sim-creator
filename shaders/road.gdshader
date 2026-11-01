@@ -27,10 +27,10 @@ void fragment() {
 	}
 	float across = UV.x;
 	// Pavements along both edges.
-	float kerb = step(across, 0.14) + step(0.86, across);
+	float kerb = clamp(step(across, 0.14) + step(0.86, across), 0.0, 1.0);
 	colour = mix(colour, kerb_colour, kerb);
 	// Dashed white centre line on straight sections (UV2.x = 1).
-	float dash = step(0.5, fract(UV.y / 6.0)) * step(abs(across - 0.5), 0.012) * UV2.x;
+	float dash = step(0.5, fract(UV.y / 6.25)) * step(abs(across - 0.5), 0.012) * UV2.x;   // 4 dashes per half tile
 	colour = mix(colour, vec3(0.9), dash);
 	ALBEDO = colour;
 	ROUGHNESS = mix(0.88, 0.7, kerb);
