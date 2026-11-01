@@ -14,6 +14,7 @@ uniform sampler2D grass_tex : source_color, filter_linear_mipmap_anisotropic, re
 uniform sampler2D sand_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D rock_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float texture_metres = 6.0;                 // how many metres one texture tile covers
+uniform vec3 grass_average = vec3(0.157, 0.117, 0.045);  // the grass photo's average colour (linear)
 
 uniform vec3 grass_light : source_color = vec3(0.42, 0.55, 0.26);
 uniform vec3 grass_dark : source_color = vec3(0.24, 0.36, 0.15);
@@ -61,16 +62,19 @@ void fragment() {
 	vec3 grass;
 	vec3 sand;
 	vec3 rock;
+	float n = fbm(p / 40.0);
+	vec3 green = mix(grass_dark, grass_light, smoothstep(0.25, 0.75, n));
 	if (use_textures) {
 		vec2 uv = p / texture_metres;
-		// Two scales mixed together hide the repeating pattern.
-		grass = mix(texture(grass_tex, uv).rgb, texture(grass_tex, uv * 0.137).rgb, 0.35);
+		// The grass photo adds detail on top of our own green (it's a dry summer
+		// photo; Ayrshire is greener). Two scales mixed hide the repeating pattern.
+		vec3 detail = mix(texture(grass_tex, uv).rgb, texture(grass_tex, uv * 0.137).rgb, 0.35);
+		grass = green * clamp(detail / grass_average, 0.4, 1.8);
 		sand = texture(sand_tex, uv).rgb;
 		rock = texture(rock_tex, uv * 0.5).rgb;
 	} else {
-		float n = fbm(p / 40.0);
 		float fine = value_noise(p / 3.0);
-		grass = mix(grass_dark, grass_light, smoothstep(0.25, 0.75, n)) * (0.92 + 0.16 * fine);
+		grass = green * (0.92 + 0.16 * fine);
 		sand = sand_colour * (0.94 + 0.12 * value_noise(p / 2.0));
 		rock = rock_colour * (0.85 + 0.3 * fbm(p / 6.0));
 	}

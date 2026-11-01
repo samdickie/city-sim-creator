@@ -198,6 +198,7 @@ func _build_terrain() -> void:
 	var rock := _optional_texture("rock")
 	if grass and sand and rock:
 		terrain_material.set_shader_parameter("use_textures", true)
+		terrain_material.set_shader_parameter("grass_average", _average_colour(grass))
 		terrain_material.set_shader_parameter("grass_tex", grass)
 		terrain_material.set_shader_parameter("sand_tex", sand)
 		terrain_material.set_shader_parameter("rock_tex", rock)
@@ -239,6 +240,7 @@ func _build_city_nodes() -> void:
 	if stone:
 		wall_mat.set_shader_parameter("use_texture", true)
 		wall_mat.set_shader_parameter("wall_tex", stone)
+		wall_mat.set_shader_parameter("wall_average", _average_colour(stone))
 	walls.multimesh = _new_multimesh(_unit_box_mesh(), true)
 	walls.material_override = wall_mat
 	add_child(walls)
@@ -249,6 +251,7 @@ func _build_city_nodes() -> void:
 	if slate:
 		roof_mat.set_shader_parameter("use_texture", true)
 		roof_mat.set_shader_parameter("roof_tex", slate)
+		roof_mat.set_shader_parameter("roof_average", _average_colour(slate))
 	roofs.multimesh = _new_multimesh(_gable_mesh(), false)
 	roofs.material_override = roof_mat
 	add_child(roofs)
@@ -311,6 +314,22 @@ func _new_multimesh(mesh: Mesh, custom_data: bool) -> MultiMesh:
 	mm.use_custom_data = custom_data
 	mm.mesh = mesh
 	return mm
+
+
+func _average_colour(tex: Texture2D) -> Vector3:
+	# The photo's average colour in linear light, so the shaders can use it for detail.
+	var img := tex.get_image()
+	if img == null:
+		return Vector3(0.25, 0.25, 0.25)
+	if img.is_compressed() and img.decompress() != OK:
+		return Vector3(0.25, 0.25, 0.25)
+	var total := Color(0, 0, 0)
+	const N := 32
+	for gy in N:
+		for gx in N:
+			total += img.get_pixel(gx * img.get_width() / N, gy * img.get_height() / N).srgb_to_linear()
+	total /= float(N * N)
+	return Vector3(maxf(total.r, 0.01), maxf(total.g, 0.01), maxf(total.b, 0.01))
 
 
 func _optional_texture(tex_name: String) -> Texture2D:

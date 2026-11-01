@@ -10,6 +10,7 @@ render_mode diffuse_burley, specular_schlick_ggx;
 uniform bool use_texture = false;
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float wall_texture_metres = 3.0;
+uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);   // the stone photo's average colour (linear)
 
 varying vec3 local_pos;
 varying vec3 local_normal;
@@ -39,7 +40,8 @@ void fragment() {
 
 	vec3 colour = wall_colour;
 	if (use_texture && style != 2) {
-		colour *= texture(wall_tex, vec2(u, v) / wall_texture_metres).rgb * 1.6;
+		// Stone detail from the photo, keeping each building's own colour.
+		colour *= clamp(texture(wall_tex, vec2(u, v) / wall_texture_metres).rgb / wall_average, 0.3, 1.8);
 	} else {
 		// Stone blocks / panels with slight colour variation.
 		vec2 block = floor(vec2(u / 0.9, v / 0.45) + vec2(floor(v / 0.45) * 0.5, 0.0));

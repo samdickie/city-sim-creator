@@ -5,6 +5,7 @@ render_mode diffuse_burley, specular_schlick_ggx, cull_disabled;
 
 uniform bool use_texture = false;
 uniform sampler2D roof_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform vec3 roof_average = vec3(0.284, 0.243, 0.18);   // the slate photo's average colour (linear)
 
 varying vec3 world_pos;
 varying vec3 roof_colour;
@@ -22,7 +23,7 @@ void fragment() {
 	vec3 colour = roof_colour;
 	vec2 p = world_pos.xz + vec2(world_pos.y * 0.7);
 	if (use_texture) {
-		colour *= texture(roof_tex, p / 2.5).rgb * 1.7;
+		colour *= clamp(texture(roof_tex, p / 2.5).rgb / roof_average, 0.3, 1.8);
 	} else {
 		float course = fract(world_pos.y / 0.25);
 		colour *= mix(0.8, 1.0, smoothstep(0.0, 0.15, course));

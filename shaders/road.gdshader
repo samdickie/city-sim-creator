@@ -21,7 +21,7 @@ void vertex() {
 void fragment() {
 	vec3 colour = tarmac_colour;
 	if (use_texture) {
-		colour = texture(tarmac_tex, world_pos.xz / 4.0).rgb;
+		colour = texture(tarmac_tex, world_pos.xz / 4.0).rgb * 0.8;
 	} else {
 		colour *= 0.9 + 0.2 * hash(floor(world_pos.xz * 4.0));
 	}
