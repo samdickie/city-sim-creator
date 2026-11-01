@@ -7,7 +7,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Decisions
 - **Engine:** Godot 4.7, GDScript. Free tools only.
-- **Map:** OS Terrain 50 heights, 50 m per tile, 120 × 120 tiles. Starts entirely blank: no roads or buildings.
+- **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings.
 - **View:** Top-down 2D now. 3D (Terrain3D add-on, Blender or Kenney models) once the game is fun.
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
 - **Simulate tiles and totals, not individual people.** No real traffic; a zone counts as connected if a road touches it.
@@ -19,6 +19,19 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 | Homes | Residential zone. Grows houses and people (Phase 2). |
 | Shops | Commercial zone. Needs people nearby (Phase 2). |
 | Industry | Jobs; causes pollution (Phase 2). |
+
+## Money
+- Start with £20,000. Every build costs money; bulldozing a built tile costs £5.
+- Hills cost more (+8% per metre of slope); tiles steeper than 12 m can't be built on.
+- All numbers live in `scripts/settings.gd`.
+
+## Growth (Phase 2)
+- One game month every 3 seconds (Space pauses, F fast-forwards).
+- A zone grows when a road is within 2 tiles and the town wants more of it. Each zone grows in 3 levels.
+- Homes add 20 people per level; shops 8 jobs; industry 15 jobs.
+- Demand: homes follow jobs, shops follow residents, industry soaks up spare workers.
+- Taxes (default 9%) come in monthly from residents and jobs; roads cost £0.50 per tile per month. Higher taxes cut demand.
+- Rules live in `scripts/simulation.gd`, with no drawing code.
 
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
