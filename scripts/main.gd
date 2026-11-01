@@ -13,8 +13,8 @@ const MIN_ZOOM := 0.25
 const MAX_ZOOM := 4.0
 const PAN_SPEED := 900.0               # keyboard panning, pixels per second
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE }
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE }   # same order as simulation.gd
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -22,6 +22,8 @@ const TOOL_NAMES := {
 	Tool.SHOPS: "Shops",
 	Tool.INDUSTRY: "Industry",
 	Tool.BULLDOZE: "Bulldoze",
+	Tool.POWER_PLANT: "Power plant",
+	Tool.POWER_LINE: "Power line",
 }
 
 const TOOL_TO_TILE := {
@@ -29,6 +31,8 @@ const TOOL_TO_TILE := {
 	Tool.HOMES: Tile.HOMES,
 	Tool.SHOPS: Tile.SHOPS,
 	Tool.INDUSTRY: Tile.INDUSTRY,
+	Tool.POWER_PLANT: Tile.POWER_PLANT,
+	Tool.POWER_LINE: Tile.POWER_LINE,
 }
 
 const TILE_NAMES := {
@@ -37,6 +41,8 @@ const TILE_NAMES := {
 	Tile.HOMES: "Homes",
 	Tile.SHOPS: "Shops",
 	Tile.INDUSTRY: "Industry",
+	Tile.POWER_PLANT: "Power plant",
+	Tile.POWER_LINE: "Power line",
 }
 
 const TILE_COLOURS := {
@@ -44,7 +50,10 @@ const TILE_COLOURS := {
 	Tile.HOMES: Color(0.86, 0.36, 0.30),   # brick red: stands out on green land
 	Tile.SHOPS: Color(0.26, 0.58, 0.92),
 	Tile.INDUSTRY: Color(0.96, 0.70, 0.15),
+	Tile.POWER_PLANT: Color(0.45, 0.32, 0.62),
+	Tile.POWER_LINE: Color(0.98, 0.88, 0.25),
 }
+const SPARK := Color(1.0, 0.9, 0.2)
 
 const LEVEL_FILL := [0.22, 0.55, 0.8, 1.0]   # how solid a zone looks at levels 0-3
 const FLASH_SECONDS := 1.5
@@ -188,6 +197,7 @@ func _draw() -> void:
 	var tiles := sim.tiles
 	var levels := sim.levels
 	var reach := sim.road_reach_map()
+	var power := sim.power_map()
 	for y in map_h:
 		for x in map_w:
 			var i := _index(x, y)
@@ -198,6 +208,18 @@ func _draw() -> void:
 			var c: Color = TILE_COLOURS[t]
 			if t == Tile.ROAD:
 				draw_rect(r, c)
+				continue
+			if t == Tile.POWER_PLANT:
+				draw_rect(r, c)
+				# A yellow lightning-bolt shape.
+				var o := r.position
+				draw_colored_polygon(PackedVector2Array([
+					o + Vector2(10, 2), o + Vector2(4, 9), o + Vector2(9, 9)]), SPARK)
+				draw_colored_polygon(PackedVector2Array([
+					o + Vector2(7, 7), o + Vector2(12, 7), o + Vector2(6, 14)]), SPARK)
+				continue
+			if t == Tile.POWER_LINE:
+				_draw_power_line(x, y, c)
 				continue
 			var plot := r.grow(-1.0)   # small gap so plots read as separate
 			var lv := levels[i]
@@ -213,6 +235,11 @@ func _draw() -> void:
 				draw_line(plot.position, plot.end, Color(0, 0, 0, 0.6), 1.5)
 				draw_line(Vector2(plot.end.x, plot.position.y),
 					Vector2(plot.position.x, plot.end.y), Color(0, 0, 0, 0.6), 1.5)
+			elif power[i] == 0:
+				# Has a road but no electricity: dim it and add a small power warning.
+				draw_rect(plot, Color(0, 0, 0, 0.35))
+				draw_circle(plot.position + Vector2(TILE * 0.5 - 1, TILE * 0.5 - 1), 3.5, Color(0, 0, 0, 0.8))
+				draw_circle(plot.position + Vector2(TILE * 0.5 - 1, TILE * 0.5 - 1), 2.0, SPARK)
 
 	# Plots that grew this month flash white, then fade.
 	if flash_time > 0.0:
@@ -237,6 +264,16 @@ func _draw() -> void:
 		if why != "" and why != "-":
 			outline = Color(1, 0.3, 0.3, 0.95)
 		draw_rect(Rect2(Vector2(hover) * TILE, Vector2(TILE, TILE)), outline, false, 2.0)
+
+
+func _draw_power_line(x: int, y: int, c: Color) -> void:
+	# A cable from the centre of the tile towards each built neighbour.
+	var centre := Vector2(x + 0.5, y + 0.5) * TILE
+	draw_circle(centre, 2.0, c)
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n: Vector2i = Vector2i(x, y) + d
+		if _in_map(n) and sim.tiles[_index(n.x, n.y)] != Tile.EMPTY:
+			draw_line(centre, centre + Vector2(d) * TILE * 0.5, c, 2.0)
 
 
 func _draw_demand() -> void:
@@ -320,6 +357,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.INDUSTRY)
 			KEY_5, KEY_B:
 				_select_tool(Tool.BULLDOZE)
+			KEY_6:
+				_select_tool(Tool.POWER_PLANT)
+			KEY_7:
+				_select_tool(Tool.POWER_LINE)
 			KEY_SPACE:
 				_set_speed(1 if speed == 0 else 0)
 			KEY_F:
@@ -440,6 +481,10 @@ func _tool_cost(p: Vector2i) -> int:
 			base = Settings.SHOPS_COST
 		Tool.INDUSTRY:
 			base = Settings.INDUSTRY_COST
+		Tool.POWER_PLANT:
+			base = Settings.POWER_PLANT_COST
+		Tool.POWER_LINE:
+			base = Settings.POWER_LINE_COST
 	var hill := 1.0 + slope[_index(p.x, p.y)] * Settings.SLOPE_COST_PER_METRE
 	return roundi(base * hill)
 
@@ -595,8 +640,9 @@ func _build_tools_panel(layer: CanvasLayer) -> void:
 
 	var help := Label.new()
 	help.text = "Left-drag: build   ·   Right-drag, WASD or two fingers: move\n" \
-		+ "Scroll or pinch: zoom   ·   1-5: tools   ·   Space: pause   ·   F: fast\n" \
+		+ "Scroll or pinch: zoom   ·   1-7: tools   ·   Space: pause   ·   F: fast\n" \
 		+ "Zones fill in as they grow; crossed out = no road within %d tiles\n" % Settings.ROAD_REACH \
+		+ "Yellow dot = no power: roads, zones and power lines carry power from a plant\n" \
 		+ "Cmd+S save, Cmd+L load"
 	help.add_theme_font_size_override("font_size", 12)
 	help.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
@@ -701,11 +747,14 @@ func _refresh_hud() -> void:
 	money_label.add_theme_color_override("font_color",
 		Color(1.0, 0.45, 0.4) if low else Color(0.55, 0.9, 0.55))
 	var net := sim.last_income - sim.last_upkeep
-	budget_label.text = "%s%s last month   (taxes %s, roads %s)" % [
+	budget_label.text = "%s%s last month   (taxes %s, upkeep %s)" % [
 		"+" if net >= 0 else "", _money_text(net),
 		_money_text(sim.last_income), _money_text(sim.last_upkeep)]
-	city_label.text = "Population %d   ·   Jobs %d\nLast month: %d plots grew, %d shrank" % [
-		sim.population, sim.jobs(), sim.grew.size(), sim.shrank.size()]
+	city_label.text = "Population %d   ·   Jobs %d\nLast month: %d plots grew, %d shrank\nPower: %d of %d used" % [
+		sim.population, sim.jobs(), sim.grew.size(), sim.shrank.size(),
+		sim.power_used, sim.power_supply]
+	if sim.plants == 0:
+		city_label.text += "   (build a power plant!)"
 	tax_label.text = "Tax rate %d%%" % roundi(sim.tax_rate * 100.0)
 	demand_box.queue_redraw()
 	_update_stats()
@@ -732,7 +781,9 @@ func _update_info() -> void:
 
 func _tile_text(i: int) -> String:
 	var t := sim.tiles[i]
-	if t < Tile.HOMES:
+	if not sim.is_zone(t):
+		if t == Tile.POWER_PLANT:
+			return "Power plant, powers %d zone levels" % Settings.POWER_PER_PLANT
 		return TILE_NAMES[t]
 	var lv := sim.levels[i]
 	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, Settings.MAX_LEVEL, sim.zone_status(i)]

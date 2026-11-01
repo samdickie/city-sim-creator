@@ -44,3 +44,9 @@ const MAX_TAX_RATE := 0.20
 const TAX_DEMAND_EFFECT := 4.0    # each 1% above 9% cuts demand by 4%
 const TAX_BASE := 2.0             # £ per resident or job per month at a 100% rate
 const ROAD_UPKEEP := 0.5          # £ per road tile per month
+
+# --- Power ---
+const POWER_PLANT_COST := 3000
+const POWER_LINE_COST := 5
+const POWER_PER_PLANT := 200      # one plant powers this many zone levels
+const POWER_PLANT_UPKEEP := 100   # £ per plant per month

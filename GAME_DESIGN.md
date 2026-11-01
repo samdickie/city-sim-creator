@@ -33,6 +33,12 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Taxes (default 9%) come in monthly from residents and jobs; roads cost £0.50 per tile per month. Higher taxes cut demand.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
+## Power
+- Zones need electricity to grow; plots without it slowly shrink.
+- A power plant (£3,000, £100/month upkeep) powers 200 zone levels.
+- Power spreads through any touching built tiles: roads, zones, power lines (£5) and other plants.
+- When a network runs short, plots furthest from the plant lose power first.
+
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*

@@ -2,7 +2,7 @@
 
 A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 
-**Status: Phase 1 – Sandbox.** Paint roads and zones on a blank map, then save and load. The city doesn't grow yet; that's Phase 2.
+**Status: Phase 2 – Living city.** Zones grow when they have a road and power; demand, taxes and upkeep run monthly.
 
 ## Play it
 
@@ -13,9 +13,10 @@ A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 | Control | Action |
 | --- | --- |
 | Left-drag | Build with the current tool |
-| 1–5 | Road, Homes, Shops, Industry, Bulldoze |
+| 1–7 | Road, Homes, Shops, Industry, Bulldoze, Power plant, Power line |
 | Right-drag, WASD, arrow keys, two-finger scroll | Move around |
 | Mouse wheel or pinch | Zoom |
+| Space / F | Pause / fast-forward |
 | Cmd+S / Cmd+L | Save / Load |
 
 ## The map
@@ -29,7 +30,7 @@ To switch to real Troon:
    `python3 tools/make_troon_map.py ~/Downloads/<the zip you downloaded>`
 3. Check `map/preview.png` looks like Troon, then press Play.
 
-The map covers 6 × 6 km around Troon (harbour, town centre, Barassie, Royal Troon) at 50 m per tile, giving 120 × 120 tiles. Low ground joined to the map edge becomes sea.
+The map covers 7 × 6.5 km around Troon (harbour, town centre, Barassie, Royal Troon and the hills to the east) at 50 m per tile, giving 140 × 130 tiles. Low ground joined to the map edge becomes sea.
 
 ## Files
 
