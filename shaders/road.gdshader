@@ -30,9 +30,17 @@ void fragment() {
 	// Pavements along both edges.
 	float kerb = clamp(step(across, 0.14) + step(0.86, across), 0.0, 1.0);
 	colour = mix(colour, kerb_colour, kerb);
-	// Dashed white centre line on straight sections (UV2.x = 1).
+	// Zebra crossing on roads leading into a junction (UV2.y = 1): white bars
+	// across the carriageway, a few metres back from the junction.
+	float zebra_zone = UV2.y * step(12.5, UV.y) * step(UV.y, 16.5) * (1.0 - kerb);
+	float bars = step(0.5, fract(across * 12.0 / 1.1));
+	colour = mix(colour, vec3(0.92), zebra_zone * bars);
+	// Give-way line where the road meets the junction.
+	float give_way = UV2.y * step(17.5, UV.y) * step(UV.y, 17.9) * (1.0 - kerb);
+	colour = mix(colour, vec3(0.92), give_way);
+	// Dashed white centre line on straight sections (UV2.x = 1), not on the crossing.
 	float dash = step(0.5, fract(UV.y / 6.25)) * step(abs(across - 0.5), 0.012) * UV2.x;   // 4 dashes per half tile
-	colour = mix(colour, vec3(0.9), dash);
+	colour = mix(colour, vec3(0.9), dash * (1.0 - zebra_zone));
 	ALBEDO = colour;
 	ROUGHNESS = mix(0.88, 0.7, kerb);
 

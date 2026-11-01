@@ -15,8 +15,8 @@ var ground_height := Callable() # func(x, z) -> float, so the camera follows hil
 # Where the camera is heading...
 var target := Vector3.ZERO
 var yaw := deg_to_rad(200.0)
-var pitch := deg_to_rad(50.0)
-var distance := 3200.0
+var pitch := deg_to_rad(48.0)
+var distance := 1400.0
 # ...and where it is right now (eases towards the values above).
 var _target := Vector3.ZERO
 var _yaw := 0.0
@@ -28,6 +28,12 @@ func _ready() -> void:
 	camera.fov = 45.0
 	camera.near = 1.0
 	camera.far = 40000.0
+	# Depth of field: blur what's well behind or in front of the point you're
+	# looking at. From above, that gives the "tilt-shift" miniature-model look.
+	var dof := CameraAttributesPractical.new()
+	dof.dof_blur_far_enabled = true
+	dof.dof_blur_near_enabled = true
+	camera.attributes = dof
 	add_child(camera)
 	camera.make_current()
 	snap()
@@ -56,6 +62,14 @@ func _apply() -> void:
 	var offset := Vector3(sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
 	camera.global_position = _target + offset
 	camera.look_at(_target, Vector3.UP)
+	var dof := camera.attributes as CameraAttributesPractical
+	if dof:
+		dof.dof_blur_far_distance = _distance * 1.15
+		dof.dof_blur_far_transition = _distance * 0.9
+		dof.dof_blur_near_distance = _distance * 0.65
+		dof.dof_blur_near_transition = _distance * 0.35
+		# Gentle when zoomed in close, off when looking over the whole map.
+		dof.dof_blur_amount = lerpf(0.09, 0.0, smoothstep(2500.0, 5000.0, _distance))
 
 
 # ------------------------------------------------------------- controls
