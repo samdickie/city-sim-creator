@@ -6,7 +6,7 @@ Read this at the start of every build session. Keep it up to date when decisions
 Build a thriving town on a blank map of Troon's real land and coastline. Balance money against happiness.
 
 ## Decisions
-- **Engine:** Godot 4.6, GDScript. Free tools only.
+- **Engine:** Godot 4.7, GDScript. Free tools only.
 - **Map:** OS Terrain 50 heights, 50 m per tile, 120 × 120 tiles. Starts entirely blank: no roads or buildings.
 - **View:** Top-down 2D now. 3D (Terrain3D add-on, Blender or Kenney models) once the game is fun.
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.

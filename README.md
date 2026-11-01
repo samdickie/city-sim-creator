@@ -6,7 +6,7 @@ A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 
 ## Play it
 
-1. Install **Godot 4.6** (free) from https://godotengine.org/download and open it.
+1. Install **Godot 4.7** (free) from https://godotengine.org/download and open it.
 2. In the Project Manager, choose **Import**, pick this folder's `project.godot`, then **Import & Edit**.
 3. Press **Play** (▶, top right) or F5.
 
