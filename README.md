@@ -2,7 +2,7 @@
 
 A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 
-**Status: Phase 2 – Living city.** Zones grow when they have a road and power; demand, taxes and upkeep run monthly.
+**Status: Phase 2 – Living city, now in 3D.** Zones grow when they have a road and power; demand, taxes and upkeep run monthly.
 
 ## Play it
 
@@ -14,9 +14,10 @@ A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 | --- | --- |
 | Left-drag | Build with the current tool |
 | 1–7 | Road, Homes, Shops, Industry, Bulldoze, Power plant, Power line |
-| Right-drag, WASD, arrow keys, two-finger scroll | Move around |
-| Mouse wheel or pinch | Zoom |
-| Space / F | Pause / fast-forward |
+| Two-finger scroll, middle-drag, WASD | Move around |
+| Right-drag, Q / E, Shift + two-finger scroll | Rotate and tilt |
+| Pinch or mouse wheel | Zoom |
+| Space / F / H | Pause / fast-forward / help |
 | Cmd+S / Cmd+L | Save / Load |
 
 ## The map

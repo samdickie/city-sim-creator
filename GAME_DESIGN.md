@@ -8,7 +8,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Decisions
 - **Engine:** Godot 4.7, GDScript. Free tools only.
 - **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings.
-- **View:** Top-down 2D now. 3D (Terrain3D add-on, Blender or Kenney models) once the game is fun.
+- **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D view is kept in `main.tscn` as a backup.
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
 - **Simulate tiles and totals, not individual people.** No real traffic; a zone counts as connected if a road touches it.
 
