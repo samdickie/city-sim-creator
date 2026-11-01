@@ -255,6 +255,8 @@ func _process(delta: float) -> void:
 			rig.turn(1.6 * delta)
 	if dir != Vector2.ZERO:
 		rig.pan_direction(dir.normalized(), delta)
+	world.set_view_distance(rig.distance)
+	world.blink(fmod(Time.get_ticks_msec() / 1000.0, 1.0) < 0.7)
 
 	# The game clock: one simulation step per game month.
 	if speed > 0:
@@ -389,10 +391,16 @@ func _line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 		if p == b:
 			break
 		var e2 := 2 * err
-		if e2 >= dy:
+		var step_x := e2 >= dy
+		var step_y := e2 <= dx
+		if step_x:
 			err += dy
 			p.x += sx
-		if e2 <= dx:
+		if step_y:
+			if step_x:
+				points.append(p)   # fill the corner so tiles always share an edge
+				if p == b:
+					break
 			err += dx
 			p.y += sy
 	return points

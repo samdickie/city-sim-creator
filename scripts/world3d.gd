@@ -66,6 +66,14 @@ var pylons := MultiMeshInstance3D.new()
 var cables := MultiMeshInstance3D.new()
 var hover_box := MeshInstance3D.new()
 var hover_material := StandardMaterial3D.new()
+var alerts := Node3D.new()            # floating warning icons above plots
+var _alert_items: Array = []          # [sprite, ground height] for resizing
+var _alert_size := 30.0
+var _power_icon: Texture2D
+var _road_icon: Texture2D
+
+const POWER_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#ffd21f' stroke='#16181c' stroke-width='7'/><path d='M54 14 L26 54 H45 L39 84 L70 40 H51 Z' fill='#16181c'/></svg>"
+const ROAD_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#e5484d' stroke='#16181c' stroke-width='7'/><rect x='22' y='41' width='52' height='14' rx='3' fill='white'/></svg>"
 var sun := DirectionalLight3D.new()
 
 
@@ -274,6 +282,17 @@ func _build_city_nodes() -> void:
 	hover_box.visible = false
 	add_child(hover_box)
 
+	_power_icon = _svg_texture(POWER_ICON_SVG)
+	_road_icon = _svg_texture(ROAD_ICON_SVG)
+	add_child(alerts)
+
+
+func _svg_texture(svg: String) -> Texture2D:
+	var img := Image.new()
+	img.load_svg_from_string(svg, 1.0)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
 
 func _new_multimesh(mesh: Mesh, custom_data: bool) -> MultiMesh:
 	var mm := MultiMesh.new()
@@ -322,7 +341,7 @@ func refresh_ground() -> void:
 				if reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
 				elif power[i] == 0:
-					warn.g = 1.0
+					warn.g = 1.0   # (shown as a floating icon, see _build_alerts)
 			elif t == Tile.POWER_PLANT:
 				tint = Color(0.55, 0.55, 0.55, 0.6)
 			zone_image.set_pixel(x, y, tint)
@@ -331,6 +350,49 @@ func refresh_ground() -> void:
 	warn_texture.update(warn_image)
 	_build_roads(tiles)
 	_build_power_lines(tiles)
+	_build_alerts()
+
+
+func _build_alerts() -> void:
+	# A floating icon over every plot that can't grow: no road (red), no power (yellow).
+	for child in alerts.get_children():
+		child.queue_free()
+	_alert_items.clear()
+	for y in map_h:
+		for x in map_w:
+			var warn := warn_image.get_pixel(x, y)
+			if warn.r < 0.5 and warn.g < 0.5:
+				continue
+			var sprite := Sprite3D.new()
+			sprite.texture = _road_icon if warn.r >= 0.5 else _power_icon
+			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sprite.no_depth_test = true
+			sprite.render_priority = 10
+			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+			var ground := ground_point(Vector2i(x, y))
+			alerts.add_child(sprite)
+			_alert_items.append([sprite, ground])
+	_place_alerts()
+
+
+func set_view_distance(distance: float) -> void:
+	# Keep the warning icons a readable size however far the camera is.
+	var size := clampf(distance * 0.022, 12.0, 120.0)
+	if absf(size - _alert_size) > _alert_size * 0.05:
+		_alert_size = size
+		_place_alerts()
+
+
+func _place_alerts() -> void:
+	for item in _alert_items:
+		var sprite: Sprite3D = item[0]
+		var ground: Vector3 = item[1]
+		sprite.pixel_size = _alert_size / 96.0
+		sprite.position = ground + Vector3.UP * (12.0 + _alert_size * 0.6)
+
+
+func blink(on: bool) -> void:
+	alerts.visible = on
 
 
 func refresh_buildings() -> void:

@@ -215,8 +215,8 @@ func _build_help(root: Control) -> void:
 		"Zoom: pinch or scroll wheel\n" +
 		"Tools: keys 1-7     Pause: Space     Fast: F     Help: H\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
-		"Dark stripes = no road nearby.   Yellow glow = no power.\n" +
-		"Power travels through roads, buildings and power lines.", 15, TEXT_DIM)
+		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
+		"Power travels through roads, buildings and power lines that share an edge.", 15, TEXT_DIM)
 	box.add_child(text)
 	var close := _button("Got it", false)
 	close.pressed.connect(func(): help_panel.visible = false)

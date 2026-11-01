@@ -93,8 +93,7 @@ void fragment() {
 		vec4 warn = texture(warn_map, tile_uv);
 		float stripes = step(0.5, fract((p.x + p.y) / 8.0));
 		colour = mix(colour, vec3(0.05), warn.r * stripes * 0.55);           // no road: dark stripes
-		float pulse = 0.5 + 0.5 * sin(time_now * 4.0);
-		colour = mix(colour, vec3(1.0, 0.85, 0.1), warn.g * (0.25 + 0.3 * pulse)); // no power: yellow pulse
+		// (No power is shown by a floating icon instead of a ground colour.)
 	} else {
 		// Outside the playable area: muted, so the edge of the map is clear.
 		colour = mix(colour, vec3(dot(colour, vec3(0.33))), 0.55) * 0.75;
