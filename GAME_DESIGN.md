@@ -39,6 +39,11 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Power spreads through any touching built tiles: roads, zones, power lines (£5) and other plants.
 - When a network runs short, plots furthest from the plant lose power first.
 
+## Look and feel
+- Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more; houses get garden trees.
+- Cars drive on the left along the roads, more as the population grows (purely visual).
+- A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. A "Day & night" button turns it off.
+
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*

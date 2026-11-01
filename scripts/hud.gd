@@ -12,6 +12,7 @@ signal tax_changed(step: float)
 signal new_city_pressed
 signal save_pressed
 signal load_pressed
+signal day_cycle_toggled(on: bool)
 
 const Settings = preload("res://scripts/settings.gd")
 
@@ -24,6 +25,7 @@ const BAD := Color(1.0, 0.45, 0.42)
 var tool_buttons := {}
 var speed_buttons := {}
 var date_label: Label
+var clock_label: Label
 var money_label: Label
 var budget_label: Label
 var people_label: Label
@@ -85,6 +87,9 @@ func _build_top_left(root: Control) -> void:
 	date_label = _label("", 17, TEXT_DIM)
 	date_label.custom_minimum_size = Vector2(96, 0)
 	row.add_child(date_label)
+	clock_label = _label("", 17, TEXT_DIM)
+	clock_label.custom_minimum_size = Vector2(56, 0)
+	row.add_child(clock_label)
 	for s in [0, 1, Settings.FAST_SPEED]:
 		var b := _button({0: "Pause", 1: "Play", Settings.FAST_SPEED: "Fast"}[s], true)
 		b.pressed.connect(func(): speed_chosen.emit(s))
@@ -101,6 +106,11 @@ func _build_top_left(root: Control) -> void:
 		var b := _button(item[0], false)
 		b.pressed.connect(item[1])
 		files.add_child(b)
+	var cycle := _button("Day & night", true)
+	cycle.button_pressed = true
+	cycle.tooltip_text = "Turn off to keep it daytime"
+	cycle.toggled.connect(func(on: bool): day_cycle_toggled.emit(on))
+	files.add_child(cycle)
 
 
 func _build_top_right(root: Control) -> void:
@@ -213,7 +223,7 @@ func _build_help(root: Control) -> void:
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
-		"Tools: keys 1-7     Pause: Space     Fast: F     Help: H\n\n" +
+		"Tools: keys 1-8     Pause: Space     Fast: F     Help: H\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.", 15, TEXT_DIM)
@@ -251,6 +261,10 @@ func show_city(sim, money_text: String, net_text: String, income_text: String, u
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
 	tax_label.text = "Tax rate %d%%" % roundi(sim.tax_rate * 100.0)
 	demand_box.queue_redraw()
+
+
+func set_clock(text: String) -> void:
+	clock_label.text = text
 
 
 func show_info(text: String) -> void:

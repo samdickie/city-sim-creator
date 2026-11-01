@@ -11,6 +11,7 @@ uniform bool use_texture = false;
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform float wall_texture_metres = 3.0;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);   // the stone photo's average colour (linear)
+uniform float night = 0.0;                                // 0 = day, 1 = night: lights come on
 
 varying vec3 local_pos;
 varying vec3 local_normal;
@@ -52,6 +53,7 @@ void fragment() {
 
 	float rough = 0.85;
 	float metal = 0.0;
+	vec3 glow = vec3(0.0);
 
 	if (!is_roof) {
 		float floor_h = style == 2 ? 6.0 : 3.0;
@@ -80,10 +82,19 @@ void fragment() {
 		}
 		if (window) {
 			// Glass: dark, glossy, the odd one with curtains or lights.
-			float which = hash(floor(vec2(u / spacing, v / floor_h)) + size.xz);
+			vec2 window_id = floor(vec2(u / spacing, v / floor_h)) + size.xz;
+			float which = hash(window_id);
 			colour = mix(vec3(0.07, 0.09, 0.12), vec3(0.32, 0.30, 0.26), step(0.85, which));
 			rough = 0.08;
 			metal = 0.3;
+			// At night, about half the windows are lit, in slightly different warm tones.
+			float lit = step(0.45, hash(window_id + vec2(3.7, 1.3)));
+			vec3 lamp = mix(vec3(1.0, 0.72, 0.38), vec3(1.0, 0.86, 0.62), hash(window_id + 9.1));
+			if (style == 1 && storey < 0.5) {
+				lit = 1.0;   // shop windows stay lit
+				lamp = vec3(1.0, 0.92, 0.78);
+			}
+			glow = lamp * lit * night * 2.2;
 		} else if (cell_v < 0.32 && cell_v > 0.26 && style != 2 && style != 4 && edge_margin && cell_u > 0.18 && cell_u < 0.82) {
 			// Stone sill under each window.
 			colour *= 1.25;
@@ -93,4 +104,5 @@ void fragment() {
 	ALBEDO = colour;
 	ROUGHNESS = rough;
 	METALLIC = metal;
+	EMISSION = glow;
 }

@@ -10,7 +10,7 @@ const BUILDING_SHADER = preload("res://shaders/building.gdshader")
 const ROOF_SHADER = preload("res://shaders/roof.gdshader")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE }   # same order as simulation.gd
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -85,6 +85,25 @@ var _road_icon: Texture2D
 const POWER_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#ffd21f' stroke='#16181c' stroke-width='7'/><path d='M54 14 L26 54 H45 L39 84 L70 40 H51 Z' fill='#16181c'/></svg>"
 const ROAD_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#e5484d' stroke='#16181c' stroke-width='7'/><rect x='22' y='41' width='52' height='14' rx='3' fill='white'/></svg>"
 var sun := DirectionalLight3D.new()
+var env: Environment
+var sky_material: Material
+var wall_material: ShaderMaterial
+var night := 0.0                       # 0 = full day, 1 = full night
+var _sky_energy := 1.0
+
+# Trees: natural woods on open land (hidden where you build), plus park and garden trees.
+var trunks := MultiMeshInstance3D.new()
+var crowns := MultiMeshInstance3D.new()        # broadleaf canopies
+var cones := MultiMeshInstance3D.new()         # conifers
+var city_trunks := MultiMeshInstance3D.new()
+var city_crowns := MultiMeshInstance3D.new()
+var _tree_trunk_xf: Array[Transform3D] = []
+var _tree_crown_xf: Array[Transform3D] = []
+var _tree_conifer := PackedByteArray()
+var _tree_crown_idx := PackedInt32Array()
+var _trees_in_tile := {}                       # tile index -> Array of tree numbers
+var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
+var _hidden := Transform3D(Basis.from_scale(Vector3(0.001, 0.001, 0.001)), Vector3(0, -500, 0))
 
 
 # ------------------------------------------------------------------- setup
@@ -105,22 +124,25 @@ func setup(simulation, width: int, height: int, cell_metres: float,
 	_build_terrain()
 	_build_sea()
 	_build_city_nodes()
+	_build_trees()
 	refresh_all()
 
 
 func _build_environment() -> void:
-	var env := Environment.new()
+	env = Environment.new()
 	var sky := Sky.new()
 	var hdri_path := "res://assets/hdri/sky.hdr"
 	if ResourceLoader.exists(hdri_path):
 		var pano := PanoramaSkyMaterial.new()
 		pano.panorama = load(hdri_path)
 		sky.sky_material = pano
+		sky_material = pano
 	else:
 		var physical := PhysicalSkyMaterial.new()
 		physical.turbidity = 8.0
 		physical.ground_color = Color(0.3, 0.33, 0.3)
 		sky.sky_material = physical
+		sky_material = physical
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -235,6 +257,7 @@ func _build_city_nodes() -> void:
 	add_child(road_instance)
 
 	var wall_mat := ShaderMaterial.new()
+	wall_material = wall_mat
 	wall_mat.shader = BUILDING_SHADER
 	var stone := _optional_texture("sandstone")
 	if stone:
@@ -373,6 +396,8 @@ func refresh_ground() -> void:
 					warn.g = 1.0   # (shown as a floating icon, see _build_alerts)
 			elif t == Tile.POWER_PLANT:
 				tint = Color(0.55, 0.55, 0.55, 0.6)
+			elif t == Tile.PARK:
+				tint = Color(0.40, 0.72, 0.32, 0.45)
 			zone_image.set_pixel(x, y, tint)
 			warn_image.set_pixel(x, y, warn)
 	zone_texture.update(zone_image)
@@ -380,6 +405,7 @@ func refresh_ground() -> void:
 	_build_roads(tiles)
 	_build_power_lines(tiles)
 	_build_alerts()
+	_update_natural_trees(tiles)
 
 
 func _build_alerts() -> void:
@@ -440,6 +466,7 @@ func refresh_buildings() -> void:
 	_fill(walls.multimesh, wall_list, true)
 	_fill(roofs.multimesh, roof_list, false)
 	_fill(chimneys.multimesh, chimney_list, false)
+	_build_city_trees(tiles, levels)
 
 
 func _fill(mm: MultiMesh, items: Array, custom: bool) -> void:
@@ -842,6 +869,194 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 		var pos: Vector3 = stack["pos"]
 		chimney_list.append([Transform3D(Basis.from_scale(Vector3(3.0, 65.0, 3.0)),
 			pos + Vector3.UP * 32.5), Color(0.75, 0.74, 0.72)])
+
+
+# -------------------------------------------------------------------- trees
+
+func _tree_multimesh(node: MultiMeshInstance3D, mesh: Mesh, shadows: bool) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.roughness = 0.95
+	node.multimesh = _new_multimesh(mesh, false)
+	node.material_override = mat
+	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows \
+		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(node)
+
+
+func _build_trees() -> void:
+	var trunk_mesh := CylinderMesh.new()
+	trunk_mesh.top_radius = 0.35
+	trunk_mesh.bottom_radius = 0.5
+	trunk_mesh.height = 1.0
+	trunk_mesh.radial_segments = 6
+	trunk_mesh.rings = 1
+	var crown_mesh := SphereMesh.new()
+	crown_mesh.radius = 0.5
+	crown_mesh.height = 1.0
+	crown_mesh.radial_segments = 10
+	crown_mesh.rings = 6
+	var cone_mesh := CylinderMesh.new()
+	cone_mesh.top_radius = 0.0
+	cone_mesh.bottom_radius = 0.5
+	cone_mesh.height = 1.0
+	cone_mesh.radial_segments = 8
+	cone_mesh.rings = 1
+	_tree_multimesh(trunks, trunk_mesh, false)
+	_tree_multimesh(crowns, crown_mesh, true)
+	_tree_multimesh(cones, cone_mesh, true)
+	_tree_multimesh(city_trunks, trunk_mesh, false)
+	_tree_multimesh(city_crowns, crown_mesh, true)
+
+	# Woods where the noise is high, open fields where it's low, the odd lone tree.
+	var noise := FastNoiseLite.new()
+	noise.seed = 1977
+	noise.frequency = 0.045
+	noise.fractal_octaves = 3
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2026
+	var trunk_items: Array = []
+	var crown_items: Array = []
+	var cone_items: Array = []
+	_tile_has_trees.resize(map_w * map_h)
+	_tile_has_trees.fill(1)
+	for y in map_h:
+		for x in map_w:
+			var i := y * map_w + x
+			if water[i] == 1 or heights[i] < 3.0:
+				continue   # no trees on the sea or the beach
+			var woods := clampf((noise.get_noise_2d(x, y) - 0.08) * 2.4, 0.0, 1.0)
+			var count := int(woods * 7.0 + rng.randf() * 0.6)
+			if count == 0 and rng.randf() < 0.06:
+				count = 1
+			for k in count:
+				var px := (x + rng.randf_range(0.06, 0.94)) * cell
+				var pz := (y + rng.randf_range(0.06, 0.94)) * cell
+				var conifer := woods > 0.55 and rng.randf() < 0.5
+				var n := _tree_trunk_xf.size()
+				var parts := _tree_parts(Vector2(px, pz), rng.randf_range(8.0, 16.0), conifer, rng)
+				_tree_trunk_xf.append(parts[0])
+				_tree_crown_xf.append(parts[1])
+				_tree_conifer.append(1 if conifer else 0)
+				trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
+				if conifer:
+					_tree_crown_idx.append(cone_items.size())
+					cone_items.append([parts[1], parts[2]])
+				else:
+					_tree_crown_idx.append(crown_items.size())
+					crown_items.append([parts[1], parts[2]])
+				if not _trees_in_tile.has(i):
+					_trees_in_tile[i] = []
+				_trees_in_tile[i].append(n)
+	_fill(trunks.multimesh, trunk_items, false)
+	_fill(crowns.multimesh, crown_items, false)
+	_fill(cones.multimesh, cone_items, false)
+
+
+func _tree_parts(at: Vector2, tall: float, conifer: bool, rng: RandomNumberGenerator) -> Array:
+	# [trunk transform, canopy transform, canopy colour] for one tree.
+	var ground := height_at(at.x, at.y)
+	var spin := Basis(Vector3.UP, rng.randf() * TAU)
+	var trunk_h := tall * (0.3 if conifer else 0.45)
+	var trunk := Transform3D(spin.scaled(Vector3(0.7, trunk_h, 0.7)),
+		Vector3(at.x, ground + trunk_h * 0.5 - 0.3, at.y))
+	var crown: Transform3D
+	var colour: Color
+	if conifer:
+		var cone_h := tall * 0.85
+		crown = Transform3D(spin.scaled(Vector3(tall * 0.32, cone_h, tall * 0.32)),
+			Vector3(at.x, ground + tall * 0.15 + cone_h * 0.5, at.y))
+		colour = Color(rng.randf_range(0.10, 0.15), rng.randf_range(0.22, 0.30), rng.randf_range(0.12, 0.17))
+	else:
+		var width := tall * rng.randf_range(0.5, 0.7)
+		crown = Transform3D(spin.scaled(Vector3(width, tall * 0.55, width)),
+			Vector3(at.x, ground + tall * 0.68, at.y))
+		colour = Color(rng.randf_range(0.18, 0.30), rng.randf_range(0.30, 0.42), rng.randf_range(0.10, 0.17))
+	return [trunk, crown, colour]
+
+
+func _update_natural_trees(tiles: PackedByteArray) -> void:
+	# Trees stay on open land and in parks; building anything else clears them.
+	for i in tiles.size():
+		var show := 1 if (tiles[i] == Tile.EMPTY or tiles[i] == Tile.PARK) else 0
+		if show == _tile_has_trees[i]:
+			continue
+		_tile_has_trees[i] = show
+		if not _trees_in_tile.has(i):
+			continue
+		for n in _trees_in_tile[i]:
+			trunks.multimesh.set_instance_transform(n, _tree_trunk_xf[n] if show == 1 else _hidden)
+			var mm := cones.multimesh if _tree_conifer[n] == 1 else crowns.multimesh
+			mm.set_instance_transform(_tree_crown_idx[n], _tree_crown_xf[n] if show == 1 else _hidden)
+
+
+func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
+	# Planted trees: lots in parks, a couple in the back gardens of houses.
+	var trunk_items: Array = []
+	var crown_items: Array = []
+	for i in tiles.size():
+		var t := tiles[i]
+		var count := 0
+		if t == Tile.PARK:
+			count = 9
+		elif t == Tile.HOMES and levels[i] >= 1 and levels[i] <= 2:
+			count = 3
+		if count == 0:
+			continue
+		var rng := RandomNumberGenerator.new()
+		rng.seed = i * 31 + t
+		var c := tile_centre(Vector2i(i % map_w, i / map_w))
+		for k in count:
+			var spot := c + Vector2(rng.randf_range(-21.0, 21.0), rng.randf_range(-21.0, 21.0))
+			if t == Tile.HOMES:
+				# Back gardens: the far half of the plot from the street.
+				var away := -Vector2(_frontage(i))
+				var across := Vector2(away.y, -away.x)
+				spot = c + away * rng.randf_range(14.0, 22.0) + across * rng.randf_range(-20.0, 20.0)
+			var parts := _tree_parts(spot, rng.randf_range(6.0, 11.0), false, rng)
+			trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
+			crown_items.append([parts[1], parts[2]])
+	_fill(city_trunks.multimesh, trunk_items, false)
+	_fill(city_crowns.multimesh, crown_items, false)
+
+
+# -------------------------------------------------------------- day and night
+
+func set_time_of_day(t: float) -> void:
+	# t: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
+	var phase := (t - 0.25) * TAU
+	var height := sin(phase)                       # above 0 = sun is up
+	var daylight := smoothstep(-0.08, 0.25, height)
+	night = 1.0 - smoothstep(-0.12, 0.08, height)
+
+	if height > -0.05:
+		# The sun rises in the east, crosses the south and sets in the west.
+		var elevation := maxf(height, 0.02) * 42.0
+		var yaw := 90.0 - 180.0 * clampf((t - 0.25) / 0.5, 0.0, 1.0)
+		sun.rotation_degrees = Vector3(-elevation, yaw, 0.0)
+		var warm := Color(1.0, 0.55, 0.30).lerp(Color(1.0, 0.96, 0.90), smoothstep(0.0, 0.4, height))
+		sun.light_color = warm
+		sun.light_energy = lerpf(0.0, 1.25, smoothstep(-0.05, 0.15, height))
+	else:
+		# Moonlight: faint and blue, from high in the south-east.
+		sun.rotation_degrees = Vector3(-40.0, 150.0, 0.0)
+		sun.light_color = Color(0.55, 0.65, 1.0)
+		sun.light_energy = 0.12
+
+	env.ambient_light_energy = lerpf(0.15, 1.0, daylight)
+	env.background_energy_multiplier = lerpf(0.04, 1.0, daylight)
+	env.fog_light_color = Color(0.04, 0.06, 0.10).lerp(Color(0.72, 0.78, 0.86), daylight)
+	# Dimming the sky itself makes Godot redo its lighting, so only do it in steps.
+	var sky_energy := lerpf(0.06, 1.0, daylight)
+	if absf(sky_energy - _sky_energy) > 0.04 and sky_material:
+		_sky_energy = sky_energy
+		sky_material.set("energy_multiplier", sky_energy)
+
+	if wall_material:
+		wall_material.set_shader_parameter("night", night)
+	if road_material:
+		road_material.set_shader_parameter("night", night)
 
 
 # ----------------------------------------------------------- simple shapes

@@ -13,7 +13,7 @@ A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 | Control | Action |
 | --- | --- |
 | Left-drag | Build with the current tool |
-| 1–7 | Road, Homes, Shops, Industry, Bulldoze, Power plant, Power line |
+| 1–8 | Road, Homes, Shops, Industry, Bulldoze, Power plant, Power line, Park |
 | Two-finger scroll, middle-drag, WASD | Move around |
 | Right-drag, Q / E, Shift + two-finger scroll | Rotate and tilt |
 | Pinch or mouse wheel | Zoom |

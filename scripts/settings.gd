@@ -50,3 +50,13 @@ const POWER_PLANT_COST := 3000
 const POWER_LINE_COST := 5
 const POWER_PER_PLANT := 200      # one plant powers this many zone levels
 const POWER_PLANT_UPKEEP := 100   # £ per plant per month
+
+# --- Parks ---
+const PARK_COST := 100
+const PARK_UPKEEP := 1.0          # £ per park tile per month
+
+# --- Look (no effect on the simulation) ---
+const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
+const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
+const PEOPLE_PER_CAR := 25        # one car on the roads per this many residents
+const MAX_CARS := 400

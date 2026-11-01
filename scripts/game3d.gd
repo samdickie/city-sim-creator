@@ -9,12 +9,13 @@ const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world3d.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
+const Cars = preload("res://scripts/cars.gd")
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE }
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -24,6 +25,7 @@ const TOOL_NAMES := {
 	Tool.BULLDOZE: "Bulldoze",
 	Tool.POWER_PLANT: "Power plant",
 	Tool.POWER_LINE: "Power line",
+	Tool.PARK: "Park",
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -32,6 +34,7 @@ const TOOL_TO_TILE := {
 	Tool.INDUSTRY: Tile.INDUSTRY,
 	Tool.POWER_PLANT: Tile.POWER_PLANT,
 	Tool.POWER_LINE: Tile.POWER_LINE,
+	Tool.PARK: Tile.PARK,
 }
 const TOOL_COLOURS := {
 	Tool.ROAD: Color(0.45, 0.45, 0.48),
@@ -41,6 +44,7 @@ const TOOL_COLOURS := {
 	Tool.BULLDOZE: Color(0.9, 0.3, 0.3),
 	Tool.POWER_PLANT: Color(0.62, 0.45, 0.85),
 	Tool.POWER_LINE: Color(0.98, 0.88, 0.25),
+	Tool.PARK: Color(0.40, 0.78, 0.36),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -50,6 +54,7 @@ const TILE_NAMES := {
 	Tile.INDUSTRY: "Industry",
 	Tile.POWER_PLANT: "Power plant",
 	Tile.POWER_LINE: "Power line",
+	Tile.PARK: "Park",
 }
 
 # --- Map ---
@@ -67,8 +72,11 @@ var sim := Simulation.new()
 var world := WorldView.new()
 var rig := CameraRig.new()
 var hud := Hud.new()
+var cars := Cars.new()
 var speed := 1
 var clock := 0.0
+var time_of_day := Settings.START_TIME_OF_DAY
+var day_cycle := true
 
 # --- Interaction ---
 var current_tool: int = Tool.ROAD
@@ -94,6 +102,9 @@ func _ready() -> void:
 	rig.target = Vector3(map_w * cell_size_m * 0.45, 0.0, map_h * cell_size_m * 0.5)
 	add_child(rig)
 
+	add_child(cars)
+	cars.setup(world, sim)
+
 	var tools := []
 	for id in TOOL_NAMES:
 		tools.append([id, TOOL_NAMES[id], str(id + 1), _price_text(id), TOOL_COLOURS[id]])
@@ -109,6 +120,7 @@ func _ready() -> void:
 	hud.new_city_pressed.connect(_new_city)
 	hud.save_pressed.connect(_save_game)
 	hud.load_pressed.connect(_load_game)
+	hud.day_cycle_toggled.connect(_set_day_cycle)
 
 	_select_tool(Tool.ROAD)
 	_set_speed(1)
@@ -229,6 +241,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.POWER_PLANT)
 			KEY_7:
 				_select_tool(Tool.POWER_LINE)
+			KEY_8:
+				_select_tool(Tool.PARK)
 			KEY_SPACE:
 				_set_speed(1 if speed == 0 else 0)
 			KEY_F:
@@ -256,6 +270,14 @@ func _process(delta: float) -> void:
 	if dir != Vector2.ZERO:
 		rig.pan_direction(dir.normalized(), delta)
 	world.set_view_distance(rig.distance)
+
+	# Time of day (only moves while the game is running).
+	if day_cycle:
+		time_of_day = fmod(time_of_day + delta * speed / Settings.DAY_SECONDS, 1.0)
+	world.set_time_of_day(time_of_day)
+	hud.set_clock(_clock_text())
+	cars.lights_on = world.night > 0.3
+	cars.update(delta * speed)
 	world.blink(fmod(Time.get_ticks_msec() / 1000.0, 1.0) < 0.7)
 
 	# The game clock: one simulation step per game month.
@@ -272,6 +294,8 @@ func _process(delta: float) -> void:
 	if _ground_dirty:
 		_ground_dirty = false
 		world.refresh_ground()
+		cars.roads_changed()
+		_update_traffic()
 	if _buildings_dirty and not painting:
 		_buildings_dirty = false
 		world.refresh_buildings()
@@ -362,6 +386,8 @@ func _base_cost(tool_id: int) -> int:
 			return Settings.POWER_PLANT_COST
 		Tool.POWER_LINE:
 			return Settings.POWER_LINE_COST
+		Tool.PARK:
+			return Settings.PARK_COST
 	return 0
 
 
@@ -415,6 +441,25 @@ func _select_tool(tool_id: int) -> void:
 	_update_info()
 
 
+func _set_day_cycle(on: bool) -> void:
+	day_cycle = on
+	if not on:
+		time_of_day = Settings.START_TIME_OF_DAY + 0.06   # late morning
+
+
+func _update_traffic() -> void:
+	# More people, more cars (but always a few once there are roads).
+	var wanted := sim.population / Settings.PEOPLE_PER_CAR
+	if sim.road_tiles > 0:
+		wanted = maxi(wanted, mini(10, sim.road_tiles))
+	cars.set_count(mini(wanted, Settings.MAX_CARS))
+
+
+func _clock_text() -> String:
+	var minutes := int(time_of_day * 24.0 * 60.0)
+	return "%02d:%02d" % [minutes / 60, minutes % 60]
+
+
 func _change_tax(step: float) -> void:
 	sim.change_tax(step)
 	_refresh_hud()
@@ -454,6 +499,8 @@ func _load_game() -> void:
 		return
 	sim.from_save(data)
 	world.refresh_all()
+	cars.roads_changed()
+	_update_traffic()
 	_refresh_hud()
 	hud.flash("City loaded.")
 
@@ -462,6 +509,8 @@ func _new_city() -> void:
 	sim.reset()
 	clock = 0.0
 	world.refresh_all()
+	cars.roads_changed()
+	_update_traffic()
 	_refresh_hud()
 	hud.flash("New city: the map is blank again.")
 
@@ -496,6 +545,8 @@ func _tile_text(i: int) -> String:
 	var t := sim.tiles[i]
 	if t == Tile.POWER_PLANT:
 		return "Power plant (powers %d zone levels)" % Settings.POWER_PER_PLANT
+	if t == Tile.PARK:
+		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
 	if not sim.is_zone(t):
 		return TILE_NAMES[t]
 	return "%s, level %d of %d: %s" % [TILE_NAMES[t], sim.levels[i], Settings.MAX_LEVEL, sim.zone_status(i)]

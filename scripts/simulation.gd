@@ -5,7 +5,7 @@ extends RefCounted
 
 const Settings = preload("res://scripts/settings.gd")
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE }
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }
 
 # --- The city ---
 var w := 0
@@ -23,6 +23,7 @@ var shop_jobs := 0
 var industry_jobs := 0
 var road_tiles := 0
 var plants := 0
+var park_tiles := 0
 var power_supply := 0                 # zone levels the plants can power
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
@@ -166,7 +167,8 @@ func _grow() -> void:
 
 func _collect_taxes() -> void:
 	last_income = roundi((population + jobs()) * tax_rate * Settings.TAX_BASE)
-	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + plants * Settings.POWER_PLANT_UPKEEP)
+	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + plants * Settings.POWER_PLANT_UPKEEP
+		+ park_tiles * Settings.PARK_UPKEEP)
 	money += last_income - last_upkeep
 
 
@@ -178,6 +180,7 @@ func recount() -> void:
 	industry_jobs = 0
 	road_tiles = 0
 	plants = 0
+	park_tiles = 0
 	power_used = 0
 	for i in w * h:
 		var lv := levels[i]
@@ -188,6 +191,8 @@ func recount() -> void:
 				road_tiles += 1
 			Tile.POWER_PLANT:
 				plants += 1
+			Tile.PARK:
+				park_tiles += 1
 			Tile.HOMES:
 				population += lv * Settings.PEOPLE_PER_LEVEL
 			Tile.SHOPS:
