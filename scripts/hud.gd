@@ -7,6 +7,7 @@ extends CanvasLayer
 ## It only displays things and reports button presses; the game decides what they do.
 
 signal tool_chosen(tool_id: int)
+signal density_chosen(density: int)
 signal speed_chosen(speed: int)
 signal tax_changed(step: float)
 signal new_city_pressed
@@ -23,6 +24,8 @@ const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
 
 var tool_buttons := {}
+var density_buttons := {}
+var density_panel: PanelContainer
 var speed_buttons := {}
 var date_label: Label
 var clock_label: Label
@@ -192,6 +195,31 @@ func _build_toolbar(root: Control, tools: Array) -> void:
 		row.add_child(b)
 		tool_buttons[id] = b
 
+	# Density picker, shown above the toolbar while Homes or Shops is selected.
+	density_panel = _panel(root)
+	density_panel.anchor_left = 0.5
+	density_panel.anchor_right = 0.5
+	density_panel.anchor_top = 1.0
+	density_panel.anchor_bottom = 1.0
+	density_panel.offset_bottom = -116.0
+	density_panel.offset_top = -116.0
+	density_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	density_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var drow := HBoxContainer.new()
+	drow.add_theme_constant_override("separation", 6)
+	density_panel.add_child(drow)
+	drow.add_child(_label("Density (Tab)", 14, TEXT_DIM))
+	for d: int in [0, 1, 2]:
+		var db := _button(["Low", "Medium", "High"][d], true)
+		db.custom_minimum_size = Vector2(84, 0)
+		db.tooltip_text = ["Villas and corner shops; never more than 2 storeys",
+			"Terraces and tenements; mansion flats when space runs short",
+			"Flats, towers and offices, as high as land value allows"][d]
+		db.pressed.connect(func(): density_chosen.emit(d))
+		drow.add_child(db)
+		density_buttons[d] = db
+	density_panel.visible = false
+
 
 func _build_info(root: Control) -> void:
 	var panel := _panel(root)
@@ -227,6 +255,7 @@ func _build_help(root: Control) -> void:
 		"  Zones and parks: drag a box. Start the drag ON a road to zone both sides\n" +
 		"  of every road in the box, two plots deep\n" +
 		"  Street grid (9): drag a box to lay streets with 100 m blocks\n" +
+		"Homes and shops come in low, medium and high density (Tab or the buttons)\n" +
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
@@ -244,6 +273,16 @@ func _build_help(root: Control) -> void:
 
 
 # ----------------------------------------------------------------- updates
+
+func set_density(d: int) -> void:
+	for k in density_buttons:
+		(density_buttons[k] as Button).set_pressed_no_signal(k == d)
+
+
+func show_density(on: bool) -> void:
+	if density_panel:
+		density_panel.visible = on
+
 
 func set_tool(id: int) -> void:
 	for k in tool_buttons:

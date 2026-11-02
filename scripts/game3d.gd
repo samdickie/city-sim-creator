@@ -83,6 +83,7 @@ var day_cycle := true
 
 # --- Interaction ---
 var current_tool: int = Tool.ROAD
+var current_density: int = 1          # 0 = low, 1 = medium, 2 = high (homes and shops)
 var painting := false
 var orbiting := false
 var dragging_map := false
@@ -119,6 +120,7 @@ func _ready() -> void:
 		Tile.INDUSTRY: [TOOL_COLOURS[Tool.INDUSTRY], "Industry"],
 	}, sim)
 	hud.tool_chosen.connect(_select_tool)
+	hud.density_chosen.connect(_set_density)
 	hud.speed_chosen.connect(_set_speed)
 	hud.tax_changed.connect(_change_tax)
 	hud.new_city_pressed.connect(_new_city)
@@ -127,6 +129,7 @@ func _ready() -> void:
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 
 	_select_tool(Tool.ROAD)
+	hud.set_density(current_density)
 	_set_speed(1)
 	_refresh_hud()
 	if map_credits != "":
@@ -250,6 +253,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.PARK)
 			KEY_9:
 				_select_tool(Tool.GRID)
+			KEY_TAB:
+				_set_density((current_density + 1) % 3)
 			KEY_ESCAPE:
 				_cancel_drag()
 			KEY_SPACE:
@@ -359,7 +364,11 @@ func _update_drag() -> void:
 			total += _tool_cost(p)
 			count += 1
 	world.set_preview(items, TOOL_COLOURS[current_tool])
-	var what := "%s: %d %s" % [TOOL_NAMES[current_tool], count, "tile" if count == 1 else "tiles"]
+	var tool_name: String = TOOL_NAMES[current_tool]
+	if _has_density():
+		var dn: String = Settings.DENSITY_NAMES[current_density]
+		tool_name += " (%s density)" % dn
+	var what := "%s: %d %s" % [tool_name, count, "tile" if count == 1 else "tiles"]
 	if current_tool == Tool.BULLDOZE:
 		hud.show_info("%s to clear, %s. Release to clear, Esc to cancel." % [what, _money_text(total)])
 	elif total > sim.money:
@@ -493,7 +502,7 @@ func _apply_tool(p: Vector2i) -> bool:
 	if current_tool == Tool.BULLDOZE:
 		sim.set_tile(i, Tile.EMPTY)
 	else:
-		sim.set_tile(i, TOOL_TO_TILE[current_tool])
+		sim.set_tile(i, TOOL_TO_TILE[current_tool], current_density if _has_density() else 1)
 	return true
 
 
@@ -506,7 +515,9 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			return "-"
 	else:
 		if here == TOOL_TO_TILE[current_tool]:
-			return "-"
+			# Same zone again does nothing, unless it changes the density.
+			if not _has_density() or sim.density[i] == current_density:
+				return "-"
 		# Zones and parks go round roads, power and plants rather than replacing
 		# them; the street grid only goes on open land. (Bulldoze first to replace.)
 		var infrastructure := here == Tile.ROAD or here == Tile.POWER_LINE or here == Tile.POWER_PLANT
@@ -529,9 +540,11 @@ func _base_cost(tool_id: int) -> int:
 		Tool.ROAD:
 			return Settings.ROAD_COST
 		Tool.HOMES:
-			return Settings.HOMES_COST
+			var homes_cost: int = Settings.HOMES_COSTS[current_density]
+			return homes_cost
 		Tool.SHOPS:
-			return Settings.SHOPS_COST
+			var shops_cost: int = Settings.SHOPS_COSTS[current_density]
+			return shops_cost
 		Tool.INDUSTRY:
 			return Settings.INDUSTRY_COST
 		Tool.BULLDOZE:
@@ -556,12 +569,28 @@ func _tool_cost(p: Vector2i) -> int:
 
 
 func _price_text(tool_id: int) -> String:
+	if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
+		return "from " + _money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
 	return _money_text(_base_cost(tool_id))
+
+
+func _has_density() -> bool:
+	return current_tool == Tool.HOMES or current_tool == Tool.SHOPS
+
+
+func _set_density(d: int) -> void:
+	current_density = d
+	hud.set_density(d)
+	var density_word: String = Settings.DENSITY_NAMES[d]
+	hud.flash("Zoning %s density" % density_word)
+	if painting:
+		_update_drag()
 
 
 func _select_tool(tool_id: int) -> void:
 	current_tool = tool_id
 	hud.set_tool(tool_id)
+	hud.show_density(_has_density())
 	if _in_map(hover):
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
@@ -678,11 +707,31 @@ func _tile_text(i: int) -> String:
 		if t == Tile.EMPTY and water[i] == 0:
 			return "Open land (land value %s)" % sim.land_value_word(i)
 		return TILE_NAMES[t]
-	var text := "%s, level %d of %d: %s" % [TILE_NAMES[t], sim.levels[i], sim.max_level(t), sim.zone_status(i)]
+	var kind: String = TILE_NAMES[t]
+	if t != Tile.INDUSTRY:
+		kind += " (%s density)" % sim.density_name(i)
+	var text := "%s, level %d of %d%s: %s" % [kind, sim.levels[i], sim.max_level(i),
+		_stage_words(t, sim.stage(i)), sim.zone_status(i)]
 	text += "\nLand value %s" % sim.land_value_word(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % _money_text(sim.home_price(i))
 	return text
+
+
+func _stage_words(t: int, s: int) -> String:
+	# What the buildings on a plot are, for the hover text.
+	var homes := ["", "villas", "villas and terraces", "tenements", "mansion flats", "modern flats", "towers"]
+	var shops := ["", "corner shops", "shop parade", "shops with flats", "offices over shops", "office blocks", "office tower"]
+	var works := ["", "small works", "factory", "large factory"]
+	var words: String = ""
+	match t:
+		Tile.HOMES:
+			words = homes[s]
+		Tile.SHOPS:
+			words = shops[s]
+		Tile.INDUSTRY:
+			words = works[s]
+	return "" if words == "" else " (" + words + ")"
 
 
 func _money_text(amount: int) -> String:

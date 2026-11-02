@@ -786,7 +786,7 @@ func _tile_text(i: int) -> String:
 			return "Power plant, powers %d zone levels" % Settings.POWER_PER_PLANT
 		return TILE_NAMES[t]
 	var lv := sim.levels[i]
-	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, sim.max_level(t), sim.zone_status(i)]
+	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, sim.max_level(i), sim.zone_status(i)]
 
 
 func _update_stats() -> void:

@@ -76,3 +76,21 @@ const INDUSTRY_PENALTY := 0.03    # per level of industry within 4 tiles
 const PLANT_PENALTY := 0.30       # a power plant within 5 tiles
 const BASE_HOME_PRICE := 160000   # £ for a home on average land with no shortage
 const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this much
+
+# --- Zoning density ---
+# A plot's building "stage" = its level + the density's head start:
+#   stage 1 villas · 2 two rows of villas / terraces · 3 tenements
+#   stage 4 mansion flats · 5 modern flats · 6 towers   (shops: parades up to an office tower)
+# Low density: levels 1-2 (stages 1-2). Medium: levels 1-3 (stages 2-4).
+# High: levels 1-4 (stages 3-6). Industry has one density (stages 1-3).
+const DENSITY_NAMES := ["low", "medium", "high"]
+const DENSITY_START := [0, 1, 2]          # stage = level + this
+const DENSITY_MAX_LEVEL := [2, 3, 4]
+const FREE_STAGE := 3                     # up to here, plots grow whenever there's demand
+# How many residents / jobs a plot holds at each stage (0 to 6).
+const HOMES_AT_STAGE := [0, 20, 40, 60, 100, 150, 220]
+const SHOP_JOBS_AT_STAGE := [0, 8, 16, 24, 40, 60, 90]
+const INDUSTRY_JOBS_AT_STAGE := [0, 15, 30, 45]
+# Zoning cost per tile for low / medium / high density.
+const HOMES_COSTS := [40, 60, 100]
+const SHOPS_COSTS := [60, 80, 120]

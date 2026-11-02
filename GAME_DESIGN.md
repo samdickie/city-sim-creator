@@ -33,6 +33,14 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Taxes (default 9%) come in monthly from residents and jobs; roads cost £0.50 per tile per month. Higher taxes cut demand.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
+## Zoning density
+- Homes and shops are zoned low, medium or high density (Tab or the buttons above the toolbar). Industry has one density.
+- A plot's building stage = its level + the density's head start: 1 villas, 2 terraces, 3 tenements, 4 mansion flats, 5 modern flats, 6 towers (shops: corner shops up to an office tower).
+- Low: stages 1-2 (never above 2 storeys). Medium: stages 2-4 (mansion flats only when space is short). High: stages 3-6 (as high as land value allows: stage 4/5/6 need 0.35/0.5/0.65).
+- Each stage holds more people/jobs (homes 20/40/60/100/150/220) and uses more power. Zoning costs more the denser you go (homes £40/60/100, shops £60/80/120).
+- Each month, valuable plots that can build taller go first; then everything else grows in random order.
+- Re-zone by dragging a different density over an area; buildings trim to the new maximum.
+
 ## Density, land value and prices
 - Homes and shops grow to level 3 (low-rise) whenever there's demand. Industry stops at 3.
 - When demand is more than the low-rise plots can still take, the town is "short of space": the most valuable plots build upwards, to level 4 (5-6 storey mansion flats), 5 (7-9 storey modern flats) and 6 (towers up to 12 storeys). Levels 4/5/6 need land value 0.35/0.5/0.65.

@@ -463,7 +463,10 @@ func refresh_ground() -> void:
 			if ZONE_TINTS.has(t):
 				var c: Color = ZONE_TINTS[t]
 				# Coloured while waiting to be built on; once built, it's lawn and gardens.
-				tint = Color(c, 0.5) if levels[i] == 0 else Color(0, 0, 0, 0)
+				var strength: float = 0.5
+				if t != Tile.INDUSTRY:
+					strength = [0.28, 0.48, 0.7][sim.density[i]]
+				tint = Color(c, strength) if levels[i] == 0 else Color(0, 0, 0, 0)
 				if reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
 				elif power[i] == 0:
@@ -547,7 +550,7 @@ func refresh_buildings() -> void:
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0:
-			_plan_zone(i, t, lv, wall_list, roof_list, chimney_list)
+			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
 		elif ZONE_TINTS.has(t) and _road_near(i):
 			_plan_site(i, t, wall_list)
 		elif t == Tile.EMPTY and _infill[i] > 0:
@@ -966,6 +969,13 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 		wall_list: Array, roof_list: Array) -> void:
 	var value := _values[i] if i < _values.size() else 0.3
 	_slab(i, side, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
+	if t == Tile.HOMES and lv == 2 and sim.density[i] >= 1:
+		# A terrace along this street too.
+		var stone: Color = _house_colour(rng)
+		for along: float in [-15.5, 0.0, 15.5]:
+			var spot := _place(i, side, along, 4.0, 15.0, 8.5)
+			_add_block(spot, 15.0, 8.5, 6.2, stone, STYLE_HOUSE, 3.2, SLATE, wall_list, roof_list)
+		return
 	if t == Tile.HOMES and lv <= 2:
 		# A row of villas with driveways and hedges.
 		var green := _hedge_colour(rng)
@@ -1032,7 +1042,7 @@ func _plan_site(i: int, t: int, wall_list: Array) -> void:
 		_prop(i, front, rng.randf_range(-18.0, 10.0), rng.randf_range(24.0, depth - 8.0),
 			rng.randf_range(2.0, 4.0), rng.randf_range(2.0, 4.0), rng.randf_range(0.8, 1.8),
 			[CONCRETE, RED_SANDSTONE, Color(0.55, 0.42, 0.28)][k])
-	if t != Tile.INDUSTRY and rng.randf() < 0.5:
+	if t != Tile.INDUSTRY and sim.density[i] >= 1 and rng.randf() < (0.4 if sim.density[i] == 1 else 0.8):
 		# Tower crane: mast, jib out over the foundations, counterweight.
 		var mast := _place(i, front, 8.0, 22.0, 1.8, 1.8)
 		var mx: Vector3 = mast["x"]
@@ -1169,6 +1179,10 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 				_parked_car(i, front, -18.0 + k * 6.0, mid, rng.randf() < 0.5, rng)
 		return
 
+	if lv == 2 and sim.density[i] >= 1:
+		_plan_terraces(i, front, depth, rng, wall_list, roof_list)
+		return
+
 	# Villas on their own lots (11.5 m wide, hedged): house, driveway down the side,
 	# maybe a car. From level 2 a second row behind, reached by a lane that runs
 	# in from the street where the first front lot would be.
@@ -1205,6 +1219,29 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	if lv >= 2:
 		_slab(i, front, -17.25, 0.0, 3.2, lane_at + 3.0, DRIVEWAY)     # lane in from the street
 		_slab(i, front, 0.0, lane_at, 48.0, 3.0, DRIVEWAY)              # lane behind the front gardens
+
+
+func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGenerator,
+		wall_list: Array, roof_list: Array) -> void:
+	# Medium density: two-storey terraces, front and back, each split into a few
+	# runs of joined houses, with small front gardens and long back gardens.
+	var back_row: float = depth - 13.0
+	var green := _hedge_colour(rng)
+	for row_back: float in [4.0, back_row]:
+		var stone: Color = _house_colour(rng)
+		var roof: Color = SLATE if rng.randf() < 0.7 else ROOF_TILE
+		for along: float in [-15.5, 0.0, 15.5]:
+			var spot := _place(i, front, along, row_back, 15.0, 8.5)
+			_add_block(spot, 15.0, 8.5, 6.2, stone.darkened(rng.randf_range(-0.04, 0.06)), STYLE_HOUSE,
+				3.2, roof, wall_list, roof_list)
+		_prop(i, front, 0.0, row_back - 3.6, 47.0, 0.7, 1.0, green)   # front garden hedge
+	_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
+	# A back lane between the two rows of back gardens, with a few cars.
+	var lane: float = (4.0 + 8.5 + back_row) * 0.5 - 1.5
+	_slab(i, front, 0.0, lane, 48.0, 3.0, DRIVEWAY)
+	for k in 4:
+		if rng.randf() < 0.5:
+			_parked_car(i, front, -18.0 + k * 12.0, lane - 0.7, rng.randf() < 0.5, rng)
 
 
 func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: float,
@@ -1516,9 +1553,9 @@ func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
 			count = 9
 		elif t == Tile.EMPTY and _infill[i] == INFILL_PARK:
 			count = 6
-		elif t == Tile.HOMES and levels[i] == 1:
+		elif t == Tile.HOMES and sim.stage(i) == 1:
 			count = 4
-		elif t == Tile.HOMES and levels[i] == 2:
+		elif t == Tile.HOMES and sim.stage(i) == 2:
 			count = 2
 		if count == 0:
 			continue
@@ -1532,7 +1569,7 @@ func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
 				var away := -Vector2(_frontage(i))
 				var across := Vector2(away.y, -away.x)
 				# Back gardens: the rear of the plot (the very back strip once there's a second row).
-				var from := 2.0 if levels[i] == 1 else 20.5
+				var from: float = 2.0 if sim.stage(i) == 1 else 20.5
 				spot = c + away * rng.randf_range(from, 22.5) + across * rng.randf_range(-20.0, 20.0)
 			var parts := _tree_parts(spot, rng.randf_range(6.0, 11.0), false, rng)
 			trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])

@@ -13,7 +13,8 @@ var w := 0
 var h := 0
 var water := PackedByteArray()
 var tiles := PackedByteArray()        # Tile enum per map tile
-var levels := PackedByteArray()       # zones: 0 = empty plot, 1-3 low-rise, 4-6 building up
+var levels := PackedByteArray()       # zones: 0 = empty plot, then 1 up to the density's maximum
+var density := PackedByteArray()      # zones: 0 = low, 1 = medium, 2 = high
 var money := 0
 var month := 0                        # months since the city was founded
 var tax_rate := Settings.DEFAULT_TAX_RATE
@@ -57,6 +58,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	water = water_map
 	tiles.resize(w * h)
 	levels.resize(w * h)
+	density.resize(w * h)
 	powered.resize(w * h)
 	_net_id.resize(w * h)
 	land_value.resize(w * h)
@@ -67,6 +69,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 func reset() -> void:
 	tiles.fill(Tile.EMPTY)
 	levels.fill(0)
+	density.fill(1)
 	money = Settings.START_MONEY
 	month = 0
 	tax_rate = Settings.DEFAULT_TAX_RATE
@@ -84,11 +87,18 @@ func reset() -> void:
 
 # ------------------------------------------------------------- player actions
 
-func set_tile(i: int, t: int) -> void:
+func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	if tiles[i] == t:
+		if is_zone(t) and density[i] != new_density:
+			# Re-zoning to another density keeps what's there, trimmed to the new maximum.
+			density[i] = new_density
+			levels[i] = mini(levels[i], max_level(i))
+			_power_dirty = true
+			_value_dirty = true
 		return
 	tiles[i] = t
 	levels[i] = 0                     # a new zone starts as an empty plot
+	density[i] = new_density if is_zone(t) else 1
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
@@ -107,7 +117,7 @@ func road_reach_map() -> PackedByteArray:
 
 func zone_status(i: int) -> String:
 	# A plain-English reason for what a zone plot is doing.
-	var t := tiles[i]
+	var t: int = tiles[i]
 	if not has_road_access(i):
 		return "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH
 	_update_power()
@@ -115,20 +125,15 @@ func zone_status(i: int) -> String:
 		if _net_id[i] < 0:
 			return "no power, link it to a power plant (roads, zones and power lines carry power)"
 		return "no power, the power plant is full, build another"
-	var lv := levels[i]
-	if lv < max_level(t) and _net_spare[_net_id[i]] <= 0:
+	var lv: int = levels[i]
+	if lv < max_level(i) and _net_spare[_net_id[i]] <= 0:
 		return "waiting, the power plant is full, build another"
-	if lv >= max_level(t):
+	if lv >= max_level(i):
+		if t != Tile.INDUSTRY and density[i] < 2:
+			return "fully built for %s density (zone it higher to let it grow more)" % density_name(i)
 		return "fully built up"
-	if lv >= Settings.MAX_LEVEL:
-		# Low-rise is full: building taller depends on scarcity and land value.
-		_update_land_value()
-		if shortage[t] <= 0.0:
-			return "built up as far as low-rise goes; will build taller when the town runs short of space"
-		if land_value[i] < Settings.TALL_VALUE_NEEDED[lv + 1]:
-			return "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"
-		return "space is short and the land is valuable: building taller"
-	if demand[t] < _capacity_per_level(t) * 0.5:
+	var next_stage: int = stage_at(i, lv + 1)
+	if demand_for(t) < step_size(i) * 0.5:
 		match t:
 			Tile.HOMES:
 				return "waiting, the town needs more jobs first"
@@ -136,7 +141,77 @@ func zone_status(i: int) -> String:
 				return "waiting, the town needs more residents first"
 			Tile.INDUSTRY:
 				return "waiting, the town needs more workers first"
+	if next_stage > Settings.FREE_STAGE:
+		_update_land_value()
+		var needed: float = Settings.TALL_VALUE_NEEDED[next_stage]
+		if land_value[i] < needed:
+			return "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"
+		if density[i] < 2 and shortage_for(t) <= 0.0:
+			return "will build taller when the town runs short of space"
 	return "growing"
+
+
+func demand_for(t: int) -> float:
+	var d: float = demand[t]
+	return d
+
+
+func shortage_for(t: int) -> float:
+	var v: float = shortage[t]
+	return v
+
+
+func density_name(i: int) -> String:
+	var n: String = Settings.DENSITY_NAMES[density[i]]
+	return n
+
+
+# ------------------------------------------------------------- stages and sizes
+
+func max_level(i: int) -> int:
+	if tiles[i] == Tile.INDUSTRY:
+		return 3
+	var m: int = Settings.DENSITY_MAX_LEVEL[density[i]]
+	return m
+
+
+func stage_at(i: int, level: int) -> int:
+	# What kind of building a plot has at a given level (see settings.gd).
+	if level <= 0:
+		return 0
+	if tiles[i] == Tile.INDUSTRY:
+		return level
+	var start: int = Settings.DENSITY_START[density[i]]
+	return level + start
+
+
+func stage(i: int) -> int:
+	return stage_at(i, levels[i])
+
+
+func units_at_stage(t: int, s: int) -> int:
+	# Residents (homes) or jobs (shops, industry) a plot holds at a stage.
+	var n: int = 0
+	match t:
+		Tile.HOMES:
+			n = Settings.HOMES_AT_STAGE[s]
+		Tile.SHOPS:
+			n = Settings.SHOP_JOBS_AT_STAGE[s]
+		Tile.INDUSTRY:
+			n = Settings.INDUSTRY_JOBS_AT_STAGE[s]
+	return n
+
+
+func units(i: int) -> int:
+	return units_at_stage(tiles[i], stage(i))
+
+
+func step_size(i: int) -> int:
+	# How many more residents/jobs the next level adds (or the last one added).
+	var lv: int = levels[i]
+	if lv < max_level(i):
+		return units_at_stage(tiles[i], stage_at(i, lv + 1)) - units(i)
+	return units(i) - units_at_stage(tiles[i], stage_at(i, lv - 1))
 
 
 func change_tax(step: float) -> void:
@@ -168,56 +243,76 @@ func _grow() -> void:
 
 	grew.clear()
 	shrank.clear()
-	var wanted := demand.duplicate()
+	var wanted: Dictionary = demand.duplicate()
 
-	# How much more the low-rise plots that can grow (road + power) could still take.
-	var room := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
+	# How much more the plots that can grow freely (road + power) could still take.
+	var room: Dictionary = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	for i in zones:
-		var t := tiles[i]
-		if levels[i] < Settings.MAX_LEVEL and _road_dist[i] <= Settings.ROAD_REACH and powered[i] == 1:
-			room[t] += (Settings.MAX_LEVEL - levels[i]) * _capacity_per_level(t)
+		if _road_dist[i] > Settings.ROAD_REACH or powered[i] == 0:
+			continue
+		var t: int = tiles[i]
+		var free_top: int = mini(stage_at(i, max_level(i)), Settings.FREE_STAGE)
+		var extra: int = units_at_stage(t, free_top) - units(i)
+		if extra > 0:
+			room[t] = float(room[t]) + extra
 	# Short of space when demand is more than that room can take.
-	for t in shortage:
-		var size := float(_capacity_per_level(t))
-		shortage[t] = clampf((wanted[t] - room[t]) / (size * 20.0), 0.0, 1.0)
+	for t: int in [Tile.HOMES, Tile.SHOPS, Tile.INDUSTRY]:
+		var unit: float = float(_capacity_per_level(t))
+		var gap: float = float(wanted[t]) - float(room[t])
+		shortage[t] = clampf(gap / (unit * 20.0), 0.0, 1.0)
 
-	# Pass 1: low-rise growth (and decline) on any plot, in random order.
+	# Pass 1: building taller, most valuable plots first (developers go where land
+	# is worth most). High-density plots rise whenever there's demand and the land
+	# is valuable enough; medium-density plots only take the step up to mansion
+	# flats when the town is short of space.
 	var tall_candidates: Array[int] = []
 	for i in zones:
-		var t := tiles[i]
-		var lv := levels[i]
-		var size := float(_capacity_per_level(t))
-		var connected := _road_dist[i] <= Settings.ROAD_REACH
-		var has_power := powered[i] == 1
-		var spare := _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
-		if connected and has_power and spare > 0 and lv < Settings.MAX_LEVEL \
-				and wanted[t] >= size * 0.5 and _rng.randf() < Settings.GROWTH_CHANCE:
+		if levels[i] < max_level(i) and stage_at(i, levels[i] + 1) > Settings.FREE_STAGE \
+				and _road_dist[i] <= Settings.ROAD_REACH and powered[i] == 1:
+			tall_candidates.append(i)
+	tall_candidates.sort_custom(func(a: int, b: int) -> bool: return land_value[a] > land_value[b])
+	var grown := {}
+	for i in tall_candidates:
+		var t: int = tiles[i]
+		var lv: int = levels[i]
+		var step: int = step_size(i)
+		var want: float = wanted[t]
+		var short: float = shortage[t]
+		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
+		var needed: float = Settings.TALL_VALUE_NEEDED[stage_at(i, lv + 1)]
+		var allowed: bool = density[i] == 2 or short > 0.0
+		if allowed and spare > 0 and want >= step * 0.5 and land_value[i] >= needed \
+				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short):
 			levels[i] = lv + 1
-			wanted[t] -= size
+			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
 			grew.append(i)
-		elif lv > 0 and (not connected or not has_power or wanted[t] < -size * 2.0) \
+			grown[i] = true
+
+	# Pass 2: free growth (up to tenements) and decline, in random order.
+	for i in zones:
+		if grown.has(i):
+			continue
+		var t: int = tiles[i]
+		var lv: int = levels[i]
+		var connected: bool = _road_dist[i] <= Settings.ROAD_REACH
+		var has_power: bool = powered[i] == 1
+		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
+		var want: float = wanted[t]
+		var can_rise: bool = lv < max_level(i)
+		var next_stage: int = stage_at(i, lv + 1) if can_rise else 0
+		var step: int = step_size(i)
+		if connected and has_power and spare > 0 and can_rise and next_stage <= Settings.FREE_STAGE \
+				and want >= step * 0.5 and _rng.randf() < Settings.GROWTH_CHANCE:
+			levels[i] = lv + 1
+			wanted[t] = want - step
+			_net_spare[_net_id[i]] -= 1
+			grew.append(i)
+		elif lv > 0 and (not connected or not has_power or want < -step * 2.0) \
 				and _rng.randf() < Settings.DECLINE_CHANCE:
 			levels[i] = lv - 1
-			wanted[t] += size
+			wanted[t] = want + step
 			shrank.append(i)
-		elif connected and has_power and lv >= Settings.MAX_LEVEL and lv < max_level(t):
-			tall_candidates.append(i)
-
-	# Pass 2: when space is short, the most valuable plots build upwards first.
-	tall_candidates.sort_custom(func(a: int, b: int) -> bool: return land_value[a] > land_value[b])
-	for i in tall_candidates:
-		var t := tiles[i]
-		var lv := levels[i]
-		var size := float(_capacity_per_level(t))
-		var spare := _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
-		if shortage[t] > 0.0 and spare > 0 and wanted[t] >= size * 0.5 \
-				and land_value[i] >= Settings.TALL_VALUE_NEEDED[lv + 1] \
-				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + shortage[t]):
-			levels[i] = lv + 1
-			wanted[t] -= size
-			_net_spare[_net_id[i]] -= 1
-			grew.append(i)
 
 
 func _collect_taxes() -> void:
@@ -226,7 +321,7 @@ func _collect_taxes() -> void:
 	var taxable := 0.0
 	for i in w * h:
 		if is_zone(tiles[i]) and levels[i] > 0:
-			taxable += levels[i] * _capacity_per_level(tiles[i]) * (0.6 + 0.8 * land_value[i])
+			taxable += units(i) * (0.6 + 0.8 * land_value[i])
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
 	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + plants * Settings.POWER_PLANT_UPKEEP
 		+ park_tiles * Settings.PARK_UPKEEP)
@@ -244,9 +339,8 @@ func recount() -> void:
 	park_tiles = 0
 	power_used = 0
 	for i in w * h:
-		var lv := levels[i]
 		if is_zone(tiles[i]):
-			power_used += lv
+			power_used += stage(i)
 		match tiles[i]:
 			Tile.ROAD:
 				road_tiles += 1
@@ -255,11 +349,11 @@ func recount() -> void:
 			Tile.PARK:
 				park_tiles += 1
 			Tile.HOMES:
-				population += lv * Settings.PEOPLE_PER_LEVEL
+				population += units(i)
 			Tile.SHOPS:
-				shop_jobs += lv * Settings.SHOP_JOBS_PER_LEVEL
+				shop_jobs += units(i)
 			Tile.INDUSTRY:
-				industry_jobs += lv * Settings.INDUSTRY_JOBS_PER_LEVEL
+				industry_jobs += units(i)
 	power_supply = plants * Settings.POWER_PER_PLANT
 	_update_power()
 	_update_demand()
@@ -268,18 +362,13 @@ func recount() -> void:
 	var homes := 0
 	for i in w * h:
 		if tiles[i] == Tile.HOMES and levels[i] > 0:
-			price_total += home_price(i) * levels[i]
-			homes += levels[i]
+			price_total += home_price(i) * units(i)
+			homes += units(i)
 	average_home_price = roundi(price_total / homes) if homes > 0 else 0
 
 
 func is_zone(t: int) -> bool:
 	return t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
-
-
-func max_level(t: int) -> int:
-	# Homes and shops can build upwards; industry stays low-rise.
-	return Settings.MAX_LEVEL if t == Tile.INDUSTRY else Settings.TALL_MAX_LEVEL
 
 
 func home_price(i: int) -> int:
@@ -354,9 +443,9 @@ func _update_land_value() -> void:
 				_spread(i, 3, Settings.PARK_BONUS)
 			Tile.SHOPS:
 				if levels[i] > 0:
-					_spread(i, 3, Settings.SHOP_BONUS * levels[i])
+					_spread(i, 3, Settings.SHOP_BONUS * stage(i))
 			Tile.INDUSTRY:
-				_spread(i, 4, -Settings.INDUSTRY_PENALTY * maxi(levels[i], 1))
+				_spread(i, 4, -Settings.INDUSTRY_PENALTY * maxi(stage(i), 1))
 			Tile.POWER_PLANT:
 				_spread(i, 5, -Settings.PLANT_PENALTY)
 	for i in w * h:
@@ -415,8 +504,9 @@ func _update_power() -> void:
 				left += Settings.POWER_PER_PLANT
 		for i in members:
 			if is_zone(tiles[i]):
-				if levels[i] <= left:
-					left -= levels[i]
+				var use: int = stage(i)
+				if use <= left:
+					left -= use
 					powered[i] = 1
 			else:
 				powered[i] = 1
@@ -519,6 +609,7 @@ func to_save() -> Dictionary:
 		"tax_rate": tax_rate,
 		"tiles": Array(tiles),
 		"levels": Array(levels),
+		"density": Array(density),
 	}
 
 
@@ -531,6 +622,22 @@ func from_save(data: Dictionary) -> void:
 		tiles[i] = int(saved_tiles[i])
 	for i in mini(saved_levels.size(), levels.size()):
 		levels[i] = int(saved_levels[i])
+	var saved_density: Array = data.get("density", [])
+	if saved_density.size() == density.size():
+		for i in density.size():
+			density[i] = int(saved_density[i])
+	else:
+		# A save from before density zoning: pick the density that matches what's built.
+		for i in density.size():
+			var old: int = levels[i]
+			density[i] = 1
+			if tiles[i] == Tile.HOMES or tiles[i] == Tile.SHOPS:
+				if old >= 1 and old <= 2:
+					density[i] = 0                    # villas / small shops: low
+				elif old >= 5:
+					density[i] = 2                    # modern flats, towers: high
+				var start: int = Settings.DENSITY_START[density[i]]
+				levels[i] = maxi(old - start, 1) if old > 0 else 0
 	money = int(data.get("money", Settings.START_MONEY))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
