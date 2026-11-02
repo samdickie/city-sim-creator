@@ -15,7 +15,7 @@ const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK }
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK, GRID }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -26,6 +26,7 @@ const TOOL_NAMES := {
 	Tool.POWER_PLANT: "Power plant",
 	Tool.POWER_LINE: "Power line",
 	Tool.PARK: "Park",
+	Tool.GRID: "Street grid",
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -35,6 +36,7 @@ const TOOL_TO_TILE := {
 	Tool.POWER_PLANT: Tile.POWER_PLANT,
 	Tool.POWER_LINE: Tile.POWER_LINE,
 	Tool.PARK: Tile.PARK,
+	Tool.GRID: Tile.ROAD,
 }
 const TOOL_COLOURS := {
 	Tool.ROAD: Color(0.45, 0.45, 0.48),
@@ -45,6 +47,7 @@ const TOOL_COLOURS := {
 	Tool.POWER_PLANT: Color(0.62, 0.45, 0.85),
 	Tool.POWER_LINE: Color(0.98, 0.88, 0.25),
 	Tool.PARK: Color(0.40, 0.78, 0.36),
+	Tool.GRID: Color(0.62, 0.62, 0.66),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -83,7 +86,8 @@ var current_tool: int = Tool.ROAD
 var painting := false
 var orbiting := false
 var dragging_map := false
-var last_paint := Vector2i(-1, -1)
+var drag_start := Vector2i(-1, -1)     # where the current drag began
+var drag_plan: Array[Vector2i] = []    # tiles the current drag would build on
 var hover := Vector2i(-1, -1)
 var _ground_dirty := false
 var _buildings_dirty := false
@@ -178,12 +182,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
 			MOUSE_BUTTON_LEFT:
-				painting = mb.pressed
-				last_paint = Vector2i(-1, -1)
-				if painting:
-					_paint_at(hover)
-				else:
-					_buildings_dirty = true
+				# Press, drag to see a preview and the cost, release to build.
+				if mb.pressed:
+					if _in_map(hover):
+						painting = true
+						drag_start = hover
+						_update_drag()
+				elif painting:
+					painting = false
+					_finish_drag()
 			MOUSE_BUTTON_RIGHT:
 				orbiting = mb.pressed
 			MOUSE_BUTTON_MIDDLE:
@@ -202,8 +209,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif dragging_map:
 			rig.pan_pixels(mm.relative)
 		_update_hover(mm.position)
-		if painting:
-			_paint_at(hover)
 
 	elif event is InputEventMagnifyGesture:       # trackpad pinch
 		var mg := event as InputEventMagnifyGesture
@@ -243,6 +248,10 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.POWER_LINE)
 			KEY_8:
 				_select_tool(Tool.PARK)
+			KEY_9:
+				_select_tool(Tool.GRID)
+			KEY_ESCAPE:
+				_cancel_drag()
 			KEY_SPACE:
 				_set_speed(1 if speed == 0 else 0)
 			KEY_F:
@@ -317,42 +326,178 @@ func _update_hover(screen_pos: Vector2) -> void:
 		hover = t
 		var why := _why_cant_build(hover) if _in_map(hover) else "-"
 		world.set_hover(hover, why == "" or why == "-")
-		_update_info()
+		if painting:
+			_update_drag()
+		else:
+			_update_info()
 
 
 # ------------------------------------------------------------------ building
 
-func _paint_at(t: Vector2i) -> void:
-	if not _in_map(t):
-		last_paint = Vector2i(-1, -1)
-		return
-	if _in_map(last_paint):
-		for p in _line(last_paint, t):
-			_apply_tool(p)
+# Every tool works the same way: press, drag to see the preview and the total
+# cost, release to build. What the drag covers depends on the tool:
+#   Road, power line   a straight run, turning one corner (L-shaped)
+#   Zones and parks    a box; or, if the drag starts on a road, both sides of
+#                      every road in the box, two plots deep
+#   Street grid        a box filled with streets every third tile (100 m blocks)
+#   Bulldoze           a box
+#   Power plant        the tile under the mouse
+
+func _update_drag() -> void:
+	var end := hover if _in_map(hover) else drag_start
+	drag_plan = _plan_tiles(drag_start, end)
+	var items: Array = []
+	var total := 0
+	var count := 0
+	for p in drag_plan:
+		var why := _why_cant_build(p, false)
+		if why == "-":
+			continue
+		var ok := why == ""
+		items.append([p, ok])
+		if ok:
+			total += _tool_cost(p)
+			count += 1
+	world.set_preview(items, TOOL_COLOURS[current_tool])
+	var what := "%s: %d %s" % [TOOL_NAMES[current_tool], count, "tile" if count == 1 else "tiles"]
+	if current_tool == Tool.BULLDOZE:
+		hud.show_info("%s to clear, %s. Release to clear, Esc to cancel." % [what, _money_text(total)])
+	elif total > sim.money:
+		hud.show_info("%s, %s. You have %s: it will build as far as the money goes." % [
+			what, _money_text(total), _money_text(sim.money)])
 	else:
-		_apply_tool(t)
-	last_paint = t
-	sim.recount()
-	_ground_dirty = true
-	_buildings_dirty = true
+		hud.show_info("%s, %s. Release to build, Esc to cancel." % [what, _money_text(total)])
+
+
+func _finish_drag() -> void:
+	var built := 0
+	for p in drag_plan:
+		if _apply_tool(p):
+			built += 1
+	drag_plan.clear()
+	world.set_preview([], Color.WHITE)
+	if built > 0:
+		sim.recount()
+		_ground_dirty = true
+		_buildings_dirty = true
 	_refresh_hud()
 
 
-func _apply_tool(p: Vector2i) -> void:
+func _cancel_drag() -> void:
+	painting = false
+	drag_plan.clear()
+	world.set_preview([], Color.WHITE)
+	_update_info()
+
+
+func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	match current_tool:
+		Tool.ROAD, Tool.POWER_LINE:
+			return _l_path(a, b)
+		Tool.POWER_PLANT:
+			return [b]
+		Tool.GRID:
+			return _grid_tiles(a, b)
+		Tool.BULLDOZE:
+			return _box(a, b)
+	# Zones and parks.
+	if sim.tiles[a.y * map_w + a.x] == Tile.ROAD:
+		return _roadside(a, b)
+	return _box(a, b)
+
+
+func _box(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for y in range(mini(a.y, b.y), maxi(a.y, b.y) + 1):
+		for x in range(mini(a.x, b.x), maxi(a.x, b.x) + 1):
+			out.append(Vector2i(x, y))
+	return out
+
+
+func _l_path(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	# Straight along the longer direction first, then one turn to the end point.
+	var corner := Vector2i(b.x, a.y) if absi(b.x - a.x) >= absi(b.y - a.y) else Vector2i(a.x, b.y)
+	var out: Array[Vector2i] = []
+	for p in _straight(a, corner):
+		out.append(p)
+	for p in _straight(corner, b):
+		if p != corner:
+			out.append(p)
+	return out
+
+
+func _straight(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var step := Vector2i(signi(b.x - a.x), signi(b.y - a.y))
+	var p := a
+	out.append(p)
+	while p != b:
+		p += step
+		out.append(p)
+	return out
+
+
+func _grid_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	# Streets on every third row and column (two 50 m plots between them),
+	# plus the far edges, so every plot inside touches a road.
+	var x0 := mini(a.x, b.x)
+	var x1 := maxi(a.x, b.x)
+	var y0 := mini(a.y, b.y)
+	var y1 := maxi(a.y, b.y)
+	var out: Array[Vector2i] = []
+	for y in range(y0, y1 + 1):
+		for x in range(x0, x1 + 1):
+			if (x - x0) % 3 == 0 or (y - y0) % 3 == 0 or x == x1 or y == y1:
+				out.append(Vector2i(x, y))
+	return out
+
+
+func _roadside(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
+	# Land on both sides of every road in the box, nearest the road first
+	# (so if money runs out, the frontages get built first).
+	var ring1: Array[Vector2i] = []
+	var ring2: Array[Vector2i] = []
+	var seen := {}
+	for r in _box(a, b):
+		if sim.tiles[r.y * map_w + r.x] != Tile.ROAD:
+			continue
+		for dy in range(-2, 3):
+			for dx in range(-2, 3):
+				var p := r + Vector2i(dx, dy)
+				if not _in_map(p) or seen.has(p):
+					continue
+				if sim.tiles[p.y * map_w + p.x] == Tile.ROAD:
+					continue
+				seen[p] = true
+				if maxi(absi(dx), absi(dy)) == 1:
+					ring1.append(p)
+				else:
+					ring2.append(p)
+	var out: Array[Vector2i] = []
+	for p in ring1:
+		out.append(p)
+	for p in ring2:
+		if not ring1.has(p):
+			out.append(p)
+	return out
+
+
+func _apply_tool(p: Vector2i) -> bool:
 	var problem := _why_cant_build(p)
 	if problem != "":
 		if problem != "-":
 			hud.flash(problem)
-		return
+		return false
 	var i := p.y * map_w + p.x
 	sim.money -= _tool_cost(p)
 	if current_tool == Tool.BULLDOZE:
 		sim.set_tile(i, Tile.EMPTY)
 	else:
 		sim.set_tile(i, TOOL_TO_TILE[current_tool])
+	return true
 
 
-func _why_cant_build(p: Vector2i) -> String:
+func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	# "" = OK to build; "-" = nothing to do (no message); otherwise the reason.
 	var i := p.y * map_w + p.x
 	var here := sim.tiles[i]
@@ -362,12 +507,19 @@ func _why_cant_build(p: Vector2i) -> String:
 	else:
 		if here == TOOL_TO_TILE[current_tool]:
 			return "-"
+		# Zones and parks go round roads, power and plants rather than replacing
+		# them; the street grid only goes on open land. (Bulldoze first to replace.)
+		var infrastructure := here == Tile.ROAD or here == Tile.POWER_LINE or here == Tile.POWER_PLANT
+		if current_tool in [Tool.HOMES, Tool.SHOPS, Tool.INDUSTRY, Tool.PARK] and infrastructure:
+			return "-"
+		if current_tool == Tool.GRID and here != Tile.EMPTY:
+			return "-"
 		if water[i] == 1:
 			return "You can't build on water."
 		if slope[i] > Settings.MAX_SLOPE_M:
 			return "Too steep to build here."
 	var cost := _tool_cost(p)
-	if cost > sim.money:
+	if check_money and cost > sim.money:
 		return "Not enough money: that costs %s." % _money_text(cost)
 	return ""
 
@@ -390,6 +542,8 @@ func _base_cost(tool_id: int) -> int:
 			return Settings.POWER_LINE_COST
 		Tool.PARK:
 			return Settings.PARK_COST
+		Tool.GRID:
+			return Settings.ROAD_COST
 	return 0
 
 
@@ -403,35 +557,6 @@ func _tool_cost(p: Vector2i) -> int:
 
 func _price_text(tool_id: int) -> String:
 	return _money_text(_base_cost(tool_id))
-
-
-func _line(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
-	# Bresenham's line: every grid tile between a and b.
-	var points: Array[Vector2i] = []
-	var dx := absi(b.x - a.x)
-	var dy := -absi(b.y - a.y)
-	var sx := 1 if a.x < b.x else -1
-	var sy := 1 if a.y < b.y else -1
-	var err := dx + dy
-	var p := a
-	while true:
-		points.append(p)
-		if p == b:
-			break
-		var e2 := 2 * err
-		var step_x := e2 >= dy
-		var step_y := e2 <= dx
-		if step_x:
-			err += dy
-			p.x += sx
-		if step_y:
-			if step_x:
-				points.append(p)   # fill the corner so tiles always share an edge
-				if p == b:
-					break
-			err += dx
-			p.y += sy
-	return points
 
 
 func _select_tool(tool_id: int) -> void:

@@ -222,11 +222,15 @@ func _build_help(root: Control) -> void:
 	var box := _vbox(help_panel)
 	box.add_child(_label("How to play", 20, TEXT))
 	var text := _label(
-		"Build: left-click and drag with a tool selected\n" +
+		"Build: press, drag to see a preview and the cost, release to build (Esc cancels)\n" +
+		"  Roads and power lines run straight and can turn one corner\n" +
+		"  Zones and parks: drag a box. Start the drag ON a road to zone both sides\n" +
+		"  of every road in the box, two plots deep\n" +
+		"  Street grid (9): drag a box to lay streets with 100 m blocks\n" +
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
-		"Tools: keys 1-8     Pause: Space     Fast: F     Help: H\n\n" +
+		"Tools: keys 1-9     Pause: Space     Fast: F     Help: H\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +

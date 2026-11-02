@@ -46,6 +46,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Power spreads through any touching built tiles: roads, zones, power lines (£5) and other plants.
 - When a network runs short, plots furthest from the plant lose power first.
 
+## Building tools
+- Press, drag to preview (with total cost), release to build; Esc cancels.
+- Roads and power lines run straight with one corner. Zones and parks: drag a box; start on a road to zone both sides of every road in the box, two plots deep.
+- Street grid (9): drag a box to lay streets every third tile (100 m blocks).
+- Corner and through plots build along every road they touch.
+- Zoned plots waiting to grow show building sites; leftover open land inside the town becomes pocket parks, allotments or car parks (looks only).
+
 ## Look and feel
 - Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more; houses get garden trees.
 - Cars drive on the left along the roads, more as the population grows (purely visual).
