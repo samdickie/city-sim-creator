@@ -7,9 +7,7 @@ const START_MONEY := 20000        # £ at the start of a new city
 
 # Cost to build one tile, in £.
 const ROAD_COST := 10
-const HOMES_COST := 40
-const SHOPS_COST := 60
-const INDUSTRY_COST := 80
+const INDUSTRY_COST := 80         # (homes and shops cost depends on density, see below)
 const BULLDOZE_COST := 5          # clearing a built tile (empty tiles are free)
 
 # Hills: each metre of height difference to a neighbouring tile
@@ -25,11 +23,6 @@ const START_YEAR := 2027
 
 # --- Growth ---
 const ROAD_REACH := 2             # a zone grows if a road is within this many tiles
-const MAX_LEVEL := 3              # low-rise: zones grow this far whenever there's demand
-const TALL_MAX_LEVEL := 6         # homes and shops can build up to here when space runs out
-const PEOPLE_PER_LEVEL := 20      # residents added each time homes grow a level
-const SHOP_JOBS_PER_LEVEL := 8    # jobs added each time shops grow a level
-const INDUSTRY_JOBS_PER_LEVEL := 15
 const GROWTH_CHANCE := 0.25       # chance per month that a wanted zone grows
 const DECLINE_CHANCE := 0.05      # chance per month that an unwanted zone shrinks
 

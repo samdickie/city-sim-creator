@@ -42,6 +42,7 @@ var shortage := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var average_home_price := 0
 var _sea_near := PackedFloat32Array() # 1 by the sea, fading to 0 inland
 var _value_dirty := true
+var layout_version := 0               # goes up whenever a tile changes type (roads, zones...)
 
 var _road_dist := PackedByteArray()   # tiles to the nearest road (255 = far)
 var _roads_dirty := true
@@ -80,6 +81,7 @@ func reset() -> void:
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	layout_version += 1
 	shortage = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	_rng.randomize()
 	recount()
@@ -102,6 +104,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	layout_version += 1
 
 
 func has_road_access(i: int) -> bool:
@@ -159,6 +162,10 @@ func demand_for(t: int) -> float:
 func shortage_for(t: int) -> float:
 	var v: float = shortage[t]
 	return v
+
+
+func housing_shortage() -> float:
+	return shortage_for(Tile.HOMES)
 
 
 func density_name(i: int) -> String:
@@ -225,11 +232,12 @@ func tick() -> void:
 	month += 1
 	_update_road_distance()
 	_power_dirty = true
-	_value_dirty = true
 	recount()
 	_update_land_value()
 	_grow()
-	_power_dirty = true
+	if not grew.is_empty() or not shrank.is_empty():
+		_power_dirty = true
+		_value_dirty = true       # taller shops and industry change the land around them
 	recount()
 	_collect_taxes()
 
@@ -302,16 +310,17 @@ func _grow() -> void:
 		var can_rise: bool = lv < max_level(i)
 		var next_stage: int = stage_at(i, lv + 1) if can_rise else 0
 		var step: int = step_size(i)
+		var down_step: int = units(i) - units_at_stage(t, stage_at(i, lv - 1)) if lv > 0 else 0
 		if connected and has_power and spare > 0 and can_rise and next_stage <= Settings.FREE_STAGE \
 				and want >= step * 0.5 and _rng.randf() < Settings.GROWTH_CHANCE:
 			levels[i] = lv + 1
 			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
 			grew.append(i)
-		elif lv > 0 and (not connected or not has_power or want < -step * 2.0) \
+		elif lv > 0 and (not connected or not has_power or want < -down_step * 2.0) \
 				and _rng.randf() < Settings.DECLINE_CHANCE:
 			levels[i] = lv - 1
-			wanted[t] = want + step
+			wanted[t] = want + down_step
 			shrank.append(i)
 
 
@@ -415,7 +424,7 @@ func _measure_sea() -> void:
 		if d >= Settings.SEA_VIEW_TILES:
 			continue
 		var x := i % w
-		for n in [i - 1 if x > 0 else -1, i + 1 if x < w - 1 else -1, i - w, i + w]:
+		for n: int in [i - 1 if x > 0 else -1, i + 1 if x < w - 1 else -1, i - w, i + w]:
 			if n >= 0 and n < w * h and dist[n] > d + 1:
 				dist[n] = d + 1
 				queue.append(n)
@@ -546,14 +555,8 @@ func demand_bar(t: int) -> float:
 
 
 func _capacity_per_level(t: int) -> int:
-	match t:
-		Tile.HOMES:
-			return Settings.PEOPLE_PER_LEVEL
-		Tile.SHOPS:
-			return Settings.SHOP_JOBS_PER_LEVEL
-		Tile.INDUSTRY:
-			return Settings.INDUSTRY_JOBS_PER_LEVEL
-	return 0
+	# A typical step of growth (the first stage), used to scale demand and shortage.
+	return units_at_stage(t, 1)
 
 
 func date_text() -> String:
@@ -619,13 +622,15 @@ func from_save(data: Dictionary) -> void:
 	tiles.fill(Tile.EMPTY)
 	levels.fill(0)
 	for i in mini(saved_tiles.size(), tiles.size()):
-		tiles[i] = int(saved_tiles[i])
+		var t: int = int(saved_tiles[i])
+		tiles[i] = t if t >= Tile.EMPTY and t <= Tile.PARK and water[i] == 0 else Tile.EMPTY
 	for i in mini(saved_levels.size(), levels.size()):
-		levels[i] = int(saved_levels[i])
+		levels[i] = clampi(int(saved_levels[i]), 0, 6) if is_zone(tiles[i]) else 0
 	var saved_density: Array = data.get("density", [])
 	if saved_density.size() == density.size():
 		for i in density.size():
-			density[i] = int(saved_density[i])
+			density[i] = clampi(int(saved_density[i]), 0, 2) if is_zone(tiles[i]) else 1
+			levels[i] = mini(levels[i], max_level(i)) if is_zone(tiles[i]) else 0
 	else:
 		# A save from before density zoning: pick the density that matches what's built.
 		for i in density.size():
@@ -646,4 +651,5 @@ func from_save(data: Dictionary) -> void:
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	layout_version += 1
 	recount()

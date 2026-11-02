@@ -19,6 +19,7 @@ const KERB_HALF_WIDTH := 0.85  # pavement width at junctions, halved
 const ROAD_NORMAL := Vector2(0.0, 1.0)   # road texture: pavement, tarmac, pavement
 const ROAD_PLAIN := Vector2(0.5, 0.5)    # tarmac only
 const ROAD_KERB := Vector2(0.0, 0.0)     # pavement only
+const ZONE_STRENGTH := [0.28, 0.48, 0.7]  # zone colour on empty plots, by density
 
 # Optional photo textures. Drop files here and they're used automatically.
 const TEXTURE_DIR := "res://assets/textures/"
@@ -124,7 +125,8 @@ var preview := MultiMeshInstance3D.new()   # tiles a drag will build on
 var hover_box := MeshInstance3D.new()
 var hover_material := StandardMaterial3D.new()
 var alerts := Node3D.new()            # floating warning icons above plots
-var _alert_items: Array = []          # [sprite, ground height] for resizing
+var _alert_items: Array = []          # [sprite, ground point]; reused between refreshes
+var _alert_count := 0                 # how many of them are showing
 var _alert_size := 30.0
 var _power_icon: Texture2D
 var _road_icon: Texture2D
@@ -460,12 +462,18 @@ func refresh_all() -> void:
 	refresh_buildings()
 
 
-func refresh_ground() -> void:
-	# Zone colours and warnings on the ground, roads and power lines.
+func refresh_ground(layout_changed: bool = true) -> void:
+	# Zone colours and warnings on the ground; roads, power lines and woods too
+	# when the layout has changed (they only depend on what's where).
 	var tiles: PackedByteArray = sim.tiles
 	var levels: PackedByteArray = sim.levels
 	var reach: PackedByteArray = sim.road_reach_map()
 	var power: PackedByteArray = sim.power_map()
+	if layout_changed:
+		for y in map_h:
+			for x in map_w:
+				var k := y * map_w + x
+				_infill[k] = _infill_kind(x, y) if tiles[k] == Tile.EMPTY else 0
 	for y in map_h:
 		for x in map_w:
 			var i := y * map_w + x
@@ -477,7 +485,7 @@ func refresh_ground() -> void:
 				# Coloured while waiting to be built on; once built, it's lawn and gardens.
 				var strength: float = 0.5
 				if t != Tile.INDUSTRY:
-					strength = [0.28, 0.48, 0.7][sim.density[i]]
+					strength = ZONE_STRENGTH[sim.density[i]]
 				tint = Color(c, strength) if levels[i] == 0 else Color(0, 0, 0, 0)
 				if reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
@@ -487,7 +495,6 @@ func refresh_ground() -> void:
 				tint = Color(0.55, 0.55, 0.55, 0.6)
 			elif t == Tile.PARK:
 				tint = Color(0.40, 0.72, 0.32, 0.45)
-			_infill[i] = _infill_kind(x, y) if t == Tile.EMPTY else 0
 			if _infill[i] == INFILL_PARK:
 				tint = Color(0.40, 0.68, 0.30, 0.35)   # mown grass
 			elif _infill[i] == INFILL_ALLOTMENTS:
@@ -496,31 +503,40 @@ func refresh_ground() -> void:
 			warn_image.set_pixel(x, y, warn)
 	zone_texture.update(zone_image)
 	warn_texture.update(warn_image)
-	_build_roads(tiles)
-	_build_power_lines(tiles)
 	_build_alerts()
-	_update_natural_trees(tiles)
+	if layout_changed:
+		_build_roads(tiles)
+		_build_power_lines(tiles)
+		_update_natural_trees(tiles)
 
 
 func _build_alerts() -> void:
 	# A floating icon over every plot that can't grow: no road (red), no power (yellow).
-	for child in alerts.get_children():
-		child.queue_free()
-	_alert_items.clear()
+	# Icons are reused from one refresh to the next; spare ones are hidden.
+	var count := 0
 	for y in map_h:
 		for x in map_w:
 			var warn := warn_image.get_pixel(x, y)
 			if warn.r < 0.5 and warn.g < 0.5:
 				continue
-			var sprite := Sprite3D.new()
+			if count == _alert_items.size():
+				var fresh := Sprite3D.new()
+				fresh.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				fresh.no_depth_test = true
+				fresh.render_priority = 10
+				fresh.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+				alerts.add_child(fresh)
+				_alert_items.append([fresh, Vector3.ZERO])
+			var item: Array = _alert_items[count]
+			var sprite: Sprite3D = item[0]
 			sprite.texture = _road_icon if warn.r >= 0.5 else _power_icon
-			sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-			sprite.no_depth_test = true
-			sprite.render_priority = 10
-			sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-			var ground := ground_point(Vector2i(x, y))
-			alerts.add_child(sprite)
-			_alert_items.append([sprite, ground])
+			sprite.visible = true
+			item[1] = ground_point(Vector2i(x, y))
+			count += 1
+	for n in range(count, _alert_items.size()):
+		var spare: Sprite3D = _alert_items[n][0]
+		spare.visible = false
+	_alert_count = count
 	_place_alerts()
 
 
@@ -535,7 +551,8 @@ func set_view_distance(distance: float) -> void:
 
 
 func _place_alerts() -> void:
-	for item in _alert_items:
+	for n in _alert_count:
+		var item: Array = _alert_items[n]
 		var sprite: Sprite3D = item[0]
 		var ground: Vector3 = item[1]
 		sprite.pixel_size = _alert_size / 96.0
@@ -564,7 +581,7 @@ func refresh_buildings() -> void:
 			_plan_plant(i, wall_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
-		elif ZONE_TINTS.has(t) and _road_near(i):
+		elif ZONE_TINTS.has(t) and sim.has_road_access(i):
 			_plan_site(i, t, wall_list)
 		elif t == Tile.EMPTY and _infill[i] > 0:
 			_plan_infill(i)
@@ -879,17 +896,15 @@ func _place(i: int, front: Vector2i, along: float, back: float, w: float, d: flo
 	var across := Vector2(away.y, -away.x)
 	var front_edge := centre + fwd * (cell * 0.5 + _street_reach(i, front))
 	var mid := front_edge + across * along + away * (back + d * 0.5)
-	# Sit on the lowest corner so nothing floats on a slope.
+	# Sit on the lowest corner so nothing floats on a slope (and note the highest).
 	var base := INF
-	for sx: float in [-0.5, 0.5]:
-		for sz: float in [-0.5, 0.5]:
-			var q: Vector2 = mid + across * (w * sx) + away * (d * sz)
-			base = minf(base, height_at(q.x, q.y))
 	var top := -INF
 	for sx: float in [-0.5, 0.5]:
 		for sz: float in [-0.5, 0.5]:
 			var q: Vector2 = mid + across * (w * sx) + away * (d * sz)
-			top = maxf(top, height_at(q.x, q.y))
+			var corner := height_at(q.x, q.y)
+			base = minf(base, corner)
+			top = maxf(top, corner)
 	base = maxf(base, 0.3) - 0.3
 	var x_axis := Vector3(away.y, 0.0, -away.x)   # along the street
 	var z_axis := Vector3(away.x, 0.0, away.y)    # back from the street
@@ -1029,22 +1044,9 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 		colour = [WHITE_RENDER, BLONDE_SANDSTONE, CREAM_RENDER, GREY_RENDER][rng.randi_range(0, 3)]
 		storeys = 2 if lv == 1 else 3
 		roof_h = 0.0
-	if lv >= 4:
-		storeys = rng.randi_range(5, 6) if lv == 4 else rng.randi_range(6, 8) + roundi(value * 2.0)
-		if lv >= 5:
-			roof_h = 0.0
-			style = STYLE_GLASS if value >= 0.6 else (STYLE_SHOP if t == Tile.SHOPS else STYLE_FLATS)
-			colour = GLASS_FRAME if style == STYLE_GLASS else MODERN_WHITE
 	for along: float in [-12.5, 12.5]:
 		var spot := _place(i, side, along, 3.0, 22.0, 13.0)
-		var height := storeys * 3.1 + 0.5
-		_add_block(spot, 22.0, 13.0, height, colour, style, roof_h, SLATE, wall_list, roof_list)
-		if roof_h == 0.0 and storeys >= 5:
-			_add_rooftop(spot, 22.0, 13.0, height, wall_list)
-
-
-func _road_near(i: int) -> bool:
-	return sim.has_road_access(i)
+		_add_block(spot, 22.0, 13.0, storeys * 3.1 + 0.5, colour, style, roof_h, SLATE, wall_list, roof_list)
 
 
 func _plan_site(i: int, t: int, wall_list: Array) -> void:
@@ -1415,15 +1417,6 @@ func _premium_court(i: int, front: Vector2i, from: float, to: float, rng: Random
 		var spot := _place(i, front, along, back, 1.0, 1.0)
 		var at: Vector3 = spot["pos"]
 		_extra_trees.append([Vector2(at.x, at.z), rng.randf_range(7.0, 10.0)])
-
-
-func _add_rooftop(spot: Dictionary, w: float, d: float, h: float, wall_list: Array) -> void:
-	# Lift housing and plant on a flat roof.
-	var x_axis: Vector3 = spot["x"]
-	var z_axis: Vector3 = spot["z"]
-	var pos: Vector3 = spot["pos"]
-	var b3 := Basis(x_axis * (w * 0.3), Vector3.UP * 3.0, z_axis * (d * 0.35))
-	wall_list.append([Transform3D(b3, pos + Vector3.UP * h), CONCRETE, Color(w * 0.3, 3.0, d * 0.35, STYLE_PLANT)])
 
 
 func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,

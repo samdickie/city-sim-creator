@@ -263,9 +263,10 @@ func _build_help(root: Control) -> void:
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
-		"Homes and shops grow to 3 levels. When the town runs short of space, the most\n" +
-		"valuable plots build upwards, up to 12-storey towers. Land is worth more by the\n" +
-		"sea, near parks and shops, and less near industry and power plants.", 15, TEXT_DIM)
+		"Low density grows villas and terraces; medium up to tenements, and mansion flats\n" +
+		"when space runs short; high density builds upwards to towers on valuable land.\n" +
+		"Land is worth more by the sea, near parks and shops, and less near industry\n" +
+		"and power plants. Scarce homes push prices up.", 15, TEXT_DIM)
 	box.add_child(text)
 	var close := _button("Got it", false)
 	close.pressed.connect(func(): help_panel.visible = false)
@@ -294,16 +295,16 @@ func set_speed(speed: int) -> void:
 		(speed_buttons[k] as Button).set_pressed_no_signal(k == speed)
 
 
-func show_city(sim, money_text: String, net_text: String, income_text: String, upkeep_text: String) -> void:
+func show_city(sim, money_str: String, net_text: String, income_text: String, upkeep_text: String) -> void:
 	date_label.text = sim.date_text()
-	money_label.text = money_text
+	money_label.text = money_str
 	money_label.add_theme_color_override("font_color", BAD if sim.money * 10 < Settings.START_MONEY else GOOD)
 	budget_label.text = "%s last month   ·   taxes %s, upkeep %s" % [net_text, income_text, upkeep_text]
-	people_label.text = "%s people   ·   %s jobs" % [_thousands(sim.population), _thousands(sim.jobs())]
-	var short: float = sim.shortage[2]   # homes
+	people_label.text = "%s people   ·   %s jobs" % [thousands(sim.population), thousands(sim.jobs())]
+	var short: float = sim.housing_shortage()
 	var word := "none" if short <= 0.0 else ("some" if short < 0.4 else ("serious" if short < 0.8 else "severe"))
 	if sim.average_home_price > 0:
-		housing_label.text = "Average home £%s   ·   housing shortage: %s" % [_thousands(sim.average_home_price), word]
+		housing_label.text = "Average home £%s   ·   housing shortage: %s" % [thousands(sim.average_home_price), word]
 	else:
 		housing_label.text = "Housing shortage: %s" % word
 	housing_label.add_theme_color_override("font_color", BAD if short >= 0.4 else TEXT_DIM)
@@ -393,13 +394,19 @@ func _divider() -> HSeparator:
 	return sep
 
 
-func _thousands(n: int) -> String:
+static func thousands(n: int) -> String:
+	# 1234567 -> "1,234,567"
 	var digits := str(absi(n))
 	var out := ""
 	while digits.length() > 3:
 		out = "," + digits.substr(digits.length() - 3) + out
 		digits = digits.substr(0, digits.length() - 3)
 	return ("-" if n < 0 else "") + digits + out
+
+
+static func money_text(amount: int) -> String:
+	# -1234 -> "-£1,234"
+	return ("-£" if amount < 0 else "£") + thousands(absi(amount))
 
 
 func _make_theme() -> Theme:

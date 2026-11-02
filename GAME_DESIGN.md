@@ -8,7 +8,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Decisions
 - **Engine:** Godot 4.7, GDScript. Free tools only.
 - **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings.
-- **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D view is kept in `main.tscn` as a backup.
+- **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D version is kept in `archive/2d/` for reference (Godot ignores it).
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
 - **Simulate tiles and totals, not individual people.** No real traffic; a zone counts as connected if a road touches it.
 
@@ -46,8 +46,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Courts between tall blocks are landscaped (lawn, path, trees) with parking underground.
 
 ## Density, land value and prices
-- Homes and shops grow to level 3 (low-rise) whenever there's demand. Industry stops at 3.
-- When demand is more than the low-rise plots can still take, the town is "short of space": the most valuable plots build upwards, to level 4 (5-6 storey mansion flats), 5 (7-9 storey modern flats) and 6 (towers up to 12 storeys). Levels 4/5/6 need land value 0.35/0.5/0.65.
+- Plots grow freely up to stage 3 (tenements) whenever there's demand. Industry stops at 3.
+- When demand is more than those plots can still take, the town is "short of space": medium-density plots may rise to mansion flats, and high-density plots build upwards (stage 4/5/6 need land value 0.35/0.5/0.65).
 - Land value (0-1): base 0.3, up to +0.3 by the sea, plus parks and shops nearby; minus industry and power plants nearby.
 - Better land gets better buildings (glass on the best land) and pays more tax (0.6x to 1.4x).
 - Home prices = £160k x (0.5 + land value) x (1 + 0.8 x housing shortage).

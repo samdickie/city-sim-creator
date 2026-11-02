@@ -22,7 +22,7 @@ A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 
 ## The map
 
-The game loads `map/troon_map.json`. Right now it holds a **made-up placeholder coast**, so everything works before the real data is added.
+The game loads `map/troon_map.json`. It holds Troon's real terrain (OS Terrain 50).
 
 To switch to real Troon:
 
@@ -37,8 +37,14 @@ The map covers 7 × 6.5 km around Troon (harbour, town centre, Barassie, Royal T
 
 | Path | What it is |
 | --- | --- |
-| `scripts/main.gd` | All game code for Phase 1 |
-| `main.tscn` | The game's main scene |
+| `game3d.tscn` | The game's main scene |
+| `scripts/game3d.gd` | Runs the game: clock, mouse and keyboard, saving |
+| `scripts/simulation.gd` | The city's rules (no drawing code) |
+| `scripts/settings.gd` | Every tuning number |
+| `scripts/world3d.gd` | Draws the 3D world: terrain, roads, buildings, trees, day and night |
+| `scripts/hud.gd`, `camera_rig.gd`, `cars.gd` | Interface, camera, traffic |
+| `shaders/` | Terrain, sea, road, wall and roof looks |
+| `archive/2d/` | The old 2D version, kept for reference (Godot ignores it) |
 | `map/` | The map file and its preview picture |
 | `tools/make_troon_map.py` | Converts OS height data into the map file |
 | `GAME_DESIGN.md` | One-page design doc — read this before each build session |

@@ -13,6 +13,7 @@ const Cars = preload("res://scripts/cars.gd")
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
+const SAVE_VERSION := 3
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK, GRID }
@@ -92,15 +93,22 @@ var drag_plan: Array[Vector2i] = []    # tiles the current drag would build on
 var hover := Vector2i(-1, -1)
 var _ground_dirty := false
 var _buildings_dirty := false
+var _layout_seen := -1                 # sim.layout_version last drawn
+var _camera_seen := Transform3D()      # camera position last used to pick the hovered tile
 
 
 func _ready() -> void:
+	# Tile numbers are shared by several scripts; make sure they all agree.
+	assert(Tile.keys() == Simulation.Tile.keys(), "game3d.gd Tile list differs from simulation.gd")
+	assert(Tile.keys() == WorldView.Tile.keys(), "world3d.gd Tile list differs from simulation.gd")
+	assert(Tile.keys() == Cars.Tile.keys(), "cars.gd Tile list differs from simulation.gd")
 	_load_map()
 	_compute_slopes()
 	sim.setup(map_w, map_h, water)
 
 	add_child(world)
 	world.setup(sim, map_w, map_h, cell_size_m, heights, water)
+	_layout_seen = sim.layout_version
 
 	rig.bounds = Rect2(Vector2.ZERO, Vector2(map_w, map_h) * cell_size_m)
 	rig.ground_height = world.height_at
@@ -285,6 +293,20 @@ func _process(delta: float) -> void:
 		rig.pan_direction(dir.normalized(), delta)
 	world.set_view_distance(rig.distance)
 
+	# A button let go over the toolbar never reaches _unhandled_input: catch it here.
+	if painting and not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		painting = false
+		_finish_drag()
+	if orbiting and not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		orbiting = false
+	if dragging_map and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
+		dragging_map = false
+	# When the camera moves, a different tile is under the (still) mouse.
+	var cam_xf := rig.camera.global_transform
+	if cam_xf != _camera_seen:
+		_camera_seen = cam_xf
+		_update_hover(get_viewport().get_mouse_position())
+
 	# Time of day (only moves while the game is running).
 	if day_cycle:
 		# Nights pass about three times faster than days.
@@ -303,14 +325,20 @@ func _process(delta: float) -> void:
 			clock = 0.0
 			sim.tick()
 			_ground_dirty = true
-			_buildings_dirty = true
+			# Only rebuild the buildings when something actually grew or shrank.
+			if not sim.grew.is_empty() or not sim.shrank.is_empty():
+				_buildings_dirty = true
 			_refresh_hud()
 
-	# Redraw at most once a frame, however many tiles changed.
+	# Redraw at most once a frame, however many tiles changed. Roads, power lines
+	# and traffic routes only change when the layout does.
 	if _ground_dirty:
 		_ground_dirty = false
-		world.refresh_ground()
-		cars.roads_changed()
+		var layout_changed := sim.layout_version != _layout_seen
+		_layout_seen = sim.layout_version
+		world.refresh_ground(layout_changed)
+		if layout_changed:
+			cars.roads_changed()
 		_update_traffic()
 	if _buildings_dirty and not painting:
 		_buildings_dirty = false
@@ -370,12 +398,12 @@ func _update_drag() -> void:
 		tool_name += " (%s density)" % dn
 	var what := "%s: %d %s" % [tool_name, count, "tile" if count == 1 else "tiles"]
 	if current_tool == Tool.BULLDOZE:
-		hud.show_info("%s to clear, %s. Release to clear, Esc to cancel." % [what, _money_text(total)])
+		hud.show_info("%s to clear, %s. Release to clear, Esc to cancel." % [what, Hud.money_text(total)])
 	elif total > sim.money:
 		hud.show_info("%s, %s. You have %s: it will build as far as the money goes." % [
-			what, _money_text(total), _money_text(sim.money)])
+			what, Hud.money_text(total), Hud.money_text(sim.money)])
 	else:
-		hud.show_info("%s, %s. Release to build, Esc to cancel." % [what, _money_text(total)])
+		hud.show_info("%s, %s. Release to build, Esc to cancel." % [what, Hud.money_text(total)])
 
 
 func _finish_drag() -> void:
@@ -464,30 +492,25 @@ func _grid_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 func _roadside(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 	# Land on both sides of every road in the box, nearest the road first
 	# (so if money runs out, the frontages get built first).
-	var ring1: Array[Vector2i] = []
-	var ring2: Array[Vector2i] = []
-	var seen := {}
+	var ring := {}                      # tile -> 1 (beside a road) or 2 (one plot back)
 	for r in _box(a, b):
 		if sim.tiles[r.y * map_w + r.x] != Tile.ROAD:
 			continue
 		for dy in range(-2, 3):
 			for dx in range(-2, 3):
 				var p := r + Vector2i(dx, dy)
-				if not _in_map(p) or seen.has(p):
+				if not _in_map(p) or sim.tiles[p.y * map_w + p.x] == Tile.ROAD:
 					continue
-				if sim.tiles[p.y * map_w + p.x] == Tile.ROAD:
+				var d: int = maxi(absi(dx), absi(dy))
+				if d == 0:
 					continue
-				seen[p] = true
-				if maxi(absi(dx), absi(dy)) == 1:
-					ring1.append(p)
-				else:
-					ring2.append(p)
+				if not ring.has(p) or int(ring[p]) > d:
+					ring[p] = d
 	var out: Array[Vector2i] = []
-	for p in ring1:
-		out.append(p)
-	for p in ring2:
-		if not ring1.has(p):
-			out.append(p)
+	for want: int in [1, 2]:
+		for p: Vector2i in ring:
+			if int(ring[p]) == want:
+				out.append(p)
 	return out
 
 
@@ -531,7 +554,7 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			return "Too steep to build here."
 	var cost := _tool_cost(p)
 	if check_money and cost > sim.money:
-		return "Not enough money: that costs %s." % _money_text(cost)
+		return "Not enough money: that costs %s." % Hud.money_text(cost)
 	return ""
 
 
@@ -570,8 +593,8 @@ func _tool_cost(p: Vector2i) -> int:
 
 func _price_text(tool_id: int) -> String:
 	if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
-		return "from " + _money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
-	return _money_text(_base_cost(tool_id))
+		return "from " + Hud.money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
+	return Hud.money_text(_base_cost(tool_id))
 
 
 func _has_density() -> bool:
@@ -634,7 +657,7 @@ func _save_game() -> void:
 		hud.flash("Save failed.")
 		return
 	var data := sim.to_save()
-	data["version"] = 3
+	data["version"] = SAVE_VERSION
 	data["map"] = map_name
 	data["width"] = map_w
 	data["height"] = map_h
@@ -653,8 +676,11 @@ func _load_game() -> void:
 			or int(data.get("height", 0)) != map_h:
 		hud.flash("That save doesn't match this map.")
 		return
+	_cancel_drag()
 	sim.from_save(data)
+	clock = 0.0
 	world.refresh_all()
+	_layout_seen = sim.layout_version
 	cars.roads_changed()
 	_update_traffic()
 	_refresh_hud()
@@ -662,9 +688,11 @@ func _load_game() -> void:
 
 
 func _new_city() -> void:
+	_cancel_drag()
 	sim.reset()
 	clock = 0.0
 	world.refresh_all()
+	_layout_seen = sim.layout_version
 	cars.roads_changed()
 	_update_traffic()
 	_refresh_hud()
@@ -675,8 +703,8 @@ func _new_city() -> void:
 
 func _refresh_hud() -> void:
 	var net := sim.last_income - sim.last_upkeep
-	hud.show_city(sim, _money_text(sim.money), ("+" if net >= 0 else "") + _money_text(net),
-		_money_text(sim.last_income), _money_text(sim.last_upkeep))
+	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
+		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
 	_update_info()
 
 
@@ -689,7 +717,7 @@ func _update_info() -> void:
 	var i := hover.y * map_w + hover.x
 	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
 	var problem := _why_cant_build(hover)
-	var action := "%s here costs %s" % [TOOL_NAMES[current_tool], _money_text(_tool_cost(hover))]
+	var action := "%s here costs %s" % [TOOL_NAMES[current_tool], Hud.money_text(_tool_cost(hover))]
 	if problem == "-":
 		action = "Nothing to clear" if current_tool == Tool.BULLDOZE else "Already built"
 	elif problem != "":
@@ -714,7 +742,7 @@ func _tile_text(i: int) -> String:
 		_stage_words(t, sim.stage(i)), sim.zone_status(i)]
 	text += "\nLand value %s" % sim.land_value_word(i)
 	if t == Tile.HOMES:
-		text += "   ·   homes here worth about %s" % _money_text(sim.home_price(i))
+		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text
 
 
@@ -732,15 +760,6 @@ func _stage_words(t: int, s: int) -> String:
 		Tile.INDUSTRY:
 			words = works[s]
 	return "" if words == "" else " (" + words + ")"
-
-
-func _money_text(amount: int) -> String:
-	var digits := str(absi(amount))
-	var out := ""
-	while digits.length() > 3:
-		out = "," + digits.substr(digits.length() - 3) + out
-		digits = digits.substr(0, digits.length() - 3)
-	return ("-£" if amount < 0 else "£") + digits + out
 
 
 func _in_map(t: Vector2i) -> bool:
