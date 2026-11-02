@@ -16,6 +16,8 @@ signal save_pressed
 signal load_pressed
 signal day_cycle_toggled(on: bool)
 signal overlay_chosen(kind: int)
+signal service_chosen(service: int)
+signal funding_changed(step: float)
 
 const Settings = preload("res://scripts/settings.gd")
 
@@ -24,12 +26,13 @@ const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
-const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth"]
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
 	"Which plots have electricity, and what carries it",
 	"How far each plot is from a road (zones need one within 2 tiles)",
-	"Why each zone is or isn't growing"]
+	"Why each zone is or isn't growing",
+	"How many of police, fire, schools and hospitals cover each area"]
 
 var tool_buttons := {}
 var density_buttons := {}
@@ -49,6 +52,9 @@ var message_label: Label
 var help_panel: PanelContainer
 var demand_box: Control
 var overlay_buttons := {}
+var service_buttons := {}
+var service_panel: PanelContainer
+var funding_label: Label
 var legend_box: VBoxContainer
 var confirm_new: ConfirmationDialog
 var _message_time := 0.0
@@ -231,6 +237,50 @@ func _build_toolbar(root: Control, tools: Array) -> void:
 		density_buttons[d] = db
 	density_panel.visible = false
 
+	# Service picker and funding, shown above the toolbar while Services is selected.
+	service_panel = _panel(root)
+	service_panel.anchor_left = 0.5
+	service_panel.anchor_right = 0.5
+	service_panel.anchor_top = 1.0
+	service_panel.anchor_bottom = 1.0
+	service_panel.offset_bottom = -116.0
+	service_panel.offset_top = -116.0
+	service_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	service_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var sbox := VBoxContainer.new()
+	sbox.add_theme_constant_override("separation", 6)
+	service_panel.add_child(sbox)
+	var srow := HBoxContainer.new()
+	srow.add_theme_constant_override("separation", 6)
+	sbox.add_child(srow)
+	srow.add_child(_label("Service (Tab)", 14, TEXT_DIM))
+	for s: int in [0, 1, 2, 3]:
+		var cost: int = Settings.SERVICE_COSTS[s]
+		var sb := _button("%s\n%s" % [Settings.SERVICE_NAMES[s], money_text(cost)], true)
+		sb.custom_minimum_size = Vector2(120, 0)
+		sb.tooltip_text = ["Police: in a bigger town, homes and shops without police grow at half speed",
+			"Fire: stops buildings nearby burning down",
+			"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
+			"Hospitals: in a bigger town, homes without one grow at half speed"][s]
+		sb.pressed.connect(func(): service_chosen.emit(s))
+		srow.add_child(sb)
+		service_buttons[s] = sb
+	var frow := HBoxContainer.new()
+	frow.add_theme_constant_override("separation", 6)
+	sbox.add_child(frow)
+	funding_label = _label("", 14, TEXT)
+	funding_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	frow.add_child(funding_label)
+	var less := _button("–", false)
+	less.tooltip_text = "Less funding: cheaper, but reaches less far (0% closes it)"
+	less.pressed.connect(func(): funding_changed.emit(-0.1))
+	frow.add_child(less)
+	var more := _button("+", false)
+	more.tooltip_text = "More funding: costs more, reaches further (up to 150%)"
+	more.pressed.connect(func(): funding_changed.emit(0.1))
+	frow.add_child(more)
+	service_panel.visible = false
+
 
 func _build_info(root: Control) -> void:
 	var panel := _panel(root)
@@ -318,7 +368,10 @@ func _build_help(root: Control) -> void:
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
 		"Tools: keys 1-9     Pause: Space     Fast: F     Help: H\n" +
-		"Map views: O, or the buttons bottom right (land value, power, roads, growth)\n\n" +
+		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services)\n" +
+		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
+		"They need a road and power. Bigger towns grow slowly without them; fires break out\n" +
+		"where there's no fire station. Funding (- / +) changes how far they reach.\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
@@ -337,6 +390,17 @@ func _build_help(root: Control) -> void:
 func set_density(d: int) -> void:
 	for k in density_buttons:
 		(density_buttons[k] as Button).set_pressed_no_signal(k == d)
+
+
+func set_service(s: int, funding_text: String) -> void:
+	for k in service_buttons:
+		(service_buttons[k] as Button).set_pressed_no_signal(k == s)
+	funding_label.text = funding_text
+
+
+func show_services(on: bool) -> void:
+	if service_panel:
+		service_panel.visible = on
 
 
 func show_density(on: bool) -> void:

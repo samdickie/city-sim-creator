@@ -49,6 +49,22 @@ const POWER_PLANT_UPKEEP := 100   # £ per plant per month
 const PARK_COST := 100
 const PARK_UPKEEP := 1.0          # £ per park tile per month
 
+# --- Services (in this order: police, fire, school, hospital) ---
+const SERVICE_NAMES := ["Police station", "Fire station", "School", "Hospital"]
+const SERVICE_WORDS := ["police", "fire", "school", "hospital"]
+const SERVICE_COSTS := [1500, 1500, 2000, 4000]    # £ to build
+const SERVICE_UPKEEP := [60, 60, 80, 150]           # £ per month at 100% funding
+const SERVICE_RADIUS := [16, 14, 12, 20]            # tiles covered at 100% funding (16 = 800 m)
+const SERVICE_POWER := 3                            # power each uses, in zone levels
+const SERVICE_LAND_BONUS := [0.04, 0.03, 0.05, 0.04] # land value added where fully covered
+const COVERED := 0.3                                # coverage that counts as "covered"
+const MAX_FUNDING := 1.5                            # funding runs from 0% (closed) to 150%
+const POLICE_NEEDED_POP := 800     # bigger towns: homes and shops with no police grow at half speed
+const SCHOOL_NEEDED_POP := 1200    # bigger towns: homes need a school to grow past terraces
+const HOSPITAL_NEEDED_POP := 2500  # bigger towns: homes with no hospital grow at half speed
+const FIRE_START_POP := 500        # fires can break out once the town is this big
+const FIRE_CHANCE := 0.0005        # chance per built plot per month with no fire cover (industry x2)
+
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon

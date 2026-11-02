@@ -10,7 +10,8 @@ const BUILDING_SHADER = preload("res://shaders/building.gdshader")
 const ROOF_SHADER = preload("res://shaders/roof.gdshader")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
+	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -63,6 +64,12 @@ const STYLE_GLASS := 5         # modern glass and steel (on the most valuable la
 const STYLE_CLASSICAL := 6     # sandstone: rusticated base, sash windows, string courses
 const STYLE_MODERN := 7        # storey-high glazing in light frames, with clad bays
 const STYLE_CLASSICAL_SHOPS := 8   # classical with shopfronts on the ground floor
+const STYLE_PAINT := 9         # plain painted panels: doors, signs (no windows, no stone)
+const POLICE_BLUE := Color(0.10, 0.20, 0.50)
+const FIRE_RED := Color(0.72, 0.08, 0.06)
+const CROSS_RED := Color(0.82, 0.06, 0.06)
+const AMBULANCE_YELLOW := Color(0.92, 0.84, 0.16)
+const PATROL_WHITE := Color(0.95, 0.95, 0.95)
 const HONEY_STONE := Color(0.84, 0.71, 0.50)
 const CREAM_STONE := Color(0.88, 0.84, 0.74)
 const TRIM := Color(0.93, 0.91, 0.86)          # cornices, canopies, frames
@@ -153,7 +160,7 @@ var _tree_crown_idx := PackedInt32Array()
 var _trees_in_tile := {}                       # tile index -> Array of tree numbers
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
-enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH }
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
@@ -514,6 +521,11 @@ func refresh_ground(layout_changed: bool = true) -> void:
 					warn.r = 1.0
 				elif power[i] == 0:
 					warn.g = 1.0   # (shown as a floating icon, see _build_alerts)
+			elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
+				if reach[i] > Settings.ROAD_REACH:
+					warn.r = 1.0
+				elif power[i] == 0:
+					warn.g = 1.0
 			elif t == Tile.POWER_PLANT:
 				tint = Color(0.55, 0.55, 0.55, 0.6)
 			elif t == Tile.PARK:
@@ -610,6 +622,8 @@ func refresh_buildings() -> void:
 			_plan_plant(i, wall_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
+		elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
+			_plan_service(i, t, wall_list, roof_list)
 		elif ZONE_TINTS.has(t) and sim.has_road_access(i):
 			_plan_site(i, t, wall_list)
 		elif t == Tile.EMPTY and _infill[i] > 0:
@@ -688,8 +702,11 @@ func overlay_legend(kind: int) -> Array:
 			return [[OV_GREY, "Road"], [OV_GREEN, "Next to a road"],
 				[OV_LIGHT_GREEN, "Near enough to grow"], [OV_RED, "Zone too far from a road"]]
 		Overlay.GROWTH:
-			return [[OV_GREEN, "Growing"], [OV_YELLOW, "Waiting (demand, space or land value)"],
+			return [[OV_GREEN, "Growing"], [OV_YELLOW, "Waiting (demand, space, land value or a school)"],
 				[OV_RED, "Stuck (needs a road or power)"], [OV_BLUE, "Fully built"]]
+		Overlay.SERVICES:
+			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
+				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
 	return []
 
 
@@ -712,6 +729,7 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 	if water[i] == 1:
 		return none
 	var zone := t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
+	var service := t >= Tile.POLICE and t <= Tile.HOSPITAL
 	match overlay:
 		Overlay.LAND_VALUE:
 			# Bands match the hover text and the land value tall buildings need.
@@ -729,7 +747,7 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 		Overlay.POWER:
 			if t == Tile.EMPTY:
 				return none
-			if zone:
+			if zone or service:
 				return Color(OV_YELLOW if power[i] == 1 else OV_RED, 0.9)
 			return Color(OV_DARK_YELLOW if power[i] == 1 else OV_GREY, 0.8)
 		Overlay.ROADS:
@@ -755,6 +773,22 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 					return Color(OV_RED, 0.9)
 				Growth.FULL:
 					return Color(OV_BLUE, 0.9)
+		Overlay.SERVICES:
+			if service:
+				return Color(OV_BLUE, 0.95)
+			var n: int = sim.services_covering(i)
+			var c := OV_RED
+			if n == 4:
+				c = OV_GREEN
+			elif n == 3:
+				c = OV_LIGHT_GREEN
+			elif n >= 1:
+				c = OV_YELLOW
+			if zone:
+				return Color(c, 0.9)
+			if t == Tile.EMPTY or t == Tile.PARK:
+				return Color(c, 0.45) if n > 0 else none
+			return none
 	return none
 
 
@@ -1122,17 +1156,133 @@ func _prop(i: int, front: Vector2i, along: float, back: float, w: float, d: floa
 
 
 func _parked_car(i: int, front: Vector2i, along: float, back: float, nose_to_street: bool,
-		rng: RandomNumberGenerator) -> void:
+		rng: RandomNumberGenerator, paint_over: Color = Color(0, 0, 0, 0)) -> void:
 	var spot := _place(i, front, along, back, 1.9, 4.4)
 	var z_axis: Vector3 = spot["z"]
 	var facing := Basis.looking_at(-z_axis if nose_to_street else z_axis, Vector3.UP)
 	var base: Vector3 = spot["pos"]
 	base.y = maxf(float(spot["ground"]), base.y + float(spot["rise"])) + 0.15
-	var paint: Color = CAR_PAINT[rng.randi_range(0, CAR_PAINT.size() - 1)]
+	var paint: Color = paint_over
+	if paint_over.a == 0.0:
+		paint = CAR_PAINT[rng.randi_range(0, CAR_PAINT.size() - 1)]
 	_parked_items.append([
 		Transform3D(facing * Basis.from_scale(Vector3(1.85, 1.1, 4.3)), base + Vector3.UP * 0.75),
 		paint,
 		Transform3D(facing * Basis.from_scale(Vector3(1.65, 0.7, 2.3)), base + Vector3.UP * 1.6 + facing.z * 0.35)])
+
+
+func _parking_bays(i: int, front: Vector2i, from: float, to: float, chance: float,
+		rng: RandomNumberGenerator) -> void:
+	# Rows of marked bays across the plot: each double row is 2 x 5 m bays plus
+	# a 6 m aisle. Some bays have a car in them.
+	var row_back := from
+	var facing_street := true
+	while row_back + 5.0 <= to:
+		for k in 15:
+			var bay := -19.6 + k * 2.8
+			_slab(i, front, bay - 1.4, row_back, 0.12, 4.8, BAY_LINE, 0.03)
+			if rng.randf() < chance:
+				_parked_car(i, front, bay, row_back + 0.2, facing_street, rng)
+		row_back += 5.0 if facing_street else 11.0
+		facing_street = not facing_street
+
+
+func _front_panel(spot: Dictionary, d: float, along: float, up: float, w: float, h: float,
+		colour: Color, wall_list: Array) -> void:
+	# A flat painted panel on a block's street face: a door, a sign, a cross.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var at: Vector3 = pos + x_axis * along + Vector3.UP * up - z_axis * (d * 0.5 + 0.12)
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * h, z_axis * 0.25), at), colour,
+		Color(w, h, 0.25, STYLE_PAINT)])
+
+
+func _roof_panel(spot: Dictionary, height: float, along: float, back: float, w: float, d: float,
+		colour: Color, wall_list: Array) -> void:
+	# A thin flat panel lying on a flat roof (helipad markings).
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var at: Vector3 = pos + x_axis * along + z_axis * back + Vector3.UP * height
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * 0.3, z_axis * d), at), colour,
+		Color(w, 0.3, d, STYLE_PAINT)])
+
+
+func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = i * 6151 + t
+	var front := _frontage(i)
+	var depth := _depth(i, front)
+	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+	match t:
+		Tile.POLICE:
+			# A sandstone station with a blue sign over the door; patrol cars in the yard.
+			var spot := _place(i, front, -7.0, 4.0, 30.0, 15.0)
+			_classical_block(spot, 30.0, 15.0, 3, BLONDE_SANDSTONE, false, false, wall_list, roof_list)
+			_front_panel(spot, 15.0, 0.0, 0.0, 2.8, 3.2, POLICE_BLUE.darkened(0.35), wall_list)
+			_front_panel(spot, 15.0, 0.0, 3.3, 9.0, 0.8, POLICE_BLUE, wall_list)
+			_slab(i, front, 16.0, 3.0, 16.0, depth - 5.0, CAR_PARK)
+			for k in 4:
+				_parked_car(i, front, 12.5 + (k % 2) * 7.0, 6.0 + (k / 2) * 8.0, true, rng, PATROL_WHITE)
+			_prop(i, front, -7.0, 21.0, 30.0, 0.8, 1.2, _hedge_colour(rng))
+		Tile.FIRE:
+			# Red sandstone with three engine bays, an apron, a drill tower and a yard.
+			var spot := _place(i, front, -5.0, 8.0, 34.0, 18.0)
+			_add_block(spot, 34.0, 18.0, 9.5, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
+			for k in 3:
+				_front_panel(spot, 18.0, -11.0 + k * 11.0, 0.0, 8.0, 5.2, FIRE_RED, wall_list)
+			_slab(i, front, -5.0, 3.0, 34.0, 5.0, CONCRETE)
+			var tower := _place(i, front, 19.0, 12.0, 6.0, 6.0)
+			_add_block(tower, 6.0, 6.0, 22.0, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
+			_slab(i, front, 0.0, 27.0, 49.0, depth - 29.0, YARD)
+			_prop(i, front, -12.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)       # a fire engine
+			_prop(i, front, -6.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)
+		Tile.SCHOOL:
+			# A Victorian sandstone school with a slate roof, a playground and a playing field.
+			var spot := _place(i, front, -4.0, 4.0, 38.0, 13.0)
+			_add_block(spot, 38.0, 13.0, 9.0, RED_SANDSTONE, STYLE_CLASSICAL, 4.5, SLATE, wall_list, roof_list)
+			var porch := _place(i, front, -4.0, 2.2, 8.0, 3.0)
+			_add_block(porch, 8.0, 3.0, 10.5, RED_SANDSTONE, STYLE_CLASSICAL, 3.0, SLATE, wall_list, roof_list)
+			_slab(i, front, 20.0, 3.0, 8.0, 15.0, CAR_PARK)        # playground
+			var field_from := 19.0
+			var field_d := depth - field_from - 2.0
+			_slab(i, front, 0.0, field_from, 46.0, field_d, LAWN)
+			# Pitch markings: outline and halfway line.
+			var a := field_from + 2.0
+			var b := field_from + field_d - 2.0
+			_slab(i, front, 0.0, a, 38.0, 0.15, BAY_LINE, 0.03)
+			_slab(i, front, 0.0, b - 0.15, 38.0, 0.15, BAY_LINE, 0.03)
+			_slab(i, front, -19.0, a, 0.15, b - a, BAY_LINE, 0.03)
+			_slab(i, front, 19.0, a, 0.15, b - a, BAY_LINE, 0.03)
+			_slab(i, front, 0.0, a, 0.15, b - a, BAY_LINE, 0.03)
+			# Railings along the street and a few trees round the field.
+			_prop(i, front, 0.0, 0.2, 48.0, 0.1, 1.4, CHARCOAL)
+			for k in 4:
+				var at := _place(i, front, -21.5 + k * 14.3, depth - 3.0, 1.0, 1.0)
+				var pos: Vector3 = at["pos"]
+				_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(7.0, 10.0)])
+		Tile.HOSPITAL:
+			# A modern white block with a glass entrance, a red cross, a helipad on the
+			# roof, and ambulances by the door.
+			var floors := 6
+			var h: float = floors * 3.2 + 0.6
+			var main := _place(i, front, -6.0, 13.0, 34.0, 22.0)
+			_add_block(main, 34.0, 22.0, h, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			var entrance := _place(i, front, -6.0, 4.0, 16.0, 9.0)
+			_add_block(entrance, 16.0, 9.0, 5.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+			_front_panel(entrance, 9.0, 0.0, 5.0, 18.0, 0.5, TRIM, wall_list)      # canopy edge
+			_front_panel(main, 22.0, 11.0, h - 6.0, 1.3, 4.2, CROSS_RED, wall_list)
+			_front_panel(main, 22.0, 11.0, h - 4.55, 4.2, 1.3, CROSS_RED, wall_list)
+			_roof_panel(main, h, 0.0, 0.0, 14.0, 14.0, CHARCOAL, wall_list)      # helipad
+			_roof_panel(main, h + 0.05, -2.5, 0.0, 1.0, 6.0, WHITE_RENDER, wall_list)
+			_roof_panel(main, h + 0.05, 2.5, 0.0, 1.0, 6.0, WHITE_RENDER, wall_list)
+			_roof_panel(main, h + 0.05, 0.0, 0.0, 4.0, 1.0, WHITE_RENDER, wall_list)
+			_slab(i, front, 18.5, 3.0, 12.0, depth - 5.0, CAR_PARK)
+			_prop(i, front, 15.5, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
+			_prop(i, front, 21.0, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
+			for k in 3:
+				_parked_car(i, front, 15.5 + k * 3.0, 16.0, true, rng)
 
 
 func _hedge_colour(rng: RandomNumberGenerator) -> Color:
@@ -1303,16 +1453,7 @@ func _plan_infill(i: int) -> void:
 					2.4, 3.0, 2.2, Color(0.30, 0.38, 0.30))
 		INFILL_CAR_PARK:
 			_slab(i, front, 0.0, 1.0, 46.0, depth - 3.0, CAR_PARK)
-			var row_back := 2.0
-			var facing := true
-			while row_back + 5.0 <= depth - 2.5:
-				for k in 15:
-					var bay := -19.6 + k * 2.8
-					_slab(i, front, bay - 1.4, row_back, 0.12, 4.8, BAY_LINE, 0.03)
-					if rng.randf() < 0.5:
-						_parked_car(i, front, bay, row_back + 0.2, facing, rng)
-				row_back += 5.0 if facing else 11.0
-				facing = not facing
+			_parking_bays(i, front, 2.0, depth - 2.5, 0.5, rng)
 
 
 # ---------------------------------------------------------------- preview
@@ -1642,16 +1783,7 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	var park_depth := depth - park_from - 1.0
 	_slab(i, front, 0.0, park_from, 47.0, park_depth, CAR_PARK)
 	# Rows of marked bays: each double row is 2 x 5 m bays plus a 6 m aisle.
-	var row_back := park_from + 1.0
-	var facing_street := true
-	while row_back + 5.0 <= park_from + park_depth - 0.5:
-		for k in 15:
-			var bay := -19.6 + k * 2.8
-			_slab(i, front, bay - 1.4, row_back, 0.12, 4.8, BAY_LINE, 0.03)
-			if rng.randf() < 0.55:
-				_parked_car(i, front, bay, row_back + 0.2, facing_street, rng)
-		row_back += 5.0 if facing_street else 11.0
-		facing_street = not facing_street
+	_parking_bays(i, front, park_from + 1.0, park_from + park_depth - 0.5, 0.55, rng)
 
 
 func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,

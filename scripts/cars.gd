@@ -4,7 +4,8 @@ extends Node3D
 ## Each car crosses one road tile at a time: in from one edge, out of another,
 ## following the same straight runs and bends the roads are drawn with.
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
+	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
 
 const LANE_OFFSET := 2.4        # metres left of the road's centre line
 const SPEED_MIN := 11.0         # metres per second (about 25 to 35 mph)

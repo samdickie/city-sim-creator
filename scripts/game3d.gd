@@ -15,8 +15,9 @@ const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
 const SAVE_VERSION := 3
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK, GRID }
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
+	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK, GRID, SERVICE }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -28,6 +29,7 @@ const TOOL_NAMES := {
 	Tool.POWER_LINE: "Power line",
 	Tool.PARK: "Park",
 	Tool.GRID: "Street grid",
+	Tool.SERVICE: "Services",
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -38,6 +40,7 @@ const TOOL_TO_TILE := {
 	Tool.POWER_LINE: Tile.POWER_LINE,
 	Tool.PARK: Tile.PARK,
 	Tool.GRID: Tile.ROAD,
+	Tool.SERVICE: Tile.POLICE,   # (whichever service is picked, see _target_tile)
 }
 const TOOL_COLOURS := {
 	Tool.ROAD: Color(0.45, 0.45, 0.48),
@@ -49,6 +52,7 @@ const TOOL_COLOURS := {
 	Tool.POWER_LINE: Color(0.98, 0.88, 0.25),
 	Tool.PARK: Color(0.40, 0.78, 0.36),
 	Tool.GRID: Color(0.62, 0.62, 0.66),
+	Tool.SERVICE: Color(0.30, 0.78, 0.86),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -59,6 +63,10 @@ const TILE_NAMES := {
 	Tile.POWER_PLANT: "Power plant",
 	Tile.POWER_LINE: "Power line",
 	Tile.PARK: "Park",
+	Tile.POLICE: "Police station",
+	Tile.FIRE: "Fire station",
+	Tile.SCHOOL: "School",
+	Tile.HOSPITAL: "Hospital",
 }
 
 # --- Map ---
@@ -85,6 +93,7 @@ var day_cycle := true
 # --- Interaction ---
 var current_tool: int = Tool.ROAD
 var current_density: int = 1          # 0 = low, 1 = medium, 2 = high (homes and shops)
+var current_service: int = 0          # 0 = police, 1 = fire, 2 = school, 3 = hospital
 var painting := false
 var orbiting := false
 var dragging_map := false
@@ -121,7 +130,7 @@ func _ready() -> void:
 
 	var tools := []
 	for id in TOOL_NAMES:
-		tools.append([id, TOOL_NAMES[id], str(id + 1), _price_text(id), TOOL_COLOURS[id]])
+		tools.append([id, TOOL_NAMES[id], str((id + 1) % 10), _price_text(id), TOOL_COLOURS[id]])
 	add_child(hud)
 	hud.build(tools, {
 		Tile.HOMES: [TOOL_COLOURS[Tool.HOMES], "Homes"],
@@ -137,9 +146,12 @@ func _ready() -> void:
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 	hud.overlay_chosen.connect(_set_overlay)
+	hud.service_chosen.connect(_set_service)
+	hud.funding_changed.connect(_change_funding)
 
 	_select_tool(Tool.ROAD)
 	hud.set_density(current_density)
+	_set_service(current_service, false)
 	_set_overlay(WorldView.Overlay.NONE)
 	_set_speed(1)
 	_refresh_hud()
@@ -264,8 +276,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.PARK)
 			KEY_9:
 				_select_tool(Tool.GRID)
+			KEY_0:
+				_select_tool(Tool.SERVICE)
 			KEY_TAB:
-				_set_density((current_density + 1) % 3)
+				if current_tool == Tool.SERVICE:
+					_set_service((current_service + 1) % 4)
+				else:
+					_set_density((current_density + 1) % 3)
 			KEY_ESCAPE:
 				_cancel_drag()
 			KEY_SPACE:
@@ -334,6 +351,10 @@ func _process(delta: float) -> void:
 			if not sim.grew.is_empty() or not sim.shrank.is_empty():
 				_buildings_dirty = true
 			_refresh_hud()
+			if not sim.burned.is_empty():
+				var n := sim.burned.size()
+				hud.flash("Fire! %d %s burned down. A fire station nearby would stop that." % [
+					n, "building" if n == 1 else "buildings"])
 
 	# Redraw at most once a frame, however many tiles changed. Roads, power lines
 	# and traffic routes only change when the layout does.
@@ -397,7 +418,7 @@ func _update_drag() -> void:
 			total += _tool_cost(p)
 			count += 1
 	world.set_preview(items, TOOL_COLOURS[current_tool])
-	var tool_name: String = TOOL_NAMES[current_tool]
+	var tool_name := _tool_label()
 	if _has_density():
 		var dn: String = Settings.DENSITY_NAMES[current_density]
 		tool_name += " (%s density)" % dn
@@ -436,7 +457,7 @@ func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 	match current_tool:
 		Tool.ROAD, Tool.POWER_LINE:
 			return _l_path(a, b)
-		Tool.POWER_PLANT:
+		Tool.POWER_PLANT, Tool.SERVICE:
 			return [b]
 		Tool.GRID:
 			return _grid_tiles(a, b)
@@ -530,7 +551,7 @@ func _apply_tool(p: Vector2i) -> bool:
 	if current_tool == Tool.BULLDOZE:
 		sim.set_tile(i, Tile.EMPTY)
 	else:
-		sim.set_tile(i, TOOL_TO_TILE[current_tool], current_density if _has_density() else 1)
+		sim.set_tile(i, _target_tile(), current_density if _has_density() else 1)
 	return true
 
 
@@ -542,14 +563,14 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 		if here == Tile.EMPTY:
 			return "-"
 	else:
-		if here == TOOL_TO_TILE[current_tool]:
+		if here == _target_tile():
 			# Same zone again does nothing, unless it changes the density.
 			if not _has_density() or sim.density[i] == current_density:
 				return "-"
-		# Zones and parks go round roads, power and plants rather than replacing
+		# Zones, parks and services go round roads, power and plants rather than replacing
 		# them; the street grid only goes on open land. (Bulldoze first to replace.)
 		var infrastructure := here == Tile.ROAD or here == Tile.POWER_LINE or here == Tile.POWER_PLANT
-		if current_tool in [Tool.HOMES, Tool.SHOPS, Tool.INDUSTRY, Tool.PARK] and infrastructure:
+		if current_tool in [Tool.HOMES, Tool.SHOPS, Tool.INDUSTRY, Tool.PARK, Tool.SERVICE] and infrastructure:
 			return "-"
 		if current_tool == Tool.GRID and here != Tile.EMPTY:
 			return "-"
@@ -585,6 +606,9 @@ func _base_cost(tool_id: int) -> int:
 			return Settings.PARK_COST
 		Tool.GRID:
 			return Settings.ROAD_COST
+		Tool.SERVICE:
+			var service_cost: int = Settings.SERVICE_COSTS[current_service]
+			return service_cost
 	return 0
 
 
@@ -597,9 +621,55 @@ func _tool_cost(p: Vector2i) -> int:
 
 
 func _price_text(tool_id: int) -> String:
+	if tool_id == Tool.SERVICE:
+		return "from " + Hud.money_text(Settings.SERVICE_COSTS[0])
 	if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
 		return "from " + Hud.money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
 	return Hud.money_text(_base_cost(tool_id))
+
+
+func _target_tile() -> int:
+	# The tile the current tool builds.
+	if current_tool == Tool.SERVICE:
+		return Tile.POLICE + current_service
+	var t: int = TOOL_TO_TILE.get(current_tool, Tile.EMPTY)
+	return t
+
+
+func _tool_label() -> String:
+	if current_tool == Tool.SERVICE:
+		var service_name: String = Settings.SERVICE_NAMES[current_service]
+		return service_name
+	var tool_name: String = TOOL_NAMES[current_tool]
+	return tool_name
+
+
+func _set_service(s: int, announce: bool = true) -> void:
+	current_service = s
+	hud.set_service(s, _funding_text())
+	if announce:
+		var service_name: String = Settings.SERVICE_NAMES[s]
+		hud.flash("Building: %s" % service_name.to_lower())
+	if painting:
+		_update_drag()
+	else:
+		_update_info()
+
+
+func _change_funding(step: float) -> void:
+	sim.set_funding(current_service, sim.funding[current_service] + step)
+	hud.set_service(current_service, _funding_text())
+	_ground_dirty = true          # coverage and land value change
+	_refresh_hud()
+
+
+func _funding_text() -> String:
+	var s := current_service
+	var word: String = Settings.SERVICE_WORDS[s]
+	var upkeep: float = Settings.SERVICE_UPKEEP[s]
+	return "%s funding %d%%  ·  %s a month each  ·  reaches %d m" % [word.capitalize(),
+		roundi(sim.funding[s] * 100.0), Hud.money_text(roundi(upkeep * sim.funding[s])),
+		sim.service_reach_m(s, cell_size_m)]
 
 
 func _has_density() -> bool:
@@ -619,6 +689,7 @@ func _select_tool(tool_id: int) -> void:
 	current_tool = tool_id
 	hud.set_tool(tool_id)
 	hud.show_density(_has_density())
+	hud.show_services(current_tool == Tool.SERVICE)
 	if _in_map(hover):
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
@@ -727,7 +798,7 @@ func _update_info() -> void:
 	var i := hover.y * map_w + hover.x
 	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
 	var problem := _why_cant_build(hover)
-	var action := "%s here costs %s" % [TOOL_NAMES[current_tool], Hud.money_text(_tool_cost(hover))]
+	var action := "%s here costs %s" % [_tool_label(), Hud.money_text(_tool_cost(hover))]
 	if problem == "-":
 		action = "Nothing to clear" if current_tool == Tool.BULLDOZE else "Already built"
 	elif problem != "":
@@ -741,6 +812,10 @@ func _tile_text(i: int) -> String:
 		return "Power plant (powers %d zone levels)" % Settings.POWER_PER_PLANT
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
+	if sim.is_service(t):
+		var s: int = t - Tile.POLICE
+		return "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),
+			sim.service_reach_m(s, cell_size_m), roundi(sim.funding[s] * 100.0)]
 	if not sim.is_zone(t):
 		if t == Tile.EMPTY and water[i] == 0:
 			return "Open land (land value %s)" % sim.land_value_word(i)
@@ -750,10 +825,22 @@ func _tile_text(i: int) -> String:
 		kind += " (%s density)" % sim.density_name(i)
 	var text := "%s, level %d of %d%s: %s" % [kind, sim.levels[i], sim.max_level(i),
 		_stage_words(t, sim.stage(i)), sim.zone_status(i)]
-	text += "\nLand value %s" % sim.land_value_word(i)
+	text += "\nLand value %s   ·   %s" % [sim.land_value_word(i), _services_text(i)]
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text
+
+
+func _services_text(i: int) -> String:
+	# Which services cover this plot, e.g. "nearby: police, school".
+	var near: Array[String] = []
+	for s in 4:
+		if sim.covered(s, i):
+			var word: String = Settings.SERVICE_WORDS[s]
+			near.append(word)
+	if near.is_empty():
+		return "no services nearby"
+	return "nearby: " + ", ".join(near)
 
 
 func _stage_words(t: int, s: int) -> String:

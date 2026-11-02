@@ -6,7 +6,9 @@ extends RefCounted
 
 const Settings = preload("res://scripts/settings.gd")
 
-enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }
+enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
+	POLICE, FIRE, SCHOOL, HOSPITAL }
+enum Service { POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as the service tiles
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # for the growth map
 
 # --- The city ---
@@ -43,6 +45,11 @@ var shortage := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var average_home_price := 0
 var _sea_near := PackedFloat32Array() # 1 by the sea, fading to 0 inland
 var _value_dirty := true
+var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 = 100%
+var services := [0, 0, 0, 0]          # how many of each service the town has
+var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
+var burned := PackedInt32Array()      # plots that burned down last month
+var _coverage_dirty := true
 var layout_version := 0               # goes up whenever a tile changes type (roads, zones...)
 
 var _road_dist := PackedByteArray()   # tiles to the nearest road (255 = far)
@@ -64,6 +71,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	powered.resize(w * h)
 	_net_id.resize(w * h)
 	land_value.resize(w * h)
+	coverage.resize(w * h * 4)
 	_measure_sea()
 	reset()
 
@@ -79,9 +87,12 @@ func reset() -> void:
 	last_upkeep = 0
 	grew.clear()
 	shrank.clear()
+	burned.clear()
+	funding = [1.0, 1.0, 1.0, 1.0]
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	_coverage_dirty = true
 	layout_version += 1
 	shortage = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	_rng.randomize()
@@ -98,6 +109,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 			levels[i] = mini(levels[i], max_level(i))
 			_power_dirty = true
 			_value_dirty = true
+			_coverage_dirty = true
 		return
 	tiles[i] = t
 	levels[i] = 0                     # a new zone starts as an empty plot
@@ -105,6 +117,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	_coverage_dirty = true
 	layout_version += 1
 
 
@@ -162,6 +175,8 @@ func _zone_check(i: int) -> Array:
 				return [Growth.WAITING, "waiting, the town needs more residents first"]
 			Tile.INDUSTRY:
 				return [Growth.WAITING, "waiting, the town needs more workers first"]
+	if _needs_school(i, next_stage):
+		return [Growth.WAITING, "waiting for a school nearby (families won't move into bigger homes without one)"]
 	if next_stage > Settings.FREE_STAGE:
 		_update_land_value()
 		var needed: float = Settings.TALL_VALUE_NEEDED[next_stage]
@@ -169,6 +184,9 @@ func _zone_check(i: int) -> Array:
 			return [Growth.WAITING, "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"]
 		if density[i] < 2 and shortage_for(t) <= 0.0:
 			return [Growth.WAITING, "will build taller when the town runs short of space"]
+	var missing := _missing_services(i)
+	if missing != "":
+		return [Growth.GROWING, "growing slowly, no %s nearby" % missing]
 	return [Growth.GROWING, "growing"]
 
 
@@ -253,9 +271,13 @@ func tick() -> void:
 	recount()
 	_update_land_value()
 	_grow()
+	_fires()
 	if not grew.is_empty() or not shrank.is_empty():
+		# Power is shared out again, which can switch services on or off, and
+		# taller shops and industry change the land around them.
 		_power_dirty = true
-		_value_dirty = true       # taller shops and industry change the land around them
+		_coverage_dirty = true
+		_value_dirty = true
 	recount()
 	_collect_taxes()
 
@@ -306,9 +328,9 @@ func _grow() -> void:
 		var short: float = shortage[t]
 		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
 		var needed: float = Settings.TALL_VALUE_NEEDED[stage_at(i, lv + 1)]
-		var allowed: bool = density[i] == 2 or short > 0.0
+		var allowed: bool = (density[i] == 2 or short > 0.0) and not _needs_school(i, stage_at(i, lv + 1))
 		if allowed and spare > 0 and want >= step * 0.5 and land_value[i] >= needed \
-				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short):
+				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short) * _service_factor(i):
 			levels[i] = lv + 1
 			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
@@ -330,7 +352,8 @@ func _grow() -> void:
 		var step: int = step_size(i)
 		var down_step: int = units(i) - units_at_stage(t, stage_at(i, lv - 1)) if lv > 0 else 0
 		if connected and has_power and spare > 0 and can_rise and next_stage <= Settings.FREE_STAGE \
-				and want >= step * 0.5 and _rng.randf() < Settings.GROWTH_CHANCE:
+				and want >= step * 0.5 and not _needs_school(i, next_stage) \
+				and _rng.randf() < Settings.GROWTH_CHANCE * _service_factor(i):
 			levels[i] = lv + 1
 			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
@@ -351,7 +374,7 @@ func _collect_taxes() -> void:
 			taxable += units(i) * (0.6 + 0.8 * land_value[i])
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
 	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + plants * Settings.POWER_PLANT_UPKEEP
-		+ park_tiles * Settings.PARK_UPKEEP)
+		+ park_tiles * Settings.PARK_UPKEEP + service_upkeep())
 	money += last_income - last_upkeep
 
 
@@ -365,9 +388,11 @@ func recount() -> void:
 	plants = 0
 	park_tiles = 0
 	power_used = 0
+	services = [0, 0, 0, 0]
 	for i in w * h:
-		if is_zone(tiles[i]):
-			power_used += stage(i)
+		power_used += power_use(i)
+		if is_service(tiles[i]):
+			services[tiles[i] - Tile.POLICE] += 1
 		match tiles[i]:
 			Tile.ROAD:
 				road_tiles += 1
@@ -398,6 +423,19 @@ func is_zone(t: int) -> bool:
 	return t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
 
 
+func is_service(t: int) -> bool:
+	return t >= Tile.POLICE and t <= Tile.HOSPITAL
+
+
+func power_use(i: int) -> int:
+	# Zones use one unit per stage; services a fixed amount; nothing else uses power.
+	if is_zone(tiles[i]):
+		return stage(i)
+	if is_service(tiles[i]):
+		return Settings.SERVICE_POWER
+	return 0
+
+
 func home_price(i: int) -> int:
 	# What a home on this plot would sell for: land value times the housing shortage.
 	_update_land_value()
@@ -418,6 +456,146 @@ func land_value_word(i: int) -> String:
 	if v >= 0.2:
 		return "low"
 	return "very low"
+
+
+# ------------------------------------------------------------- services
+
+func service_working(i: int) -> bool:
+	# A service needs a road and power to do anything (and some funding).
+	_update_road_distance()
+	_update_power()
+	var f: float = funding[tiles[i] - Tile.POLICE]
+	return _road_dist[i] <= Settings.ROAD_REACH and powered[i] == 1 and f > 0.0
+
+
+func service_status(i: int) -> String:
+	var f: float = funding[tiles[i] - Tile.POLICE]
+	if f <= 0.0:
+		return "closed (no funding)"
+	_update_road_distance()
+	if _road_dist[i] > Settings.ROAD_REACH:
+		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
+	_update_power()
+	if powered[i] == 0:
+		return "not working, no power"
+	return "working"
+
+
+func service_reach_m(s: int, cell_m: float) -> int:
+	# How far a service reaches at its current funding, in metres.
+	return roundi(_service_radius(s) * cell_m)
+
+
+func _service_radius(s: int) -> float:
+	var r: float = Settings.SERVICE_RADIUS[s]
+	return r * (0.4 + 0.6 * funding[s])     # 50% funding reaches 70% as far
+
+
+func coverage_at(s: int, i: int) -> float:
+	_update_coverage()
+	return coverage[s * w * h + i]
+
+
+func covered(s: int, i: int) -> bool:
+	return coverage_at(s, i) >= Settings.COVERED
+
+
+func services_covering(i: int) -> int:
+	var n := 0
+	for s in 4:
+		if covered(s, i):
+			n += 1
+	return n
+
+
+func set_funding(s: int, value: float) -> void:
+	funding[s] = clampf(snappedf(value, 0.1), 0.0, Settings.MAX_FUNDING)
+	_coverage_dirty = true
+	_value_dirty = true
+
+
+func service_upkeep() -> int:
+	var total := 0.0
+	for s in 4:
+		var each: float = Settings.SERVICE_UPKEEP[s]
+		total += each * funding[s] * int(services[s])
+	return roundi(total)
+
+
+func _update_coverage() -> void:
+	# Each working service covers the tiles around it: fully close by, fading
+	# out to nothing at the edge of its reach.
+	if not _coverage_dirty:
+		return
+	_coverage_dirty = false
+	coverage.fill(0.0)
+	for i in w * h:
+		if not is_service(tiles[i]) or not service_working(i):
+			continue
+		var s: int = tiles[i] - Tile.POLICE
+		var radius := _service_radius(s)
+		var reach := ceili(radius)
+		var cx := i % w
+		var cy := i / w
+		var offset := s * w * h
+		for y in range(maxi(cy - reach, 0), mini(cy + reach, h - 1) + 1):
+			for x in range(maxi(cx - reach, 0), mini(cx + reach, w - 1) + 1):
+				var d := Vector2(x - cx, y - cy).length()
+				var c := clampf((1.0 - d / radius) * 1.6, 0.0, 1.0)
+				var k := offset + y * w + x
+				if c > coverage[k]:
+					coverage[k] = c
+
+
+func _service_factor(i: int) -> float:
+	# Bigger towns grow slowly where there's no police (homes and shops) or
+	# no hospital (homes).
+	var f := 1.0
+	var t: int = tiles[i]
+	if (t == Tile.HOMES or t == Tile.SHOPS) and population >= Settings.POLICE_NEEDED_POP \
+			and not covered(Service.POLICE, i):
+		f *= 0.5
+	if t == Tile.HOMES and population >= Settings.HOSPITAL_NEEDED_POP \
+			and not covered(Service.HOSPITAL, i):
+		f *= 0.5
+	return f
+
+
+func _missing_services(i: int) -> String:
+	# Which services are slowing this plot down, in words ("" = none).
+	var t: int = tiles[i]
+	var words: Array[String] = []
+	if (t == Tile.HOMES or t == Tile.SHOPS) and population >= Settings.POLICE_NEEDED_POP \
+			and not covered(Service.POLICE, i):
+		words.append("police station")
+	if t == Tile.HOMES and population >= Settings.HOSPITAL_NEEDED_POP \
+			and not covered(Service.HOSPITAL, i):
+		words.append("hospital")
+	return " or ".join(words)
+
+
+func _needs_school(i: int, next_stage: int) -> bool:
+	# In a bigger town, families won't move into anything bigger than terraces
+	# without a school nearby.
+	return tiles[i] == Tile.HOMES and next_stage > 2 and population >= Settings.SCHOOL_NEEDED_POP \
+		and not covered(Service.SCHOOL, i)
+
+
+func _fires() -> void:
+	# Now and then a building with no fire station nearby burns down.
+	burned.clear()
+	if population < Settings.FIRE_START_POP:
+		return
+	for i in w * h:
+		if not is_zone(tiles[i]) or levels[i] == 0:
+			continue
+		var risk: float = Settings.FIRE_CHANCE * (1.0 - coverage_at(Service.FIRE, i))
+		if tiles[i] == Tile.INDUSTRY:
+			risk *= 2.0
+		if _rng.randf() < risk:
+			levels[i] = 0
+			burned.append(i)
+			shrank.append(i)
 
 
 # ------------------------------------------------------------- land value
@@ -475,6 +653,13 @@ func _update_land_value() -> void:
 				_spread(i, 4, -Settings.INDUSTRY_PENALTY * maxi(stage(i), 1))
 			Tile.POWER_PLANT:
 				_spread(i, 5, -Settings.PLANT_PENALTY)
+	# Being covered by police, fire, schools and hospitals adds value too.
+	_update_coverage()
+	for s in 4:
+		var bonus: float = Settings.SERVICE_LAND_BONUS[s]
+		var offset := s * w * h
+		for i in w * h:
+			land_value[i] += bonus * coverage[offset + i]
 	for i in w * h:
 		land_value[i] = clampf(land_value[i], 0.0, 1.0)
 
@@ -530,8 +715,8 @@ func _update_power() -> void:
 			if tiles[i] == Tile.POWER_PLANT:
 				left += Settings.POWER_PER_PLANT
 		for i in members:
-			if is_zone(tiles[i]):
-				var use: int = stage(i)
+			if is_zone(tiles[i]) or is_service(tiles[i]):
+				var use: int = power_use(i)
 				if use <= left:
 					left -= use
 					powered[i] = 1
@@ -631,6 +816,7 @@ func to_save() -> Dictionary:
 		"tiles": Array(tiles),
 		"levels": Array(levels),
 		"density": Array(density),
+		"funding": funding.duplicate(),
 	}
 
 
@@ -641,7 +827,7 @@ func from_save(data: Dictionary) -> void:
 	levels.fill(0)
 	for i in mini(saved_tiles.size(), tiles.size()):
 		var t: int = int(saved_tiles[i])
-		tiles[i] = t if t >= Tile.EMPTY and t <= Tile.PARK and water[i] == 0 else Tile.EMPTY
+		tiles[i] = t if t >= Tile.EMPTY and t <= Tile.HOSPITAL and water[i] == 0 else Tile.EMPTY
 	for i in mini(saved_levels.size(), levels.size()):
 		levels[i] = clampi(int(saved_levels[i]), 0, 6) if is_zone(tiles[i]) else 0
 	var saved_density: Array = data.get("density", [])
@@ -664,10 +850,16 @@ func from_save(data: Dictionary) -> void:
 	money = int(data.get("money", Settings.START_MONEY))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
+	var saved_funding: Array = data.get("funding", [])
+	for s in 4:
+		funding[s] = clampf(float(saved_funding[s]), 0.0, Settings.MAX_FUNDING) \
+			if s < saved_funding.size() else 1.0
 	grew.clear()
 	shrank.clear()
+	burned.clear()
 	_roads_dirty = true
 	_power_dirty = true
 	_value_dirty = true
+	_coverage_dirty = true
 	layout_version += 1
 	recount()

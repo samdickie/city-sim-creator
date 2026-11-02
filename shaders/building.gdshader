@@ -6,7 +6,7 @@
 //                    style 0 = house, 1 = shop, 2 = industry, 3 = flats, 4 = power plant,
 //                    5 = modern glass (bands of glazing with slim mullions),
 //                    6 = classical sandstone, 7 = modern framed glazing with clad bays,
-//                    8 = classical with shopfronts
+//                    8 = classical with shopfronts, 9 = plain paint (doors, signs)
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -44,7 +44,9 @@ void fragment() {
 	bool is_roof = local_normal.y > 0.5;
 
 	vec3 colour = wall_colour;
-	if (use_texture && style != 2 && style != 5 && style != 7) {
+	if (style == 9) {
+		// Plain paint: no stone, no windows.
+	} else if (use_texture && style != 2 && style != 5 && style != 7) {
 		// Stone detail from the photo, keeping each building's own colour.
 		colour *= clamp(texture(wall_tex, vec2(u, v) / wall_texture_metres).rgb / wall_average, 0.3, 1.8);
 	} else {
@@ -75,7 +77,7 @@ void fragment() {
 			// Industry: a band of high windows only.
 			window = window && cell_v > 0.55;
 		}
-		if (style == 4) {
+		if (style == 4 || style == 9) {
 			window = false;
 		}
 		if (style == 5) {

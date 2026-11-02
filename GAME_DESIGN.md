@@ -65,8 +65,15 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Corner and through plots build along every road they touch.
 - Zoned plots waiting to grow show building sites; leftover open land inside the town becomes pocket parks, allotments or car parks (looks only).
 
+## Services
+- Services tool (0), then pick one (Tab or the buttons): police station £1,500, fire station £1,500, school £2,000, hospital £4,000. One tile each; they need a road and power (3 units) to work.
+- Each covers the area round it: fully close by, fading out at its reach (police 800 m, fire 700 m, school 600 m, hospital 1 km at 100% funding). Covered areas gain land value.
+- Funding (- / +, 0-150%) sets upkeep (police £60, fire £60, school £80, hospital £150 a month at 100%) and reach (50% funding reaches 70% as far; 0% closes it).
+- Effects: over 800 people, homes and shops with no police grow at half speed; over 1,200, homes need a school to grow past terraces; over 2,500, homes with no hospital grow at half speed; over 500, built plots with no fire cover can burn down (rarely; industry twice as often).
+- A Services map view shows how many of the four cover each area.
+
 ## Map views (overlays)
-- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth. Each has a colour key.
+- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services. Each has a colour key.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
 
@@ -78,7 +85,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*
-3. **Real game** — services, happiness, land value, overlay maps (done), goals. *Done when a friend asks for more.*
+3. **Real game** — services (done), land value (done), overlay maps (done), happiness, goals. *Done when a friend asks for more.*
 4. **Polish and share** — 3D art, sound, tutorial, publish on itch.io.
 
 ## Working rules
