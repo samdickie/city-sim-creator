@@ -550,8 +550,14 @@ func _tile_text(i: int) -> String:
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
 	if not sim.is_zone(t):
+		if t == Tile.EMPTY and water[i] == 0:
+			return "Open land (land value %s)" % sim.land_value_word(i)
 		return TILE_NAMES[t]
-	return "%s, level %d of %d: %s" % [TILE_NAMES[t], sim.levels[i], Settings.MAX_LEVEL, sim.zone_status(i)]
+	var text := "%s, level %d of %d: %s" % [TILE_NAMES[t], sim.levels[i], sim.max_level(t), sim.zone_status(i)]
+	text += "\nLand value %s" % sim.land_value_word(i)
+	if t == Tile.HOMES:
+		text += "   ·   homes here worth about %s" % _money_text(sim.home_price(i))
+	return text
 
 
 func _money_text(amount: int) -> String:

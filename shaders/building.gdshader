@@ -3,7 +3,8 @@
 // Per building (from the MultiMesh):
 //   COLOR            wall colour
 //   INSTANCE_CUSTOM  x = width, y = height, z = depth (metres), w = style
-//                    style 0 = house, 1 = shop, 2 = industry, 3 = flats, 4 = power plant
+//                    style 0 = house, 1 = shop, 2 = industry, 3 = flats, 4 = power plant,
+//                    5 = modern glass (bands of glazing with slim mullions)
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -40,7 +41,7 @@ void fragment() {
 	bool is_roof = local_normal.y > 0.5;
 
 	vec3 colour = wall_colour;
-	if (use_texture && style != 2) {
+	if (use_texture && style != 2 && style != 5) {
 		// Stone detail from the photo, keeping each building's own colour.
 		colour *= clamp(texture(wall_tex, vec2(u, v) / wall_texture_metres).rgb / wall_average, 0.3, 1.8);
 	} else {
@@ -73,6 +74,14 @@ void fragment() {
 		if (style == 4) {
 			window = false;
 		}
+		if (style == 5) {
+			// Floor-to-ceiling glazing with slim mullions every 1.6 m and a
+			// slab edge between floors.
+			floor_h = 3.2;
+			cell_v = fract(v / floor_h);
+			storey = floor(v / floor_h);
+			window = cell_v > 0.14 && fract(u / 1.6) > 0.05 && below_top && v > 0.4;
+		}
 		if (style == 1 && storey < 0.5) {
 			// Shop front: a big glass window along the ground floor with a fascia above.
 			window = edge_margin && v > 0.4 && v < 2.5;
@@ -87,6 +96,12 @@ void fragment() {
 			colour = mix(vec3(0.07, 0.09, 0.12), vec3(0.32, 0.30, 0.26), step(0.85, which));
 			rough = 0.08;
 			metal = 0.3;
+			if (style == 5) {
+				// Tinted glass that reflects the sky, slightly varied pane to pane.
+				colour = mix(vec3(0.10, 0.17, 0.24), vec3(0.16, 0.24, 0.30), which);
+				rough = 0.04;
+				metal = 0.65;
+			}
 			// At night, about half the windows are lit, in slightly different warm tones.
 			float lit = step(0.45, hash(window_id + vec2(3.7, 1.3)));
 			vec3 lamp = mix(vec3(1.0, 0.72, 0.38), vec3(1.0, 0.86, 0.62), hash(window_id + 9.1));

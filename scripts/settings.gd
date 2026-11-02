@@ -25,7 +25,8 @@ const START_YEAR := 2027
 
 # --- Growth ---
 const ROAD_REACH := 2             # a zone grows if a road is within this many tiles
-const MAX_LEVEL := 3              # zones grow in 3 steps: small, medium, dense
+const MAX_LEVEL := 3              # low-rise: zones grow this far whenever there's demand
+const TALL_MAX_LEVEL := 6         # homes and shops can build up to here when space runs out
 const PEOPLE_PER_LEVEL := 20      # residents added each time homes grow a level
 const SHOP_JOBS_PER_LEVEL := 8    # jobs added each time shops grow a level
 const INDUSTRY_JOBS_PER_LEVEL := 15
@@ -60,3 +61,18 @@ const DAY_SECONDS := 240.0        # real seconds for a full day and night at nor
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
 const PEOPLE_PER_CAR := 25        # one car on the roads per this many residents
 const MAX_CARS := 400
+
+# --- Density, land value and prices ---
+# Once demand for homes (or shops) is more than the low-rise plots can still take,
+# the most valuable plots build upwards: level 4, 5 and 6 need at least this land value.
+const TALL_VALUE_NEEDED := [0.0, 0.0, 0.0, 0.0, 0.35, 0.5, 0.65]
+const TALL_GROWTH_CHANCE := 0.15  # chance per month that a valuable plot builds taller
+const BASE_LAND_VALUE := 0.30     # land value runs from 0 (worst) to 1 (best)
+const SEA_BONUS := 0.30           # right by the sea (fades out over SEA_VIEW_TILES)
+const SEA_VIEW_TILES := 6
+const PARK_BONUS := 0.07          # per park tile within 3 tiles
+const SHOP_BONUS := 0.012         # per level of shops within 3 tiles
+const INDUSTRY_PENALTY := 0.03    # per level of industry within 4 tiles
+const PLANT_PENALTY := 0.30       # a power plant within 5 tiles
+const BASE_HOME_PRICE := 160000   # £ for a home on average land with no shortage
+const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this much

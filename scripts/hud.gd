@@ -29,6 +29,7 @@ var clock_label: Label
 var money_label: Label
 var budget_label: Label
 var people_label: Label
+var housing_label: Label
 var power_label: Label
 var growth_label: Label
 var tax_label: Label
@@ -131,6 +132,8 @@ func _build_top_right(root: Control) -> void:
 	box.add_child(_divider())
 	people_label = _label("", 16, TEXT)
 	box.add_child(people_label)
+	housing_label = _label("", 14, TEXT_DIM)
+	box.add_child(housing_label)
 	power_label = _label("", 14, TEXT_DIM)
 	box.add_child(power_label)
 	growth_label = _label("", 14, TEXT_DIM)
@@ -226,7 +229,10 @@ func _build_help(root: Control) -> void:
 		"Tools: keys 1-8     Pause: Space     Fast: F     Help: H\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
-		"Power travels through roads, buildings and power lines that share an edge.", 15, TEXT_DIM)
+		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
+		"Homes and shops grow to 3 levels. When the town runs short of space, the most\n" +
+		"valuable plots build upwards, up to 12-storey towers. Land is worth more by the\n" +
+		"sea, near parks and shops, and less near industry and power plants.", 15, TEXT_DIM)
 	box.add_child(text)
 	var close := _button("Got it", false)
 	close.pressed.connect(func(): help_panel.visible = false)
@@ -251,6 +257,13 @@ func show_city(sim, money_text: String, net_text: String, income_text: String, u
 	money_label.add_theme_color_override("font_color", BAD if sim.money * 10 < Settings.START_MONEY else GOOD)
 	budget_label.text = "%s last month   ·   taxes %s, upkeep %s" % [net_text, income_text, upkeep_text]
 	people_label.text = "%s people   ·   %s jobs" % [_thousands(sim.population), _thousands(sim.jobs())]
+	var short: float = sim.shortage[2]   # homes
+	var word := "none" if short <= 0.0 else ("some" if short < 0.4 else ("serious" if short < 0.8 else "severe"))
+	if sim.average_home_price > 0:
+		housing_label.text = "Average home £%s   ·   housing shortage: %s" % [_thousands(sim.average_home_price), word]
+	else:
+		housing_label.text = "Housing shortage: %s" % word
+	housing_label.add_theme_color_override("font_color", BAD if short >= 0.4 else TEXT_DIM)
 	if sim.plants == 0:
 		power_label.text = "No power plant yet: build one to start growing"
 		power_label.add_theme_color_override("font_color", BAD)

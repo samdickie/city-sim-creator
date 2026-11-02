@@ -225,11 +225,11 @@ func _draw() -> void:
 			var lv := levels[i]
 			# The whole plot gets bolder as it grows, so growth shows at any zoom:
 			# faint outline (empty) -> light -> medium -> solid with a dark block.
-			draw_rect(plot, Color(c, LEVEL_FILL[lv]))
+			draw_rect(plot, Color(c, LEVEL_FILL[mini(lv, 3)]))
 			if lv == 0:
 				draw_rect(plot, Color(c, 0.9), false, 1.0)
 			else:
-				draw_rect(r.grow(-(7.0 - lv * 2.0)), c.darkened(0.5))
+				draw_rect(r.grow(-(7.0 - mini(lv, 3) * 2.0)), c.darkened(0.5))
 			if reach[i] > Settings.ROAD_REACH:
 				# No road close enough: cross it out so it's clear why it isn't growing.
 				draw_line(plot.position, plot.end, Color(0, 0, 0, 0.6), 1.5)
@@ -786,7 +786,7 @@ func _tile_text(i: int) -> String:
 			return "Power plant, powers %d zone levels" % Settings.POWER_PER_PLANT
 		return TILE_NAMES[t]
 	var lv := sim.levels[i]
-	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, Settings.MAX_LEVEL, sim.zone_status(i)]
+	return "%s, level %d of %d: %s" % [TILE_NAMES[t], lv, sim.max_level(t), sim.zone_status(i)]
 
 
 func _update_stats() -> void:

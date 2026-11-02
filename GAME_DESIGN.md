@@ -33,6 +33,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Taxes (default 9%) come in monthly from residents and jobs; roads cost £0.50 per tile per month. Higher taxes cut demand.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
+## Density, land value and prices
+- Homes and shops grow to level 3 (low-rise) whenever there's demand. Industry stops at 3.
+- When demand is more than the low-rise plots can still take, the town is "short of space": the most valuable plots build upwards, to level 4 (5-6 storey mansion flats), 5 (7-9 storey modern flats) and 6 (towers up to 12 storeys). Levels 4/5/6 need land value 0.35/0.5/0.65.
+- Land value (0-1): base 0.3, up to +0.3 by the sea, plus parks and shops nearby; minus industry and power plants nearby.
+- Better land gets better buildings (glass on the best land) and pays more tax (0.6x to 1.4x).
+- Home prices = £160k x (0.5 + land value) x (1 + 0.8 x housing shortage).
+
 ## Power
 - Zones need electricity to grow; plots without it slowly shrink.
 - A power plant (£3,000, £100/month upkeep) powers 200 zone levels.

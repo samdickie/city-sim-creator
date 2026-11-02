@@ -58,6 +58,10 @@ const STYLE_SHOP := 1
 const STYLE_INDUSTRY := 2
 const STYLE_FLATS := 3
 const STYLE_PLANT := 4
+const STYLE_GLASS := 5         # modern glass and steel (on the most valuable land)
+const MODERN_WHITE := Color(0.92, 0.92, 0.90)
+const MODERN_GREY := Color(0.55, 0.57, 0.60)
+const GLASS_FRAME := Color(0.30, 0.33, 0.36)
 
 var sim                         # the Simulation (read only)
 var map_w := 0
@@ -92,6 +96,7 @@ var parked_cabins := MultiMeshInstance3D.new()
 var _paving_items: Array = []
 var _prop_items: Array = []
 var _parked_items: Array = []
+var _values := PackedFloat32Array()   # land value per tile, for building quality
 var hover_box := MeshInstance3D.new()
 var hover_material := StandardMaterial3D.new()
 var alerts := Node3D.new()            # floating warning icons above plots
@@ -516,6 +521,7 @@ func refresh_buildings() -> void:
 	_paving_items.clear()
 	_prop_items.clear()
 	_parked_items.clear()
+	_values = sim.land_value_map()
 	for i in tiles.size():
 		var t := tiles[i]
 		var lv := levels[i]
@@ -935,6 +941,10 @@ func _house_colour(rng: RandomNumberGenerator) -> Color:
 func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array) -> void:
 	var depth := _depth(i, front)
+	var value := _values[i] if i < _values.size() else 0.3
+	if lv >= 4:
+		_plan_tall_homes(i, lv, front, depth, value, rng, wall_list, roof_list)
+		return
 	if lv >= 3:
 		# Tenements front and back, with a shared back court between them.
 		var back_row := depth - 16.0
@@ -991,10 +1001,97 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		_slab(i, front, 0.0, lane_at, 48.0, 3.0, DRIVEWAY)              # lane behind the front gardens
 
 
+func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: float,
+		rng: RandomNumberGenerator, wall_list: Array, roof_list: Array) -> void:
+	# Building upwards where space is short. Better land gets better buildings:
+	# sandstone mansion flats, then modern flats, then glass towers by the sea.
+	var extra := roundi(value * 2.0)          # valuable land squeezes in an extra floor or two
+	var court_back := depth - 17.0
+	if lv == 4:
+		# Mansion flats: 5-6 storey red or blonde sandstone, front and back, slate roofs.
+		for row_back in [3.0, court_back]:
+			for along in [-12.5, 12.5]:
+				var stone := RED_SANDSTONE if rng.randf() < 0.5 else BLONDE_SANDSTONE
+				var storeys := rng.randi_range(5, 6)
+				var spot := _place(i, front, along, row_back, 22.0, 14.0)
+				_add_block(spot, 22.0, 14.0, storeys * 3.1 + 0.5, stone, STYLE_FLATS, 5.0, SLATE,
+					wall_list, roof_list)
+	elif lv == 5:
+		# Modern flats: 7-9 storeys, white or grey render (glass on the best land), flat roofs.
+		for row_back in [3.0, court_back]:
+			for along in [-12.5, 12.5]:
+				var storeys := rng.randi_range(6, 7) + extra
+				var glass := value >= 0.6
+				var colour := GLASS_FRAME if glass else (MODERN_WHITE if rng.randf() < 0.6 else MODERN_GREY)
+				var spot := _place(i, front, along, row_back, 21.0, 14.0)
+				var height := storeys * 3.1 + 0.6
+				_add_block(spot, 21.0, 14.0, height, colour, STYLE_GLASS if glass else STYLE_FLATS,
+					0.0, SLATE, wall_list, roof_list)
+				_add_rooftop(spot, 21.0, 14.0, height, wall_list)
+	else:
+		# Towers: 9-12 storeys on a podium, glass on valuable land, set diagonally
+		# across the plot so they don't block each other's light.
+		for k in 2:
+			var along := -11.0 if k == 0 else 11.0
+			var row_back := 4.0 if k == 0 else court_back - 4.0
+			var storeys := rng.randi_range(8, 10) + extra
+			var glass := value >= 0.55
+			var colour := GLASS_FRAME if glass else MODERN_WHITE
+			var spot := _place(i, front, along, row_back, 20.0, 18.0)
+			var height := storeys * 3.1 + 0.8
+			_add_block(spot, 20.0, 18.0, height, colour, STYLE_GLASS if glass else STYLE_FLATS,
+				0.0, SLATE, wall_list, roof_list)
+			_add_rooftop(spot, 20.0, 18.0, height, wall_list)
+	# Front pavement and a landscaped court between the blocks, with parking.
+	_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
+	_slab(i, front, 0.0, 18.0, 48.0, court_back - 19.0, COURT)
+	var mid := (18.0 + court_back) * 0.5 - 2.2
+	for k in 7:
+		if rng.randf() < 0.65:
+			_parked_car(i, front, -18.0 + k * 6.0, mid, rng.randf() < 0.5, rng)
+
+
+func _add_rooftop(spot: Dictionary, w: float, d: float, h: float, wall_list: Array) -> void:
+	# Lift housing and plant on a flat roof.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var b3 := Basis(x_axis * (w * 0.3), Vector3.UP * 3.0, z_axis * (d * 0.35))
+	wall_list.append([Transform3D(b3, pos + Vector3.UP * h), CONCRETE, Color(w * 0.3, 3.0, d * 0.35, STYLE_PLANT)])
+
+
 func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array) -> void:
 	var colours := [WHITE_RENDER, BLONDE_SANDSTONE, CREAM_RENDER, RED_SANDSTONE, GREY_RENDER]
 	var depth := _depth(i, front)
+	var value := _values[i] if i < _values.size() else 0.3
+	if lv >= 4:
+		# Offices above shops: 5-6 storeys at level 4, 7-9 at 5, a 10-14 storey tower at 6.
+		var extra := roundi(value * 2.0)
+		var glass := lv >= 5 or value >= 0.55
+		if lv == 6:
+			var podium := _place(i, front, 0.0, 3.0, 46.0, 24.0)
+			_add_block(podium, 46.0, 24.0, 7.0, MODERN_GREY, STYLE_SHOP, 0.0, SLATE, wall_list, roof_list)
+			var tower := _place(i, front, 0.0, 6.0, 26.0, 20.0)
+			var tower_pos: Vector3 = tower["pos"]
+			tower["pos"] = tower_pos + Vector3.UP * 7.0
+			var height := (rng.randi_range(9, 11) + extra) * 3.4
+			_add_block(tower, 26.0, 20.0, height, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+			_add_rooftop(tower, 26.0, 20.0, height, wall_list)
+		else:
+			for along in [-12.5, 12.5]:
+				var storeys := (rng.randi_range(5, 6) if lv == 4 else rng.randi_range(7, 8)) + extra
+				var spot := _place(i, front, along, 3.0, 23.0, 20.0)
+				var height := storeys * 3.4
+				var colour: Color = GLASS_FRAME if glass else colours[rng.randi_range(0, colours.size() - 1)]
+				_add_block(spot, 23.0, 20.0, height, colour, STYLE_GLASS if glass else STYLE_SHOP,
+					0.0, SLATE, wall_list, roof_list)
+				_add_rooftop(spot, 23.0, 20.0, height, wall_list)
+		_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+		# A multi-storey car park behind.
+		var deck := _place(i, front, 0.0, 28.0, 40.0, depth - 31.0)
+		_add_block(deck, 40.0, depth - 31.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+		return
 	var park_from := 17.0
 	if lv >= 3:
 		for along in [-12.5, 12.5]:
