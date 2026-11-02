@@ -273,7 +273,9 @@ func _process(delta: float) -> void:
 
 	# Time of day (only moves while the game is running).
 	if day_cycle:
-		time_of_day = fmod(time_of_day + delta * speed / Settings.DAY_SECONDS, 1.0)
+		# Nights pass about three times faster than days.
+		var rate := 1.0 + world.night * 2.0
+		time_of_day = fmod(time_of_day + delta * speed * rate / Settings.DAY_SECONDS, 1.0)
 	world.set_time_of_day(time_of_day)
 	hud.set_clock(_clock_text())
 	cars.lights_on = world.night > 0.3

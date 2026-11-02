@@ -1246,16 +1246,18 @@ func set_time_of_day(t: float) -> void:
 		sun.light_color = warm
 		sun.light_energy = lerpf(0.0, 1.25, smoothstep(-0.05, 0.15, height))
 	else:
-		# Moonlight: faint and blue, from high in the south-east.
-		sun.rotation_degrees = Vector3(-40.0, 150.0, 0.0)
-		sun.light_color = Color(0.55, 0.65, 1.0)
-		sun.light_energy = 0.12
+		# Bright, cool moonlight from high in the south-east, so you can keep
+		# building at night (as in most city builders).
+		sun.rotation_degrees = Vector3(-50.0, 150.0, 0.0)
+		sun.light_color = Color(0.66, 0.76, 1.0)
+		sun.light_energy = 0.55
 
-	env.ambient_light_energy = lerpf(0.15, 1.0, daylight)
-	env.background_energy_multiplier = lerpf(0.04, 1.0, daylight)
-	env.fog_light_color = Color(0.04, 0.06, 0.10).lerp(Color(0.72, 0.78, 0.86), daylight)
+	env.ambient_light_energy = lerpf(0.65, 1.0, daylight)
+	env.background_energy_multiplier = lerpf(0.35, 1.0, daylight)
+	env.fog_light_color = Color(0.18, 0.23, 0.34).lerp(Color(0.72, 0.78, 0.86), daylight)
+	env.tonemap_exposure = lerpf(1.0, 1.35, night)
 	# Dimming the sky itself makes Godot redo its lighting, so only do it in steps.
-	var sky_energy := lerpf(0.06, 1.0, daylight)
+	var sky_energy := lerpf(0.35, 1.0, daylight)
 	if absf(sky_energy - _sky_energy) > 0.04 and sky_material:
 		_sky_energy = sky_energy
 		sky_material.set("energy_multiplier", sky_energy)
