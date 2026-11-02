@@ -285,7 +285,7 @@ func max_level(t: int) -> int:
 func home_price(i: int) -> int:
 	# What a home on this plot would sell for: land value times the housing shortage.
 	_update_land_value()
-	var price := Settings.BASE_HOME_PRICE * (0.5 + land_value[i]) \
+	var price: float = Settings.BASE_HOME_PRICE * (0.5 + land_value[i]) \
 		* (1.0 + Settings.SHORTAGE_PRICE_EFFECT * shortage[Tile.HOMES])
 	return roundi(price / 1000.0) * 1000
 
