@@ -41,6 +41,10 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Each month, valuable plots that can build taller go first; then everything else grows in random order.
 - Re-zone by dragging a different density over an area; buildings trim to the new maximum.
 
+## Tall building design
+- Taller plots mix two families: classical sandstone (rusticated ground floor, sash windows in stone surrounds, bay windows, cornice, slate mansard with dormers; classical shopfronts for shops) and modern premium (glass ground floor, framed glazing with timber/bronze/stone bays, staggered glass balconies, set-back glass penthouse, roof canopy; all glass on the best land).
+- Courts between tall blocks are landscaped (lawn, path, trees) with parking underground.
+
 ## Density, land value and prices
 - Homes and shops grow to level 3 (low-rise) whenever there's demand. Industry stops at 3.
 - When demand is more than the low-rise plots can still take, the town is "short of space": the most valuable plots build upwards, to level 4 (5-6 storey mansion flats), 5 (7-9 storey modern flats) and 6 (towers up to 12 storeys). Levels 4/5/6 need land value 0.35/0.5/0.65.

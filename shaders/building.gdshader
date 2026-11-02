@@ -4,7 +4,9 @@
 //   COLOR            wall colour
 //   INSTANCE_CUSTOM  x = width, y = height, z = depth (metres), w = style
 //                    style 0 = house, 1 = shop, 2 = industry, 3 = flats, 4 = power plant,
-//                    5 = modern glass (bands of glazing with slim mullions)
+//                    5 = modern glass (bands of glazing with slim mullions),
+//                    6 = classical sandstone, 7 = modern framed glazing with clad bays,
+//                    8 = classical with shopfronts
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -41,7 +43,7 @@ void fragment() {
 	bool is_roof = local_normal.y > 0.5;
 
 	vec3 colour = wall_colour;
-	if (use_texture && style != 2 && style != 5) {
+	if (use_texture && style != 2 && style != 5 && style != 7) {
 		// Stone detail from the photo, keeping each building's own colour.
 		colour *= clamp(texture(wall_tex, vec2(u, v) / wall_texture_metres).rgb / wall_average, 0.3, 1.8);
 	} else {
@@ -55,6 +57,7 @@ void fragment() {
 	float rough = 0.85;
 	float metal = 0.0;
 	vec3 glow = vec3(0.0);
+	float sash_bar = 0.0;      // 1 on the white glazing bars of classical sash windows
 
 	if (!is_roof) {
 		float floor_h = style == 2 ? 6.0 : 3.0;
@@ -82,6 +85,68 @@ void fragment() {
 			storey = floor(v / floor_h);
 			window = cell_v > 0.14 && fract(u / 1.6) > 0.05 && below_top && v > 0.4;
 		}
+		if (style == 6 || style == 8) {
+			// Classical: a tall rusticated ground floor, then tall sash windows in
+			// lighter stone surrounds, with a string course at every floor.
+			float ground = 4.2;
+			floor_h = 3.4;
+			spacing = 2.7;
+			// Centre the window grid on the face, so no window is cut off at a corner.
+			float face_w = side_x ? size.z : size.x;
+			cell_u = fract((u - fract(face_w / spacing) * spacing * 0.5) / spacing);
+			if (v < ground) {
+				cell_v = v / ground;
+				storey = 0.0;
+				colour *= mix(0.8, 1.0, step(0.08, fract(v / 0.5)));   // rustication grooves
+				window = edge_margin && cell_u > 0.28 && cell_u < 0.72 && cell_v > 0.16 && cell_v < 0.8;
+				if (style == 8) {
+					// Shopfronts with a dark painted fascia above.
+					window = edge_margin && v > 0.5 && v < 3.2 && fract(u / 5.0) > 0.1;
+					if (v >= 3.2 && v < 3.8) {
+						colour = vec3(0.09, 0.14, 0.12);
+					}
+				}
+			} else {
+				float upper = v - ground;
+				cell_v = fract(upper / floor_h);
+				storey = 1.0 + floor(upper / floor_h);
+				window = edge_margin && below_top && cell_u > 0.31 && cell_u < 0.69 && cell_v > 0.18 && cell_v < 0.84;
+				bool surround = cell_u > 0.25 && cell_u < 0.75 && cell_v > 0.12 && cell_v < 0.9;
+				if (surround && !window && edge_margin && below_top) {
+					colour *= 1.2;
+				}
+				if (cell_v < 0.05) {
+					colour *= 1.15;   // string course
+				}
+				if (window) {
+					// Astragals: one upright and one cross bar per sash.
+					float wu = (cell_u - 0.31) / 0.38;
+					float wv = (cell_v - 0.18) / 0.66;
+					sash_bar = (abs(wu - 0.5) < 0.05 || abs(wv - 0.5) < 0.035) ? 1.0 : 0.0;
+				}
+			}
+		}
+		if (style == 7) {
+			// Modern premium: storey-high glazing between slim light frames, every
+			// third bay clad (timber, bronze or stone = the wall colour), white slab edges.
+			floor_h = 3.2;
+			spacing = 2.4;
+			float face_w = side_x ? size.z : size.x;
+			float u_c = u - fract(face_w / spacing) * spacing * 0.5;
+			cell_u = fract(u_c / spacing);
+			cell_v = fract(v / floor_h);
+			storey = floor(v / floor_h);
+			float bay = floor(u_c / spacing);
+			bool clad = mod(bay, 3.0) < 1.0;
+			bool slab_edge = cell_v < 0.09;
+			bool frame_line = cell_u < 0.05;
+			window = !clad && !slab_edge && !frame_line && below_top;
+			if (slab_edge || frame_line) {
+				colour = vec3(0.88, 0.88, 0.86);
+			} else if (clad) {
+				colour = wall_colour * (0.92 + 0.12 * hash(vec2(bay, storey)));   // panel to panel variation
+			}
+		}
 		if (style == 1 && storey < 0.5) {
 			// Shop front: a big glass window along the ground floor with a fascia above.
 			window = edge_margin && v > 0.4 && v < 2.5;
@@ -96,11 +161,16 @@ void fragment() {
 			colour = mix(vec3(0.07, 0.09, 0.12), vec3(0.32, 0.30, 0.26), step(0.85, which));
 			rough = 0.08;
 			metal = 0.3;
-			if (style == 5) {
+			if (style == 5 || style == 7) {
 				// Tinted glass that reflects the sky, slightly varied pane to pane.
 				colour = mix(vec3(0.10, 0.17, 0.24), vec3(0.16, 0.24, 0.30), which);
 				rough = 0.04;
 				metal = 0.65;
+			}
+			if (sash_bar > 0.5) {
+				colour = vec3(0.86, 0.85, 0.80);   // painted timber glazing bars
+				rough = 0.6;
+				metal = 0.0;
 			}
 			// At night, about half the windows are lit, in slightly different warm tones.
 			float lit = step(0.45, hash(window_id + vec2(3.7, 1.3)));
@@ -109,8 +179,8 @@ void fragment() {
 				lit = 1.0;   // shop windows stay lit
 				lamp = vec3(1.0, 0.92, 0.78);
 			}
-			glow = lamp * lit * night * 2.2;
-		} else if (cell_v < 0.32 && cell_v > 0.26 && style != 2 && style != 4 && edge_margin && cell_u > 0.18 && cell_u < 0.82) {
+			glow = lamp * lit * night * 2.2 * (1.0 - sash_bar);
+		} else if (cell_v < 0.32 && cell_v > 0.26 && (style < 2 || style == 3) && edge_margin && cell_u > 0.18 && cell_u < 0.82) {
 			// Stone sill under each window.
 			colour *= 1.25;
 		}

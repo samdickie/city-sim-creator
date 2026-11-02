@@ -59,6 +59,17 @@ const STYLE_INDUSTRY := 2
 const STYLE_FLATS := 3
 const STYLE_PLANT := 4
 const STYLE_GLASS := 5         # modern glass and steel (on the most valuable land)
+const STYLE_CLASSICAL := 6     # sandstone: rusticated base, sash windows, string courses
+const STYLE_MODERN := 7        # storey-high glazing in light frames, with clad bays
+const STYLE_CLASSICAL_SHOPS := 8   # classical with shopfronts on the ground floor
+const HONEY_STONE := Color(0.84, 0.71, 0.50)
+const CREAM_STONE := Color(0.88, 0.84, 0.74)
+const TRIM := Color(0.93, 0.91, 0.86)          # cornices, canopies, frames
+const TIMBER := Color(0.56, 0.38, 0.23)
+const BRONZE := Color(0.33, 0.27, 0.21)
+const CHARCOAL := Color(0.22, 0.23, 0.25)
+const BALCONY_GLASS := Color(0.55, 0.66, 0.72)
+const LAWN := Color(0.33, 0.52, 0.24)
 const MODERN_WHITE := Color(0.92, 0.92, 0.90)
 const MODERN_GREY := Color(0.55, 0.57, 0.60)
 const GLASS_FRAME := Color(0.30, 0.33, 0.36)
@@ -97,6 +108,7 @@ var _paving_items: Array = []
 var _prop_items: Array = []
 var _parked_items: Array = []
 var _values := PackedFloat32Array()   # land value per tile, for building quality
+var _extra_trees: Array = []          # [position (Vector2), height] planted in courts
 # Leftover open land inside the town gets put to use (looks only, not simulated):
 var _infill := PackedByteArray()      # 0 = none, 1 = pocket park, 2 = allotments, 3 = car park
 const INFILL_PARK := 1
@@ -543,6 +555,7 @@ func refresh_buildings() -> void:
 	_paving_items.clear()
 	_prop_items.clear()
 	_parked_items.clear()
+	_extra_trees.clear()
 	_values = sim.land_value_map()
 	for i in tiles.size():
 		var t := tiles[i]
@@ -994,6 +1007,18 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 				_parked_car(i, side, drive_along, 3.5, rng.randf() < 0.3, rng)
 			_prop(i, side, house_along, 3.2, w, 0.8, 1.1, green)
 		return
+	if lv >= 4:
+		# Tall plots: a classical block and a modern one along this street too.
+		var classical_left: bool = rng.randf() < 0.5
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, side, along, 3.0, 21.0, 13.0)
+			if (along < 0.0) == classical_left:
+				_classical_block(spot, 21.0, 13.0, rng.randi_range(5, 6), _classical_stone(rng),
+					t == Tile.SHOPS, t == Tile.HOMES, wall_list, roof_list)
+			else:
+				_modern_block(spot, 21.0, 13.0, rng.randi_range(6, 8) + roundi(value * 2.0),
+					_modern_cladding(rng), value >= 0.6, wall_list, roof_list)
+		return
 	# Flats or shops along the street: storeys follow the plot's level.
 	var storeys := 3
 	var colour := RED_SANDSTONE if rng.randf() < 0.5 else BLONDE_SANDSTONE
@@ -1246,52 +1271,150 @@ func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGene
 
 func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: float,
 		rng: RandomNumberGenerator, wall_list: Array, roof_list: Array) -> void:
-	# Building upwards where space is short. Better land gets better buildings:
-	# sandstone mansion flats, then modern flats, then glass towers by the sea.
-	var extra := roundi(value * 2.0)          # valuable land squeezes in an extra floor or two
-	var court_back := depth - 17.0
+	# Building upwards where space is short or zoned high. A mix of classical
+	# sandstone (bays, cornices, mansard roofs) and modern premium (glazing,
+	# timber and bronze, balconies, penthouses), around a landscaped court.
+	var extra: int = roundi(value * 2.0)       # valuable land squeezes in a floor or two
+	var court_back: float = depth - 17.0
+	var glassy: bool = value >= 0.6
 	if lv == 4:
-		# Mansion flats: 5-6 storey red or blonde sandstone, front and back, slate roofs.
+		# Mansion flats: classical sandstone, 5-6 storeys, front and back.
 		for row_back: float in [3.0, court_back]:
 			for along: float in [-12.5, 12.5]:
-				var stone := RED_SANDSTONE if rng.randf() < 0.5 else BLONDE_SANDSTONE
-				var storeys := rng.randi_range(5, 6)
-				var spot := _place(i, front, along, row_back, 22.0, 14.0)
-				_add_block(spot, 22.0, 14.0, storeys * 3.1 + 0.5, stone, STYLE_FLATS, 5.0, SLATE,
-					wall_list, roof_list)
+				var spot := _place(i, front, along, row_back, 21.0, 13.0)
+				_classical_block(spot, 21.0, 13.0, rng.randi_range(5, 6), _classical_stone(rng),
+					false, true, wall_list, roof_list)
 	elif lv == 5:
-		# Modern flats: 7-9 storeys, white or grey render (glass on the best land), flat roofs.
-		for row_back: float in [3.0, court_back]:
-			for along: float in [-12.5, 12.5]:
-				var storeys := rng.randi_range(6, 7) + extra
-				var glass := value >= 0.6
-				var colour := GLASS_FRAME if glass else (MODERN_WHITE if rng.randf() < 0.6 else MODERN_GREY)
-				var spot := _place(i, front, along, row_back, 21.0, 14.0)
-				var height := storeys * 3.1 + 0.6
-				_add_block(spot, 21.0, 14.0, height, colour, STYLE_GLASS if glass else STYLE_FLATS,
-					0.0, SLATE, wall_list, roof_list)
-				_add_rooftop(spot, 21.0, 14.0, height, wall_list)
+		# A street of mixed character: classical and modern side by side, 6-9 storeys.
+		var first_classical: bool = rng.randf() < 0.5
+		for row: int in 2:
+			var row_back: float = 3.0 if row == 0 else court_back
+			for k: int in 2:
+				var along: float = -12.5 if k == 0 else 12.5
+				var spot := _place(i, front, along, row_back, 21.0, 13.0)
+				if (k == 0) == first_classical and row == 0:
+					_classical_block(spot, 21.0, 13.0, rng.randi_range(6, 7), _classical_stone(rng),
+						false, true, wall_list, roof_list)
+				else:
+					_modern_block(spot, 21.0, 13.0, rng.randi_range(7, 8) + extra, _modern_cladding(rng),
+						glassy, wall_list, roof_list)
 	else:
-		# Towers: 9-12 storeys on a podium, glass on valuable land, set diagonally
-		# across the plot so they don't block each other's light.
-		for k in 2:
-			var along := -11.0 if k == 0 else 11.0
-			var row_back := 4.0 if k == 0 else court_back - 4.0
-			var storeys := rng.randi_range(8, 10) + extra
-			var glass := value >= 0.55
-			var colour := GLASS_FRAME if glass else MODERN_WHITE
-			var spot := _place(i, front, along, row_back, 20.0, 18.0)
-			var height := storeys * 3.1 + 0.8
-			_add_block(spot, 20.0, 18.0, height, colour, STYLE_GLASS if glass else STYLE_FLATS,
-				0.0, SLATE, wall_list, roof_list)
-			_add_rooftop(spot, 20.0, 18.0, height, wall_list)
-	# Front pavement and a landscaped court between the blocks, with parking.
+		# A slender modern tower beside a classical block, and a second tower behind,
+		# set diagonally so each has views and light.
+		var classical := _place(i, front, -13.0, 3.0, 20.0, 13.0)
+		_classical_block(classical, 20.0, 13.0, rng.randi_range(6, 7), _classical_stone(rng),
+			false, true, wall_list, roof_list)
+		var tower := _place(i, front, 12.0, 3.0, 17.0, 16.0)
+		_modern_block(tower, 17.0, 16.0, rng.randi_range(12, 14) + extra * 2, _modern_cladding(rng),
+			glassy, wall_list, roof_list)
+		var back_tower := _place(i, front, -10.0, court_back - 3.0, 17.0, 16.0)
+		_modern_block(back_tower, 17.0, 16.0, rng.randi_range(10, 12) + extra, _modern_cladding(rng),
+			glassy, wall_list, roof_list)
+	_premium_court(i, front, 17.5, court_back - 1.0, rng)
+
+
+func _classical_stone(rng: RandomNumberGenerator) -> Color:
+	var stones := [HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE, CREAM_STONE, HONEY_STONE]
+	var c: Color = stones[rng.randi_range(0, stones.size() - 1)]
+	return c.darkened(rng.randf_range(-0.03, 0.05))
+
+
+func _modern_cladding(rng: RandomNumberGenerator) -> Color:
+	var options := [TIMBER, BRONZE, CREAM_STONE, CHARCOAL, TIMBER]
+	var c: Color = options[rng.randi_range(0, options.size() - 1)]
+	return c
+
+
+func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone: Color,
+		shops: bool, bays: bool, wall_list: Array, roof_list: Array, mansard: bool = true) -> void:
+	# Sandstone: tall rusticated ground floor, sash windows in stone surrounds,
+	# full-height bay windows, a cornice and a slate mansard roof with dormers.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var h: float = 4.2 + (storeys - 1) * 3.4 + 0.6
+	var style: int = STYLE_CLASSICAL_SHOPS if shops else STYLE_CLASSICAL
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * h, z_axis * d), pos), stone,
+		Color(w, h, d, style)])
+	# Cornice: a lighter projecting band along the top.
+	var trim: Color = stone.lightened(0.15)
+	wall_list.append([Transform3D(Basis(x_axis * (w + 1.0), Vector3.UP * 0.9, z_axis * (d + 1.0)),
+		pos + Vector3.UP * h), trim, Color(w + 1.0, 0.9, d + 1.0, STYLE_PLANT)])
+	if not mansard:
+		return   # a podium: something else stands on top
+	# Mansard roof.
+	roof_list.append([Transform3D(Basis(x_axis * (w - 0.4), Vector3.UP * 4.0, z_axis * (d - 0.4)),
+		pos + Vector3.UP * (h + 0.9)), SLATE])
+	# Dormers along the front slope.
+	var dormers: int = maxi(2, int(w / 5.5))
+	for k: int in dormers:
+		var along: float = -w * 0.5 + (k + 0.5) * w / dormers
+		var at: Vector3 = pos + Vector3.UP * (h + 1.2) + x_axis * along - z_axis * (d * 0.5 - 2.4)
+		wall_list.append([Transform3D(Basis(x_axis * 1.8, Vector3.UP * 2.0, z_axis * 1.6), at),
+			GLASS_FRAME, Color(1.8, 2.0, 1.6, STYLE_GLASS)])
+	if bays and not shops:
+		# Two canted bays up the front, from the first floor to the cornice.
+		for side: float in [-0.25, 0.25]:
+			var at: Vector3 = pos + x_axis * (w * side) - z_axis * (d * 0.5 + 0.65) + Vector3.UP * 4.2
+			wall_list.append([Transform3D(Basis(x_axis * 3.6, Vector3.UP * (h - 4.2), z_axis * 1.3), at),
+				stone, Color(3.6, h - 4.2, 1.3, STYLE_CLASSICAL)])
+
+
+func _modern_block(spot: Dictionary, w: float, d: float, storeys: int, cladding: Color,
+		glassy: bool, wall_list: Array, roof_list: Array) -> void:
+	# Modern premium: a glass ground floor, framed glazing with clad bays (or all
+	# glass on the very best land), staggered glass balconies, a set-back
+	# penthouse and a thin roof canopy.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var base_h: float = 4.6
+	var body_floors: int = maxi(storeys - 3, 1)
+	var body_h: float = body_floors * 3.2
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * base_h, z_axis * d), pos),
+		GLASS_FRAME, Color(w, base_h, d, STYLE_GLASS)])
+	var body_style: int = STYLE_GLASS if glassy else STYLE_MODERN
+	var body_colour: Color = GLASS_FRAME if glassy else cladding
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * body_h, z_axis * d), pos + Vector3.UP * base_h),
+		body_colour, Color(w, body_h, d, body_style)])
+	# Balconies on alternate sides, floor by floor: a slab and a glass balustrade.
+	for f: int in body_floors:
+		var y: float = base_h + f * 3.2
+		var along: float = w * (0.22 if f % 2 == 0 else -0.22)
+		var at: Vector3 = pos + Vector3.UP * y + x_axis * along - z_axis * (d * 0.5 + 0.8)
+		_prop_items.append([Transform3D(Basis(x_axis * (w * 0.44), Vector3.UP * 0.22, z_axis * 1.6), at), TRIM])
+		_prop_items.append([Transform3D(Basis(x_axis * (w * 0.44), Vector3.UP * 1.05, z_axis * 0.08),
+			at + Vector3.UP * 0.22 - z_axis * 0.76), BALCONY_GLASS])
+	# Penthouse: two floors set back, all glass, under a light canopy.
+	var top: float = base_h + body_h
+	var pw: float = w - 5.0
+	var pd: float = d - 4.0
+	var penthouse_at: Vector3 = pos + Vector3.UP * top + z_axis * 1.0
+	wall_list.append([Transform3D(Basis(x_axis * pw, Vector3.UP * 6.4, z_axis * pd), penthouse_at),
+		GLASS_FRAME, Color(pw, 6.4, pd, STYLE_GLASS)])
+	wall_list.append([Transform3D(Basis(x_axis * (pw + 3.0), Vector3.UP * 0.45, z_axis * (pd + 2.5)),
+		penthouse_at + Vector3.UP * 6.4), TRIM, Color(pw + 3.0, 0.45, pd + 2.5, STYLE_PLANT)])
+	# Roof terrace edge on the main roof.
+	_prop_items.append([Transform3D(Basis(x_axis * w, Vector3.UP * 1.0, z_axis * 0.1),
+		pos + Vector3.UP * top - z_axis * (d * 0.5 - 0.05)), BALCONY_GLASS])
+
+
+func _premium_court(i: int, front: Vector2i, from: float, to: float, rng: RandomNumberGenerator) -> void:
+	# A landscaped court between the blocks (parking goes underground): lawn,
+	# a path through the middle and trees.
 	_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
-	_slab(i, front, 0.0, 18.0, 48.0, court_back - 19.0, COURT)
-	var mid := (18.0 + court_back) * 0.5 - 2.2
-	for k in 7:
-		if rng.randf() < 0.65:
-			_parked_car(i, front, -18.0 + k * 6.0, mid, rng.randf() < 0.5, rng)
+	if to - from < 4.0:
+		return
+	_slab(i, front, 0.0, from, 46.0, to - from, LAWN)
+	_slab(i, front, 0.0, from, 2.4, to - from, PAVEMENT, 0.02)
+	for k: int in 6:
+		var along: float = rng.randf_range(-20.0, 20.0)
+		if absf(along) < 3.0:
+			along += 6.0
+		var back: float = rng.randf_range(from + 2.0, to - 2.0)
+		var spot := _place(i, front, along, back, 1.0, 1.0)
+		var at: Vector3 = spot["pos"]
+		_extra_trees.append([Vector2(at.x, at.z), rng.randf_range(7.0, 10.0)])
 
 
 func _add_rooftop(spot: Dictionary, w: float, d: float, h: float, wall_list: Array) -> void:
@@ -1309,27 +1432,30 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	var depth := _depth(i, front)
 	var value := _values[i] if i < _values.size() else 0.3
 	if lv >= 4:
-		# Offices above shops: 5-6 storeys at level 4, 7-9 at 5, a 10-14 storey tower at 6.
-		var extra := roundi(value * 2.0)
-		var glass := lv >= 5 or value >= 0.55
-		if lv == 6:
-			var podium := _place(i, front, 0.0, 3.0, 46.0, 24.0)
-			_add_block(podium, 46.0, 24.0, 7.0, MODERN_GREY, STYLE_SHOP, 0.0, SLATE, wall_list, roof_list)
-			var tower := _place(i, front, 0.0, 6.0, 26.0, 20.0)
-			var tower_pos: Vector3 = tower["pos"]
-			tower["pos"] = tower_pos + Vector3.UP * 7.0
-			var height := (rng.randi_range(9, 11) + extra) * 3.4
-			_add_block(tower, 26.0, 20.0, height, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
-			_add_rooftop(tower, 26.0, 20.0, height, wall_list)
-		else:
+		# Classical commercial buildings with shopfronts; then a classical block
+		# beside a modern office; then a glass office tower over a classical podium.
+		var extra: int = roundi(value * 2.0)
+		var glassy: bool = value >= 0.55
+		if lv == 4:
 			for along: float in [-12.5, 12.5]:
-				var storeys := (rng.randi_range(5, 6) if lv == 4 else rng.randi_range(7, 8)) + extra
-				var spot := _place(i, front, along, 3.0, 23.0, 20.0)
-				var height := storeys * 3.4
-				var colour: Color = GLASS_FRAME if glass else colours[rng.randi_range(0, colours.size() - 1)]
-				_add_block(spot, 23.0, 20.0, height, colour, STYLE_GLASS if glass else STYLE_SHOP,
-					0.0, SLATE, wall_list, roof_list)
-				_add_rooftop(spot, 23.0, 20.0, height, wall_list)
+				var spot := _place(i, front, along, 3.0, 23.0, 18.0)
+				_classical_block(spot, 23.0, 18.0, rng.randi_range(5, 6), _classical_stone(rng),
+					true, false, wall_list, roof_list)
+		elif lv == 5:
+			var left := _place(i, front, -12.5, 3.0, 23.0, 18.0)
+			_classical_block(left, 23.0, 18.0, rng.randi_range(5, 6), _classical_stone(rng),
+				true, false, wall_list, roof_list)
+			var right := _place(i, front, 12.5, 3.0, 23.0, 18.0)
+			_modern_block(right, 23.0, 18.0, rng.randi_range(8, 9) + extra, _modern_cladding(rng),
+				glassy, wall_list, roof_list)
+		else:
+			var podium := _place(i, front, 0.0, 3.0, 46.0, 22.0)
+			_classical_block(podium, 46.0, 22.0, 3, _classical_stone(rng), true, false, wall_list, roof_list, false)
+			var tower := _place(i, front, 0.0, 6.0, 24.0, 16.0)
+			var tower_pos: Vector3 = tower["pos"]
+			tower["pos"] = tower_pos + Vector3.UP * (4.2 + 2 * 3.4 + 0.6 + 0.9)
+			_modern_block(tower, 24.0, 16.0, rng.randi_range(10, 12) + extra * 2, _modern_cladding(rng),
+				true, wall_list, roof_list)
 		_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
 		# A multi-storey car park behind.
 		var deck := _place(i, front, 0.0, 28.0, 40.0, depth - 31.0)
@@ -1574,6 +1700,15 @@ func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
 			var parts := _tree_parts(spot, rng.randf_range(6.0, 11.0), false, rng)
 			trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
 			crown_items.append([parts[1], parts[2]])
+	# Trees planted in landscaped courts.
+	var court_rng := RandomNumberGenerator.new()
+	court_rng.seed = 7
+	for tree in _extra_trees:
+		var at: Vector2 = tree[0]
+		var tall: float = tree[1]
+		var parts := _tree_parts(at, tall, false, court_rng)
+		trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
+		crown_items.append([parts[1], parts[2]])
 	# Street trees along straight roads, on any side not taken by a building plot.
 	for i in tiles.size():
 		if tiles[i] != Tile.ROAD:
