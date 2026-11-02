@@ -152,6 +152,25 @@ var _tree_conifer := PackedByteArray()
 var _tree_crown_idx := PackedInt32Array()
 var _trees_in_tile := {}                       # tile index -> Array of tree numbers
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
+# --- Map overlays (land value, power, roads, growth) ---
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH }
+enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
+const OV_RED := Color(0.88, 0.24, 0.18)
+const OV_ORANGE := Color(0.96, 0.52, 0.18)
+const OV_YELLOW := Color(0.97, 0.80, 0.22)
+const OV_LIGHT_GREEN := Color(0.58, 0.84, 0.32)
+const OV_GREEN := Color(0.18, 0.70, 0.30)
+const OV_BLUE := Color(0.30, 0.56, 0.95)
+const OV_GREY := Color(0.55, 0.56, 0.58)
+const OV_DARK_YELLOW := Color(0.62, 0.52, 0.16)
+var overlay: int = Overlay.NONE
+var overlay_image: Image
+var overlay_texture: ImageTexture
+var roof_material: ShaderMaterial
+var _wall_owner := PackedInt32Array()     # which plot each wall belongs to
+var _wall_base := PackedColorArray()      # each wall's own colour
+var _roof_owner := PackedInt32Array()
+var _roof_base := PackedColorArray()
 var _hidden := Transform3D(Basis.from_scale(Vector3(0.001, 0.001, 0.001)), Vector3(0, -500, 0))
 
 
@@ -264,12 +283,15 @@ func _build_terrain() -> void:
 	zone_texture = ImageTexture.create_from_image(zone_image)
 	warn_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
 	warn_texture = ImageTexture.create_from_image(warn_image)
+	overlay_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
+	overlay_texture = ImageTexture.create_from_image(overlay_image)
 
 	terrain_material = ShaderMaterial.new()
 	terrain_material.shader = TERRAIN_SHADER
 	terrain_material.set_shader_parameter("map_size", Vector2(map_w, map_h) * cell)
 	terrain_material.set_shader_parameter("zone_map", zone_texture)
 	terrain_material.set_shader_parameter("warn_map", warn_texture)
+	terrain_material.set_shader_parameter("overlay_map", overlay_texture)
 	var grass := _optional_texture("grass")
 	var sand := _optional_texture("sand")
 	var rock := _optional_texture("rock")
@@ -324,6 +346,7 @@ func _build_city_nodes() -> void:
 	add_child(walls)
 
 	var roof_mat := ShaderMaterial.new()
+	roof_material = roof_mat
 	roof_mat.shader = ROOF_SHADER
 	var slate := _optional_texture("slate")
 	if slate:
@@ -504,6 +527,8 @@ func refresh_ground(layout_changed: bool = true) -> void:
 	zone_texture.update(zone_image)
 	warn_texture.update(warn_image)
 	_build_alerts()
+	if overlay != Overlay.NONE:
+		_paint_overlay()
 	if layout_changed:
 		_build_roads(tiles)
 		_build_power_lines(tiles)
@@ -574,9 +599,13 @@ func refresh_buildings() -> void:
 	_parked_items.clear()
 	_extra_trees.clear()
 	_values = sim.land_value_map()
+	_wall_owner.clear()
+	_roof_owner.clear()
 	for i in tiles.size():
 		var t := tiles[i]
 		var lv := levels[i]
+		var walls_before := wall_list.size()
+		var roofs_before := roof_list.size()
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0:
@@ -585,8 +614,16 @@ func refresh_buildings() -> void:
 			_plan_site(i, t, wall_list)
 		elif t == Tile.EMPTY and _infill[i] > 0:
 			_plan_infill(i)
+		for n in wall_list.size() - walls_before:
+			_wall_owner.append(i)
+		for n in roof_list.size() - roofs_before:
+			_roof_owner.append(i)
 	_fill(walls.multimesh, wall_list, true)
 	_fill(roofs.multimesh, roof_list, false)
+	_wall_base = _colours_of(wall_list)
+	_roof_base = _colours_of(roof_list)
+	if overlay != Overlay.NONE:
+		_recolour_buildings()
 	_fill(chimneys.multimesh, chimney_list, false)
 	_fill(paving.multimesh, _paving_items, false)
 	_fill(props.multimesh, _prop_items, false)
@@ -600,6 +637,15 @@ func refresh_buildings() -> void:
 	_build_city_trees(tiles, levels)
 
 
+func _colours_of(items: Array) -> PackedColorArray:
+	var out := PackedColorArray()
+	out.resize(items.size())
+	for n in items.size():
+		var item: Array = items[n]
+		out[n] = item[1]
+	return out
+
+
 func _fill(mm: MultiMesh, items: Array, custom: bool) -> void:
 	mm.instance_count = items.size()
 	for n in items.size():
@@ -608,6 +654,127 @@ func _fill(mm: MultiMesh, items: Array, custom: bool) -> void:
 		mm.set_instance_color(n, item[1])
 		if custom:
 			mm.set_instance_custom_data(n, item[2])
+
+
+# ------------------------------------------------------------------ overlays
+
+func set_overlay(kind: int) -> void:
+	# Colour the map by land value, power, road access or growth (NONE = normal view).
+	overlay = kind
+	var on := kind != Overlay.NONE
+	terrain_material.set_shader_parameter("overlay_on", on)
+	wall_material.set_shader_parameter("overlay_on", on)
+	roof_material.set_shader_parameter("overlay_on", on)
+	# Trees, paving and parked cars would hide the colours on the ground.
+	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
+			trunks, crowns, cones, city_trunks, city_crowns]:
+		node.visible = not on
+	if on:
+		_paint_overlay()
+	else:
+		_recolour_buildings()
+
+
+func overlay_legend(kind: int) -> Array:
+	# [[colour, label], ...] for the key on screen.
+	match kind:
+		Overlay.LAND_VALUE:
+			return [[OV_GREEN, "Very high"], [OV_LIGHT_GREEN, "High"], [OV_YELLOW, "Average"],
+				[OV_ORANGE, "Low"], [OV_RED, "Very low"]]
+		Overlay.POWER:
+			return [[OV_YELLOW, "Has power"], [OV_DARK_YELLOW, "Carries power"],
+				[OV_RED, "Zone with no power"], [OV_GREY, "Not connected"]]
+		Overlay.ROADS:
+			return [[OV_GREY, "Road"], [OV_GREEN, "Next to a road"],
+				[OV_LIGHT_GREEN, "Near enough to grow"], [OV_RED, "Zone too far from a road"]]
+		Overlay.GROWTH:
+			return [[OV_GREEN, "Growing"], [OV_YELLOW, "Waiting (demand, space or land value)"],
+				[OV_RED, "Stuck (needs a road or power)"], [OV_BLUE, "Fully built"]]
+	return []
+
+
+func _paint_overlay() -> void:
+	var tiles: PackedByteArray = sim.tiles
+	var values: PackedFloat32Array = sim.land_value_map()
+	var power: PackedByteArray = sim.power_map()
+	var reach: PackedByteArray = sim.road_reach_map()
+	for y in map_h:
+		for x in map_w:
+			var i := y * map_w + x
+			overlay_image.set_pixel(x, y, _overlay_colour(i, tiles[i], values, power, reach))
+	overlay_texture.update(overlay_image)
+	_recolour_buildings()
+
+
+func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedByteArray,
+		reach: PackedByteArray) -> Color:
+	var none := Color(0, 0, 0, 0)
+	if water[i] == 1:
+		return none
+	var zone := t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
+	match overlay:
+		Overlay.LAND_VALUE:
+			# Bands match the hover text and the land value tall buildings need.
+			var v := values[i]
+			var c := OV_RED
+			if v >= 0.65:
+				c = OV_GREEN
+			elif v >= 0.5:
+				c = OV_LIGHT_GREEN
+			elif v >= 0.35:
+				c = OV_YELLOW
+			elif v >= 0.2:
+				c = OV_ORANGE
+			return Color(c, 0.85)
+		Overlay.POWER:
+			if t == Tile.EMPTY:
+				return none
+			if zone:
+				return Color(OV_YELLOW if power[i] == 1 else OV_RED, 0.9)
+			return Color(OV_DARK_YELLOW if power[i] == 1 else OV_GREY, 0.8)
+		Overlay.ROADS:
+			if t == Tile.ROAD:
+				return Color(OV_GREY, 0.8)
+			if reach[i] == 1:
+				return Color(OV_GREEN, 0.8)
+			if reach[i] <= Settings.ROAD_REACH:
+				return Color(OV_LIGHT_GREEN, 0.7)
+			if zone:
+				return Color(OV_RED, 0.9)
+			return none
+		Overlay.GROWTH:
+			if not zone:
+				return none
+			var state: int = sim.growth_state(i)
+			match state:
+				Growth.GROWING:
+					return Color(OV_GREEN, 0.9)
+				Growth.WAITING:
+					return Color(OV_YELLOW, 0.9)
+				Growth.BLOCKED:
+					return Color(OV_RED, 0.9)
+				Growth.FULL:
+					return Color(OV_BLUE, 0.9)
+	return none
+
+
+func _recolour_buildings() -> void:
+	# In an overlay, each building takes its plot's colour; otherwise its own.
+	_recolour(walls.multimesh, _wall_owner, _wall_base)
+	_recolour(roofs.multimesh, _roof_owner, _roof_base)
+
+
+func _recolour(mm: MultiMesh, owners: PackedInt32Array, base: PackedColorArray) -> void:
+	var count := mini(mini(owners.size(), base.size()), mm.instance_count)
+	for n in count:
+		if overlay == Overlay.NONE:
+			mm.set_instance_color(n, base[n])
+			continue
+		var i := owners[n]
+		var c := overlay_image.get_pixel(i % map_w, i / map_w)
+		# Buildings use linear colour; the image is in sRGB like the ground.
+		mm.set_instance_color(n, OV_GREY.srgb_to_linear() if c.a < 0.05 \
+			else Color(c.r, c.g, c.b).srgb_to_linear())
 
 
 # ------------------------------------------------------------------- hover

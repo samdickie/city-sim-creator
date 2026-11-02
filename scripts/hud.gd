@@ -4,6 +4,7 @@ extends CanvasLayer
 ##   Top right:     money, budget, people, power, tax, demand
 ##   Bottom centre: building tools with prices
 ##   Bottom left:   what's under the mouse, and messages
+##   Bottom right:  map overlays (land value, power, roads, growth) and their key
 ## It only displays things and reports button presses; the game decides what they do.
 
 signal tool_chosen(tool_id: int)
@@ -14,6 +15,7 @@ signal new_city_pressed
 signal save_pressed
 signal load_pressed
 signal day_cycle_toggled(on: bool)
+signal overlay_chosen(kind: int)
 
 const Settings = preload("res://scripts/settings.gd")
 
@@ -22,6 +24,12 @@ const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth"]
+const OVERLAY_TIPS := ["The normal view",
+	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
+	"Which plots have electricity, and what carries it",
+	"How far each plot is from a road (zones need one within 2 tiles)",
+	"Why each zone is or isn't growing"]
 
 var tool_buttons := {}
 var density_buttons := {}
@@ -40,6 +48,8 @@ var info_label: Label
 var message_label: Label
 var help_panel: PanelContainer
 var demand_box: Control
+var overlay_buttons := {}
+var legend_box: VBoxContainer
 var confirm_new: ConfirmationDialog
 var _message_time := 0.0
 var _sim                         # read for the demand bars
@@ -59,6 +69,7 @@ func build(tools: Array, demand_colours: Dictionary, sim) -> void:
 	_build_top_right(root)
 	_build_toolbar(root, tools)
 	_build_info(root)
+	_build_overlays(root)
 	_build_help(root)
 
 	confirm_new = ConfirmationDialog.new()
@@ -239,6 +250,53 @@ func _build_info(root: Control) -> void:
 	box.add_child(message_label)
 
 
+func _build_overlays(root: Control) -> void:
+	var panel := _panel(root)
+	panel.anchor_left = 1.0
+	panel.anchor_right = 1.0
+	panel.anchor_top = 1.0
+	panel.anchor_bottom = 1.0
+	panel.offset_left = -20.0
+	panel.offset_right = -20.0
+	panel.offset_top = -116.0      # above the toolbar
+	panel.offset_bottom = -116.0
+	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var box := _vbox(panel)
+	box.add_child(_label("Map view (O)", 13, TEXT_DIM))
+	for kind in OVERLAY_NAMES.size():
+		var b := _button(OVERLAY_NAMES[kind], true)
+		b.custom_minimum_size = Vector2(150, 0)
+		b.tooltip_text = OVERLAY_TIPS[kind]
+		b.pressed.connect(func(): overlay_chosen.emit(kind))
+		box.add_child(b)
+		overlay_buttons[kind] = b
+	legend_box = VBoxContainer.new()
+	legend_box.add_theme_constant_override("separation", 4)
+	box.add_child(legend_box)
+
+
+func set_overlay(kind: int, legend: Array) -> void:
+	# Highlight the chosen view and show its colour key.
+	for k in overlay_buttons:
+		(overlay_buttons[k] as Button).set_pressed_no_signal(k == kind)
+	for child in legend_box.get_children():
+		child.queue_free()
+	for entry in legend:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var swatch := ColorRect.new()
+		swatch.color = entry[0]
+		swatch.custom_minimum_size = Vector2(14, 14)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(swatch)
+		var text := _label(entry[1], 13, TEXT)
+		text.custom_minimum_size = Vector2(130, 0)
+		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(text)
+		legend_box.add_child(row)
+
+
 func _build_help(root: Control) -> void:
 	help_panel = _panel(root)
 	help_panel.anchor_left = 0.5
@@ -259,7 +317,8 @@ func _build_help(root: Control) -> void:
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
-		"Tools: keys 1-9     Pause: Space     Fast: F     Help: H\n\n" +
+		"Tools: keys 1-9     Pause: Space     Fast: F     Help: H\n" +
+		"Map views: O, or the buttons bottom right (land value, power, roads, growth)\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +

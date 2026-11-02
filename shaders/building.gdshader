@@ -15,6 +15,7 @@ uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, rep
 uniform float wall_texture_metres = 3.0;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);   // the stone photo's average colour (linear)
 uniform float night = 0.0;                                // 0 = day, 1 = night: lights come on
+uniform bool overlay_on = false;   // map overlay: COLOR is the plot's overlay colour
 
 varying vec3 local_pos;
 varying vec3 local_normal;
@@ -186,6 +187,13 @@ void fragment() {
 		}
 	}
 
+	if (overlay_on) {
+		// Map overlay: the plot's colour dominates (windows still show faintly).
+		colour = mix(colour, wall_colour, 0.75);
+		glow = glow * 0.2 + wall_colour * 0.15;
+		metal = 0.0;
+		rough = 0.8;
+	}
 	ALBEDO = colour;
 	ROUGHNESS = rough;
 	METALLIC = metal;

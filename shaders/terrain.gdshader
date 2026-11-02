@@ -8,6 +8,8 @@ uniform vec2 map_size = vec2(7000.0, 6500.0);      // playable area in metres
 uniform sampler2D zone_map : source_color, filter_nearest;  // zone tint per tile (alpha = strength)
 uniform sampler2D warn_map : filter_nearest;        // R = no road, G = no power
 uniform float time_now = 0.0;
+uniform sampler2D overlay_map : source_color, filter_nearest;  // map overlay colour per tile
+uniform bool overlay_on = false;                    // showing a map overlay (land value, power...)
 
 uniform bool use_textures = false;
 uniform sampler2D grass_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -91,7 +93,14 @@ void fragment() {
 	// Zone colours and warnings, one map tile at a time.
 	vec2 tile_uv = p / map_size;
 	bool inside = tile_uv.x >= 0.0 && tile_uv.y >= 0.0 && tile_uv.x <= 1.0 && tile_uv.y <= 1.0;
-	if (inside) {
+	vec3 glow = vec3(0.0);
+	if (inside && overlay_on) {
+		// Map overlay: plain grey ground with each tile's colour on top.
+		vec4 ov = texture(overlay_map, tile_uv);
+		colour = vec3(dot(colour, vec3(0.33))) * 0.7;
+		colour = mix(colour, ov.rgb, ov.a);
+		glow = ov.rgb * ov.a * 0.15;                    // still readable at night
+	} else if (inside) {
 		vec4 zone = texture(zone_map, tile_uv);
 		colour = mix(colour, zone.rgb, zone.a);
 		vec4 warn = texture(warn_map, tile_uv);
@@ -104,6 +113,7 @@ void fragment() {
 	}
 
 	ALBEDO = colour;
+	EMISSION = glow;
 	ROUGHNESS = mix(0.95, 0.75, beach);
 	SPECULAR = 0.3;
 }

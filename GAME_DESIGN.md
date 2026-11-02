@@ -65,6 +65,11 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Corner and through plots build along every road they touch.
 - Zoned plots waiting to grow show building sites; leftover open land inside the town becomes pocket parks, allotments or car parks (looks only).
 
+## Map views (overlays)
+- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth. Each has a colour key.
+- Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
+- Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
+
 ## Look and feel
 - Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more; houses get garden trees.
 - Cars drive on the left along the roads, more as the population grows (purely visual).
@@ -73,7 +78,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*
-3. **Real game** — services, happiness, land value, overlay maps, goals. *Done when a friend asks for more.*
+3. **Real game** — services, happiness, land value, overlay maps (done), goals. *Done when a friend asks for more.*
 4. **Polish and share** — 3D art, sound, tutorial, publish on itch.io.
 
 ## Working rules

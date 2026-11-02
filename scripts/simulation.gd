@@ -7,6 +7,7 @@ extends RefCounted
 const Settings = preload("res://scripts/settings.gd")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK }
+enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # for the growth map
 
 # --- The city ---
 var w := 0
@@ -120,38 +121,55 @@ func road_reach_map() -> PackedByteArray:
 
 func zone_status(i: int) -> String:
 	# A plain-English reason for what a zone plot is doing.
+	var check := _zone_check(i)
+	var text: String = check[1]
+	return text
+
+
+func growth_state(i: int) -> int:
+	# For the growth map: GROWING, WAITING (demand, space or land value),
+	# BLOCKED (needs a road or power), FULL, or NONE for anything but zones.
+	if not is_zone(tiles[i]):
+		return Growth.NONE
+	var check := _zone_check(i)
+	var state: int = check[0]
+	return state
+
+
+func _zone_check(i: int) -> Array:
+	# [Growth state, reason in plain English] for a zone plot.
 	var t: int = tiles[i]
 	if not has_road_access(i):
-		return "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH
+		return [Growth.BLOCKED, "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH]
 	_update_power()
 	if powered[i] == 0:
 		if _net_id[i] < 0:
-			return "no power, link it to a power plant (roads, zones and power lines carry power)"
-		return "no power, the power plant is full, build another"
+			return [Growth.BLOCKED, "no power, link it to a power plant (roads, zones and power lines carry power)"]
+		return [Growth.BLOCKED, "no power, the power plant is full, build another"]
 	var lv: int = levels[i]
 	if lv < max_level(i) and _net_spare[_net_id[i]] <= 0:
-		return "waiting, the power plant is full, build another"
+		return [Growth.BLOCKED, "waiting, the power plant is full, build another"]
 	if lv >= max_level(i):
 		if t != Tile.INDUSTRY and density[i] < 2:
-			return "fully built for %s density (zone it higher to let it grow more)" % density_name(i)
-		return "fully built up"
+			return [Growth.FULL, "fully built for %s density (zone it higher to let it grow more)" % density_name(i)]
+		return [Growth.FULL, "fully built up"]
 	var next_stage: int = stage_at(i, lv + 1)
 	if demand_for(t) < step_size(i) * 0.5:
 		match t:
 			Tile.HOMES:
-				return "waiting, the town needs more jobs first"
+				return [Growth.WAITING, "waiting, the town needs more jobs first"]
 			Tile.SHOPS:
-				return "waiting, the town needs more residents first"
+				return [Growth.WAITING, "waiting, the town needs more residents first"]
 			Tile.INDUSTRY:
-				return "waiting, the town needs more workers first"
+				return [Growth.WAITING, "waiting, the town needs more workers first"]
 	if next_stage > Settings.FREE_STAGE:
 		_update_land_value()
 		var needed: float = Settings.TALL_VALUE_NEEDED[next_stage]
 		if land_value[i] < needed:
-			return "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"
+			return [Growth.WAITING, "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"]
 		if density[i] < 2 and shortage_for(t) <= 0.0:
-			return "will build taller when the town runs short of space"
-	return "growing"
+			return [Growth.WAITING, "will build taller when the town runs short of space"]
+	return [Growth.GROWING, "growing"]
 
 
 func demand_for(t: int) -> float:

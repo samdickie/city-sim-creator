@@ -102,6 +102,7 @@ func _ready() -> void:
 	assert(Tile.keys() == Simulation.Tile.keys(), "game3d.gd Tile list differs from simulation.gd")
 	assert(Tile.keys() == WorldView.Tile.keys(), "world3d.gd Tile list differs from simulation.gd")
 	assert(Tile.keys() == Cars.Tile.keys(), "cars.gd Tile list differs from simulation.gd")
+	assert(Simulation.Growth.keys() == WorldView.Growth.keys(), "world3d.gd Growth list differs from simulation.gd")
 	_load_map()
 	_compute_slopes()
 	sim.setup(map_w, map_h, water)
@@ -135,9 +136,11 @@ func _ready() -> void:
 	hud.save_pressed.connect(_save_game)
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
+	hud.overlay_chosen.connect(_set_overlay)
 
 	_select_tool(Tool.ROAD)
 	hud.set_density(current_density)
+	_set_overlay(WorldView.Overlay.NONE)
 	_set_speed(1)
 	_refresh_hud()
 	if map_credits != "":
@@ -271,6 +274,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_set_speed(Settings.FAST_SPEED)
 			KEY_H:
 				hud.help_panel.visible = not hud.help_panel.visible
+			KEY_O:
+				_set_overlay((world.overlay + 1) % WorldView.Overlay.size())
 
 
 func _process(delta: float) -> void:
@@ -618,6 +623,11 @@ func _select_tool(tool_id: int) -> void:
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
 	_update_info()
+
+
+func _set_overlay(kind: int) -> void:
+	world.set_overlay(kind)
+	hud.set_overlay(kind, world.overlay_legend(kind))
 
 
 func _set_day_cycle(on: bool) -> void:
