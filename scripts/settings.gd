@@ -75,6 +75,17 @@ const HOSPITAL_NEEDED_POP := 2500  # bigger towns: homes with no hospital grow a
 const FIRE_START_POP := 500        # fires can break out once the town is this big
 const FIRE_CHANCE := 0.0005        # chance per built plot per month with no fire cover (industry x2)
 
+# --- Districts: height rules painted over the zones ---
+# 0 = normal, 1 = conservation area, 2 = central business district (CBD).
+const DISTRICT_NAMES := ["Normal", "Conservation area", "CBD"]
+const CONSERVATION_MAX_STAGE := 3   # tenements (4 storeys) at most
+const CONSERVATION_VALUE := 0.03    # land value for the character of the old town
+const CBD_EXTRA_LEVELS := 2         # high-density plots in a CBD can rise two more stages (skyscrapers)
+const CBD_VALUE := 0.08             # land value added across a CBD
+const CBD_TALL_BOOST := 1.5         # tall buildings grow this much faster in a CBD
+const SKYSCRAPER_POP := 8000        # skyscrapers (stage 7 and up) need a town this big...
+const SKYSCRAPER_TRANSIT := 12      # ...and a working station or bus depot within this many tiles
+
 # --- Other buildings: power, utilities, leisure and transport ---
 # Each one: name, cost (per tile for "area" ones you drag over), monthly upkeep,
 # the population it unlocks at, and what it does:
@@ -140,7 +151,7 @@ const MAX_CARS := 400
 # --- Density, land value and prices ---
 # Once demand for homes (or shops) is more than the low-rise plots can still take,
 # the most valuable plots build upwards: level 4, 5 and 6 need at least this land value.
-const TALL_VALUE_NEEDED := [0.0, 0.0, 0.0, 0.0, 0.35, 0.5, 0.65]
+const TALL_VALUE_NEEDED := [0.0, 0.0, 0.0, 0.0, 0.35, 0.5, 0.65, 0.72, 0.8]
 const TALL_GROWTH_CHANCE := 0.15  # chance per month that a valuable plot builds taller
 const BASE_LAND_VALUE := 0.30     # land value runs from 0 (worst) to 1 (best)
 const SEA_BONUS := 0.30           # right by the sea (fades out over SEA_VIEW_TILES)
@@ -162,8 +173,9 @@ const DENSITY_START := [0, 1, 2]          # stage = level + this
 const DENSITY_MAX_LEVEL := [2, 3, 4]
 const FREE_STAGE := 3                     # up to here, plots grow whenever there's demand
 # How many residents / jobs a plot holds at each stage (0 to 6).
-const HOMES_AT_STAGE := [0, 20, 40, 60, 100, 150, 220]
-const SHOP_JOBS_AT_STAGE := [0, 8, 16, 24, 40, 60, 90]
+# Stages 7 and 8 are skyscrapers, only in a CBD district (see below).
+const HOMES_AT_STAGE := [0, 20, 40, 60, 100, 150, 220, 350, 500]
+const SHOP_JOBS_AT_STAGE := [0, 8, 16, 24, 40, 60, 90, 160, 260]
 const INDUSTRY_JOBS_AT_STAGE := [0, 15, 30, 45]
 # Zoning cost per tile for low / medium / high density.
 const HOMES_COSTS := [40, 60, 100]

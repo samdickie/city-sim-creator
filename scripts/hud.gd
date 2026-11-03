@@ -26,14 +26,15 @@ const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
-const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water"]
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
 	"Which plots have electricity, and what carries it",
 	"How far each plot is from a road (zones need one within 2 tiles)",
 	"Why each zone is or isn't growing",
 	"How many of police, fire, schools and hospitals cover each area",
-	"Which plots have water (anything bigger than a first-level plot needs it)"]
+	"Which plots have water (anything bigger than a first-level plot needs it)",
+	"CBD (skyscrapers allowed) and conservation areas (low-rise only)"]
 
 var tool_buttons := {}
 var density_buttons := {}
@@ -203,7 +204,7 @@ func _build_toolbar(root: Control, tools: Array) -> void:
 	for t in tools:
 		var id: int = t[0]
 		var b := _button("%s\n%s" % [t[1], t[3]], true)
-		b.custom_minimum_size = Vector2(96, 58)
+		b.custom_minimum_size = Vector2(90, 58)
 		b.tooltip_text = "Key %s" % t[2]
 		# A coloured strip along the bottom shows what the tool builds.
 		var strip := ColorRect.new()
@@ -374,7 +375,9 @@ func _build_help(root: Control) -> void:
 		"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings:\n" +
 		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
 		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +
-		"Some buildings unlock as the town grows.\n\n" +
+		"Some buildings unlock as the town grows.\n" +
+		"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000\n" +
+		"people and a station or bus depot nearby), or a conservation area kept low-rise.\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +

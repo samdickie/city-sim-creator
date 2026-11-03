@@ -119,6 +119,7 @@ var _paving_items: Array = []
 var _prop_items: Array = []
 var _parked_items: Array = []
 var _values := PackedFloat32Array()   # land value per tile, for building quality
+var _spire_items: Array = []          # skyscraper spires, drawn with the chimneys
 var _extra_trees: Array = []          # [position (Vector2), height, kind] planted on plots
 # Leftover open land inside the town gets put to use (looks only, not simulated):
 var _infill := PackedByteArray()      # 0 = none, 1 = pocket park, 2 = allotments, 3 = car park
@@ -171,7 +172,7 @@ const BIRCH_BARK := Color(0.80, 0.78, 0.72)
 const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
-enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER }
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
@@ -182,6 +183,8 @@ const OV_BLUE := Color(0.30, 0.56, 0.95)
 const OV_GREY := Color(0.55, 0.56, 0.58)
 const OV_DARK_YELLOW := Color(0.62, 0.52, 0.16)
 const OV_DARK_BLUE := Color(0.16, 0.30, 0.58)
+const OV_CBD := Color(0.62, 0.38, 0.92)
+const OV_CONSERVATION := Color(0.80, 0.56, 0.28)
 var overlay: int = Overlay.NONE
 var overlay_image: Image
 var overlay_texture: ImageTexture
@@ -635,6 +638,7 @@ func refresh_buildings() -> void:
 	_prop_items.clear()
 	_parked_items.clear()
 	_extra_trees.clear()
+	_spire_items.clear()
 	_values = sim.land_value_map()
 	_wall_owner.clear()
 	_roof_owner.clear()
@@ -665,6 +669,7 @@ func refresh_buildings() -> void:
 	_roof_base = _colours_of(roof_list)
 	if overlay != Overlay.NONE:
 		_recolour_buildings()
+	chimney_list.append_array(_spire_items)
 	_fill(chimneys.multimesh, chimney_list, false)
 	_fill(paving.multimesh, _paving_items, false)
 	_fill(props.multimesh, _prop_items, false)
@@ -734,6 +739,9 @@ func overlay_legend(kind: int) -> Array:
 		Overlay.SERVICES:
 			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
 				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
+		Overlay.DISTRICTS:
+			return [[OV_CBD, "CBD: skyscrapers allowed"], [OV_CONSERVATION, "Conservation area: low-rise only"],
+				[OV_GREY, "Normal"]]
 		Overlay.WATER:
 			return [[OV_BLUE, "Has water"], [OV_DARK_BLUE, "Carries water"],
 				[OV_RED, "Needs water to grow"], [OV_GREY, "Not connected"]]
@@ -780,6 +788,13 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 			if zone or service or sim.power_use(i) > 0:
 				return Color(OV_YELLOW if power[i] == 1 else OV_RED, 0.9)
 			return Color(OV_DARK_YELLOW if power[i] == 1 else OV_GREY, 0.8)
+		Overlay.DISTRICTS:
+			var d: int = sim.district[i]
+			if d == 2:
+				return Color(OV_CBD, 0.85)
+			if d == 1:
+				return Color(OV_CONSERVATION, 0.85)
+			return Color(OV_GREY, 0.35) if t != Tile.EMPTY else none
 		Overlay.WATER:
 			if t == Tile.EMPTY:
 				return none
@@ -1532,6 +1547,9 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array) -> void:
 	var depth := _depth(i, front)
 	var value := _values[i] if i < _values.size() else 0.3
+	if lv >= 7:
+		_plan_skyscraper(i, lv, front, depth, value, false, rng, wall_list, roof_list, _spire_items)
+		return
 	if lv >= 4:
 		_plan_tall_homes(i, lv, front, depth, value, rng, wall_list, roof_list)
 		return
@@ -1687,6 +1705,71 @@ func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: flo
 	_premium_court(i, front, 17.5, court_back - 1.0, rng)
 
 
+const SKY_CLADDING := [Color(0.80, 0.82, 0.84), Color(0.33, 0.27, 0.21), Color(0.84, 0.71, 0.50),
+	Color(0.22, 0.23, 0.25), Color(0.92, 0.92, 0.90)]   # silver, bronze, stone, charcoal, white
+
+
+func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: float, offices: bool,
+		rng: RandomNumberGenerator, wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
+	# CBD skyscrapers. A three-storey podium along the street (glass, or classical
+	# with shopfronts), and a tower rising from it: stage 7 is 20-26 storeys with
+	# a set-back crown; stage 8 is a 32-42 storey landmark that steps in twice
+	# on the way up and finishes with a spire.
+	var classical_podium := rng.randf() < 0.4
+	var podium := _place(i, front, 0.0, 3.0, 46.0, 24.0)
+	var podium_h := 12.6
+	if classical_podium:
+		_classical_block(podium, 46.0, 24.0, 3, _classical_stone(rng), true, false, wall_list, roof_list, false)
+		podium_h = 4.2 + 2 * 3.4 + 0.6 + 0.9
+	else:
+		_add_block(podium, 46.0, 24.0, podium_h, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+		_front_panel(podium, 24.0, 0.0, 4.6, 48.0, 0.6, TRIM, wall_list)     # canopy over the entrance
+	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+	var plaza_from := 28.0
+	if depth - plaza_from > 6.0:
+		_slab(i, front, 0.0, plaza_from, 46.0, depth - plaza_from - 1.0, PAVEMENT)
+		for along: float in [-17.0, 0.0, 17.0]:
+			_plant(i, front, along + rng.randf_range(-2.0, 2.0), plaza_from + (depth - plaza_from) * 0.5,
+				rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
+	var base := _place(i, front, 0.0, 5.0, 26.0, 20.0)
+	var x_axis: Vector3 = base["x"]
+	var z_axis: Vector3 = base["z"]
+	var at: Vector3 = base["pos"]
+	at.y += podium_h
+	var glassy := offices or value >= 0.75 or rng.randf() < 0.4
+	var cladding: Color = SKY_CLADDING[rng.randi_range(0, SKY_CLADDING.size() - 1)]
+	var style := STYLE_GLASS if glassy else STYLE_MODERN
+	var colour: Color = GLASS_FRAME if glassy else cladding
+	var floor_h := 3.6 if offices else 3.2
+	var storeys := rng.randi_range(20, 26) if lv == 7 else rng.randi_range(32, 42)
+	# Tiers: [width, depth, share of the storeys]
+	var tiers: Array = [[24.0, 19.0, 0.88], [18.0, 14.0, 0.12]]
+	if lv >= 8:
+		tiers = [[26.0, 20.0, 0.55], [21.0, 16.0, 0.30], [15.0, 12.0, 0.15]]
+	for tier: Array in tiers:
+		var tw: float = tier[0]
+		var td: float = tier[1]
+		var floors: int = maxi(roundi(storeys * float(tier[2])), 2)
+		var th: float = floors * floor_h
+		_box_item(wall_list, at, x_axis, z_axis, Vector3(tw, th, td), colour, style)
+		# A light slab edge where each tier steps in.
+		_box_item(wall_list, at + Vector3.UP * th, x_axis, z_axis, Vector3(tw + 0.6, 0.5, td + 0.6),
+			TRIM if glassy else cladding.lightened(0.2), STYLE_PAINT)
+		at += Vector3.UP * (th + 0.5)
+		if not offices:
+			# Glass balconies on the front, every other floor.
+			for f in range(1, floors, 2):
+				var y: float = at.y - th - 0.5 + f * floor_h
+				var balcony := Vector3(at.x, y, at.z) - z_axis * (td * 0.5 + 0.7)
+				_prop_items.append([Transform3D(Basis(x_axis * (tw * 0.6), Vector3.UP * 1.0, z_axis * 1.4),
+					balcony), BALCONY_GLASS])
+	# Roof plant and, on a landmark, a spire.
+	_box_item(wall_list, at, x_axis, z_axis, Vector3(8.0, 3.0, 6.0), CONCRETE, STYLE_PLANT)
+	if lv >= 8:
+		chimney_list.append([Transform3D(Basis.from_scale(Vector3(0.7, 28.0, 0.7)), at + Vector3.UP * 17.0),
+			Color(0.80, 0.82, 0.84)])
+
+
 func _classical_stone(rng: RandomNumberGenerator) -> Color:
 	var stones := [HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE, CREAM_STONE, HONEY_STONE]
 	var c: Color = stones[rng.randi_range(0, stones.size() - 1)]
@@ -1796,6 +1879,9 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	var colours := [WHITE_RENDER, BLONDE_SANDSTONE, CREAM_RENDER, RED_SANDSTONE, GREY_RENDER]
 	var depth := _depth(i, front)
 	var value := _values[i] if i < _values.size() else 0.3
+	if lv >= 7:
+		_plan_skyscraper(i, lv, front, depth, value, true, rng, wall_list, roof_list, _spire_items)
+		return
 	if lv >= 4:
 		# Classical commercial buildings with shopfronts; then a classical block
 		# beside a modern office; then a glass office tower over a classical podium.

@@ -42,6 +42,12 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Each month, valuable plots that can build taller go first; then everything else grows in random order.
 - Re-zone by dragging a different density over an area; buildings trim to the new maximum.
 
+## Districts and skyscrapers
+- District tool (Z) paints a height rule over any land, free: CBD, conservation area, or back to normal. Choosing it shows the Districts map view.
+- Conservation area: nothing above stage 3 (tenements, four storeys); +0.03 land value for character. Existing taller buildings are trimmed back.
+- CBD: high-density homes and shops can rise two more stages, to skyscrapers: stage 7 (20-26 storeys; 350 residents or 160 jobs) and stage 8 (32-42 storey landmark with two setbacks and a spire; 500 residents or 260 jobs). +0.08 land value across the CBD, and tall buildings grow 1.5x faster there.
+- Skyscrapers also need land value 0.72 / 0.8, a town of 8,000 people, and a working railway station or bus depot within 600 m. Each stands on a three-storey podium (glass, or classical with shopfronts) with a planted plaza behind.
+
 ## Tall building design
 - Taller plots mix two families: classical sandstone (rusticated ground floor, sash windows in stone surrounds, bay windows, cornice, slate mansard with dormers; classical shopfronts for shops) and modern premium (glass ground floor, framed glazing with timber/bronze/stone bays, staggered glass balconies, set-back glass penthouse, roof canopy; all glass on the best land).
 - Courts between tall blocks are landscaped (lawn, path, trees) with parking underground.

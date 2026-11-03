@@ -19,7 +19,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT }
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
+	DISTRICT }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -34,12 +35,19 @@ const TOOL_NAMES := {
 	Tool.SERVICE: "Services",
 	Tool.LEISURE: "Leisure",
 	Tool.TRANSPORT: "Transport",
+	Tool.DISTRICT: "Districts",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
 	Tool.POWER: "6", Tool.UTILITY: "7", Tool.PARK: "8", Tool.GRID: "9", Tool.SERVICE: "0",
-	Tool.LEISURE: "-", Tool.TRANSPORT: "=",
+	Tool.LEISURE: "-", Tool.TRANSPORT: "=", Tool.DISTRICT: "Z",
 }
+# The District tool's picker, in order: CBD, conservation area, back to normal.
+const DISTRICT_ORDER := [2, 1, 0]
+const DISTRICT_ABOUT := [
+	"Central business district: high-density plots can become skyscrapers (with 8,000 people and a station or bus depot nearby). Raises land value.",
+	"Conservation area: nothing taller than four storeys, to keep the old town's character. A little extra land value.",
+	"Normal: the usual height rules for each density."]
 # Tools that open a picker of several buildings (Tab or the buttons choose one).
 const GROUPS := {
 	Tool.POWER: [Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WIND, Tile.SOLAR, Tile.POWER_LINE],
@@ -69,6 +77,7 @@ const TOOL_COLOURS := {
 	Tool.SERVICE: Color(0.30, 0.78, 0.86),
 	Tool.LEISURE: Color(0.86, 0.55, 0.86),
 	Tool.TRANSPORT: Color(0.95, 0.55, 0.25),
+	Tool.DISTRICT: Color(0.62, 0.38, 0.92),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -110,6 +119,7 @@ var day_cycle := true
 var current_tool: int = Tool.ROAD
 var current_density: int = 1          # 0 = low, 1 = medium, 2 = high (homes and shops)
 var _choice := {}                      # group tool -> which of its buildings is picked
+var _auto_overlay := false            # the Districts view was switched on by the District tool
 var painting := false
 var orbiting := false
 var dragging_map := false
@@ -297,10 +307,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_select_tool(Tool.LEISURE)
 			KEY_EQUAL:
 				_select_tool(Tool.TRANSPORT)
+			KEY_Z:
+				_select_tool(Tool.DISTRICT)
 			KEY_TAB:
-				if GROUPS.has(current_tool):
-					var items: Array = GROUPS[current_tool]
-					_set_item((_item_index() + 1) % items.size())
+				if _has_picker():
+					_set_item((_item_index() + 1) % _picker_size())
 				else:
 					_set_density((current_density + 1) % 3)
 			KEY_ESCAPE:
@@ -479,7 +490,7 @@ func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 			return _l_path(a, b)
 		Tool.GRID:
 			return _grid_tiles(a, b)
-		Tool.BULLDOZE:
+		Tool.BULLDOZE, Tool.DISTRICT:
 			return _box(a, b)
 	if GROUPS.has(current_tool):
 		# Power lines run like roads; farms, landfill and golf courses are dragged
@@ -577,6 +588,8 @@ func _apply_tool(p: Vector2i) -> bool:
 	sim.money -= _tool_cost(p)
 	if current_tool == Tool.BULLDOZE:
 		sim.set_tile(i, Tile.EMPTY)
+	elif current_tool == Tool.DISTRICT:
+		sim.set_district(i, _district_choice())
 	else:
 		sim.set_tile(i, _target_tile(), current_density if _has_density() else 1)
 	return true
@@ -586,6 +599,9 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	# "" = OK to build; "-" = nothing to do (no message); otherwise the reason.
 	var i := p.y * map_w + p.x
 	var here := sim.tiles[i]
+	if current_tool == Tool.DISTRICT:
+		# Districts are free and go over anything on land.
+		return "-" if water[i] == 1 or sim.district[i] == _district_choice() else ""
 	if current_tool == Tool.BULLDOZE:
 		if here == Tile.EMPTY:
 			return "-"
@@ -659,6 +675,8 @@ func _tool_cost(p: Vector2i) -> int:
 
 
 func _price_text(tool_id: int) -> String:
+	if tool_id == Tool.DISTRICT:
+		return "free"
 	if GROUPS.has(tool_id):
 		var cheapest := 1 << 30
 		for t: int in GROUPS[tool_id]:
@@ -679,6 +697,22 @@ func _target_tile() -> int:
 	return t
 
 
+func _has_picker() -> bool:
+	return GROUPS.has(current_tool) or current_tool == Tool.DISTRICT
+
+
+func _picker_size() -> int:
+	if current_tool == Tool.DISTRICT:
+		return DISTRICT_ORDER.size()
+	var items: Array = GROUPS[current_tool]
+	return items.size()
+
+
+func _district_choice() -> int:
+	var d: int = DISTRICT_ORDER[_item_index()]
+	return d
+
+
 func _item_index() -> int:
 	var n: int = _choice.get(current_tool, 0)
 	return n
@@ -692,6 +726,9 @@ func _name_of(t: int) -> String:
 
 
 func _tool_label() -> String:
+	if current_tool == Tool.DISTRICT:
+		var district_name: String = Settings.DISTRICT_NAMES[_district_choice()]
+		return district_name + " district" if _district_choice() == 2 else district_name
 	if GROUPS.has(current_tool):
 		return _name_of(_target_tile())
 	var tool_name: String = TOOL_NAMES[current_tool]
@@ -699,13 +736,14 @@ func _tool_label() -> String:
 
 
 func _set_item(index: int, announce: bool = true) -> void:
-	# Pick one building from the current group.
-	if not GROUPS.has(current_tool):
+	# Pick one building from the current group (or a district type).
+	if not _has_picker():
 		return
 	_choice[current_tool] = index
 	_show_group()
 	if announce:
-		hud.flash("Building: %s" % _name_of(_target_tile()).to_lower())
+		hud.flash("Painting: %s" % _tool_label() if current_tool == Tool.DISTRICT \
+			else "Building: %s" % _name_of(_target_tile()).to_lower())
 	if painting:
 		_update_drag()
 	else:
@@ -714,6 +752,14 @@ func _set_item(index: int, announce: bool = true) -> void:
 
 func _show_group() -> void:
 	# The picker above the toolbar: each building with its price, or what it's waiting for.
+	if current_tool == Tool.DISTRICT:
+		var choices: Array = []
+		for n in DISTRICT_ORDER.size():
+			var d: int = DISTRICT_ORDER[n]
+			var label: String = "CBD" if d == 2 else ("Conservation" if d == 1 else "Normal")
+			choices.append([label, "free", DISTRICT_ABOUT[n], ""])
+		hud.show_group(choices, _item_index(), "")
+		return
 	if not GROUPS.has(current_tool):
 		hud.show_group([], 0, "")
 		return
@@ -775,6 +821,13 @@ func _select_tool(tool_id: int) -> void:
 	hud.set_tool(tool_id)
 	hud.show_density(_has_density())
 	_show_group()
+	# Painting districts is easier with the Districts view on.
+	if tool_id == Tool.DISTRICT and world.overlay == WorldView.Overlay.NONE:
+		_set_overlay(WorldView.Overlay.DISTRICTS)
+		_auto_overlay = true
+	elif tool_id != Tool.DISTRICT and _auto_overlay:
+		_set_overlay(WorldView.Overlay.NONE)
+		_auto_overlay = false
 	if _in_map(hover):
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
@@ -782,6 +835,7 @@ func _select_tool(tool_id: int) -> void:
 
 
 func _set_overlay(kind: int) -> void:
+	_auto_overlay = false
 	world.set_overlay(kind)
 	hud.set_overlay(kind, world.overlay_legend(kind))
 
@@ -871,7 +925,7 @@ func _refresh_hud() -> void:
 	var net := sim.last_income - sim.last_upkeep
 	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
 		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
-	if GROUPS.has(current_tool):
+	if _has_picker():
 		_show_group()                 # buildings unlock as the town grows
 	_update_info()
 
@@ -906,7 +960,8 @@ func _tile_text(i: int) -> String:
 			sim.service_reach_m(s, cell_size_m), roundi(sim.funding[s] * 100.0)]
 	if not sim.is_zone(t):
 		if t == Tile.EMPTY and water[i] == 0:
-			return "Open land (land value %s)" % sim.land_value_word(i)
+			var where := "" if sim.district[i] == 0 else ", %s" % sim.district_name(i).to_lower()
+			return "Open land (land value %s%s)" % [sim.land_value_word(i), where]
 		return TILE_NAMES[t]
 	var kind: String = TILE_NAMES[t]
 	if t != Tile.INDUSTRY:
@@ -914,6 +969,8 @@ func _tile_text(i: int) -> String:
 	var text := "%s, level %d of %d%s: %s" % [kind, sim.levels[i], sim.max_level(i),
 		_stage_words(t, sim.stage(i)), sim.zone_status(i)]
 	text += "\nLand value %s   ·   %s" % [sim.land_value_word(i), _services_text(i)]
+	if sim.district[i] != 0:
+		text += "   ·   %s" % sim.district_name(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text
@@ -933,8 +990,10 @@ func _services_text(i: int) -> String:
 
 func _stage_words(t: int, s: int) -> String:
 	# What the buildings on a plot are, for the hover text.
-	var homes := ["", "villas", "villas and terraces", "tenements", "mansion flats", "modern flats", "towers"]
-	var shops := ["", "corner shops", "shop parade", "shops with flats", "offices over shops", "office blocks", "office tower"]
+	var homes := ["", "villas", "villas and terraces", "tenements", "mansion flats", "modern flats", "towers",
+		"skyscraper apartments", "landmark tower"]
+	var shops := ["", "corner shops", "shop parade", "shops with flats", "offices over shops", "office blocks",
+		"office tower", "office skyscraper", "landmark office tower"]
 	var works := ["", "small works", "factory", "large factory"]
 	var words: String = ""
 	match t:

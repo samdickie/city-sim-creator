@@ -30,6 +30,7 @@ var water := PackedByteArray()
 var tiles := PackedByteArray()        # Tile enum per map tile
 var levels := PackedByteArray()       # zones: 0 = empty plot, then 1 up to the density's maximum
 var density := PackedByteArray()      # zones: 0 = low, 1 = medium, 2 = high
+var district := PackedByteArray()     # any tile: 0 = normal, 1 = conservation area, 2 = CBD
 var money := 0
 var month := 0                        # months since the city was founded
 var tax_rate := Settings.DEFAULT_TAX_RATE
@@ -82,6 +83,7 @@ var _wnet_id := PackedInt32Array()    # which water network a tile is on (-1 = n
 var _wnet_spare: Array[int] = []
 var _water_dirty := true
 var _bus_cover := PackedByteArray()   # 1 = within reach of a working bus depot
+var _transit := PackedByteArray()     # 1 = near a working station or bus depot (for skyscrapers)
 var _rng := RandomNumberGenerator.new()
 
 
@@ -92,6 +94,8 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	tiles.resize(w * h)
 	levels.resize(w * h)
 	density.resize(w * h)
+	district.resize(w * h)
+	_transit.resize(w * h)
 	powered.resize(w * h)
 	_net_id.resize(w * h)
 	watered.resize(w * h)
@@ -107,6 +111,7 @@ func reset() -> void:
 	tiles.fill(Tile.EMPTY)
 	levels.fill(0)
 	density.fill(1)
+	district.fill(0)
 	money = Settings.START_MONEY
 	month = 0
 	tax_rate = Settings.DEFAULT_TAX_RATE
@@ -147,6 +152,24 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	_value_dirty = true
 	_coverage_dirty = true
 	layout_version += 1
+
+
+func set_district(i: int, d: int) -> void:
+	# Paint a district; anything above its new height limit is trimmed back.
+	if district[i] == d:
+		return
+	district[i] = d
+	if is_zone(tiles[i]):
+		levels[i] = mini(levels[i], max_level(i))
+	_power_dirty = true
+	_value_dirty = true
+	_coverage_dirty = true
+	layout_version += 1
+
+
+func district_name(i: int) -> String:
+	var n: String = Settings.DISTRICT_NAMES[district[i]]
+	return n
 
 
 func has_road_access(i: int) -> bool:
@@ -210,6 +233,10 @@ func _zone_check(i: int) -> Array:
 			return [Growth.BLOCKED, "needs water to grow any bigger: build a water pump or tower (water travels through roads and buildings)"]
 		return [Growth.BLOCKED, "needs more water to grow: build another water pump or tower"]
 	if lv >= max_level(i):
+		if district[i] == 1 and t != Tile.INDUSTRY:
+			return [Growth.FULL, "fully built: height capped in the conservation area"]
+		if district[i] == 2 and density[i] < 2 and t != Tile.INDUSTRY:
+			return [Growth.FULL, "fully built for %s density (zone it high to build skyscrapers in the CBD)" % density_name(i)]
 		if t != Tile.INDUSTRY and density[i] < 2:
 			return [Growth.FULL, "fully built for %s density (zone it higher to let it grow more)" % density_name(i)]
 		return [Growth.FULL, "fully built up"]
@@ -226,6 +253,10 @@ func _zone_check(i: int) -> Array:
 				return [Growth.WAITING, "waiting, the town needs more residents first"]
 			Tile.INDUSTRY:
 				return [Growth.WAITING, "waiting, the town needs more workers first"]
+	if next_stage >= 7:
+		var sky_why := _skyscraper_problem(i)
+		if sky_why != "":
+			return [Growth.WAITING, sky_why]
 	if _needs_school(i, next_stage):
 		return [Growth.WAITING, "waiting for a school nearby (families won't move into bigger homes without one)"]
 	if next_stage > Settings.FREE_STAGE:
@@ -263,10 +294,16 @@ func density_name(i: int) -> String:
 # ------------------------------------------------------------- stages and sizes
 
 func max_level(i: int) -> int:
+	# The density sets how far a plot can grow; districts raise or cap it.
 	if tiles[i] == Tile.INDUSTRY:
-		return 3
+		return mini(3, Settings.CONSERVATION_MAX_STAGE) if district[i] == 1 else 3
 	var m: int = Settings.DENSITY_MAX_LEVEL[density[i]]
-	return m
+	var start: int = Settings.DENSITY_START[density[i]]
+	if district[i] == 2 and density[i] == 2:
+		m += Settings.CBD_EXTRA_LEVELS
+	elif district[i] == 1:
+		m = mini(m, Settings.CONSERVATION_MAX_STAGE - start)
+	return maxi(m, 1)
 
 
 func stage_at(i: int, level: int) -> int:
@@ -382,10 +419,12 @@ func _grow() -> void:
 		var short: float = shortage[t]
 		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
 		var needed: float = Settings.TALL_VALUE_NEEDED[stage_at(i, lv + 1)]
-		var allowed: bool = (density[i] == 2 or short > 0.0) and not _needs_school(i, stage_at(i, lv + 1)) \
-			and not _needs_water(i, stage_at(i, lv + 1))
+		var next: int = stage_at(i, lv + 1)
+		var allowed: bool = (density[i] == 2 or short > 0.0) and not _needs_school(i, next) \
+			and not _needs_water(i, next) and (next < 7 or _skyscraper_problem(i) == "")
+		var boost: float = Settings.CBD_TALL_BOOST if district[i] == 2 else 1.0
 		if allowed and spare > 0 and want >= step * 0.5 and land_value[i] >= needed \
-				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short) * _service_factor(i):
+				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short) * _service_factor(i) * boost:
 			levels[i] = lv + 1
 			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
@@ -813,7 +852,16 @@ func _update_coverage() -> void:
 	_coverage_dirty = false
 	coverage.fill(0.0)
 	_bus_cover.fill(0)
+	_transit.fill(0)
 	for i in w * h:
+		if (tiles[i] == Tile.BUS_DEPOT or tiles[i] == Tile.STATION) and building_working(i):
+			var tr: int = Settings.SKYSCRAPER_TRANSIT
+			var tx := i % w
+			var ty := i / w
+			for y in range(maxi(ty - tr, 0), mini(ty + tr, h - 1) + 1):
+				for x in range(maxi(tx - tr, 0), mini(tx + tr, w - 1) + 1):
+					if Vector2(x - tx, y - ty).length() <= tr:
+						_transit[y * w + x] = 1
 		if tiles[i] == Tile.BUS_DEPOT and building_working(i):
 			var r: int = info(Tile.BUS_DEPOT).get("bus", 0)
 			var bx := i % w
@@ -865,6 +913,17 @@ func _missing_services(i: int) -> String:
 			and not covered(Service.HOSPITAL, i):
 		words.append("hospital")
 	return " or ".join(words)
+
+
+func _skyscraper_problem(i: int) -> String:
+	# Skyscrapers need a big town and transport to bring the people in ("" = fine).
+	if population < Settings.SKYSCRAPER_POP:
+		return "waiting to build a skyscraper: needs a town of %d people" % Settings.SKYSCRAPER_POP
+	_update_coverage()
+	if _transit[i] == 0:
+		return "waiting to build a skyscraper: needs a railway station or bus depot within %d m" \
+			% (Settings.SKYSCRAPER_TRANSIT * 50)
+	return ""
 
 
 func _needs_school(i: int, next_stage: int) -> bool:
@@ -950,6 +1009,12 @@ func _update_land_value() -> void:
 					var radius: int = info(t).get("radius", 0)
 					if amount != 0.0:
 						_spread(i, radius, amount)
+	# Districts: a CBD is where everyone wants to be; the old town has character.
+	for i in w * h:
+		if district[i] == 2:
+			land_value[i] += Settings.CBD_VALUE
+		elif district[i] == 1:
+			land_value[i] += Settings.CONSERVATION_VALUE
 	# Being covered by police, fire, schools and hospitals adds value too.
 	_update_coverage()
 	for s in 4:
@@ -1206,6 +1271,7 @@ func to_save() -> Dictionary:
 		"tiles": Array(tiles),
 		"levels": Array(levels),
 		"density": Array(density),
+		"district": Array(district),
 		"funding": funding.duplicate(),
 	}
 
@@ -1219,7 +1285,11 @@ func from_save(data: Dictionary) -> void:
 		var t: int = int(saved_tiles[i])
 		tiles[i] = t if t >= Tile.EMPTY and t <= LAST_TILE and water[i] == 0 else Tile.EMPTY
 	for i in mini(saved_levels.size(), levels.size()):
-		levels[i] = clampi(int(saved_levels[i]), 0, 6) if is_zone(tiles[i]) else 0
+		levels[i] = clampi(int(saved_levels[i]), 0, 8) if is_zone(tiles[i]) else 0
+	var saved_district: Array = data.get("district", [])
+	district.fill(0)
+	for i in mini(saved_district.size(), district.size()):
+		district[i] = clampi(int(saved_district[i]), 0, 2)
 	var saved_density: Array = data.get("density", [])
 	if saved_density.size() == density.size():
 		for i in density.size():
