@@ -46,6 +46,7 @@ var people_label: Label
 var housing_label: Label
 var power_label: Label
 var growth_label: Label
+var services_label: Label
 var tax_label: Label
 var info_label: Label
 var message_label: Label
@@ -156,6 +157,8 @@ func _build_top_right(root: Control) -> void:
 	box.add_child(housing_label)
 	power_label = _label("", 14, TEXT_DIM)
 	box.add_child(power_label)
+	services_label = _label("", 14, TEXT_DIM)
+	box.add_child(services_label)
 	growth_label = _label("", 14, TEXT_DIM)
 	box.add_child(growth_label)
 	box.add_child(_divider())
@@ -371,7 +374,9 @@ func _build_help(root: Control) -> void:
 		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services)\n" +
 		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
 		"They need a road and power. Bigger towns grow slowly without them; fires break out\n" +
-		"where there's no fire station. Funding (- / +) changes how far they reach.\n\n" +
+		"where there's no fire station. Funding (- / +) changes how far they reach.\n" +
+		"Taxes: people accept higher taxes when they get good services for them. High taxes\n" +
+		"with poor services stop growth, and eventually people leave (worst-served areas first).\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
@@ -439,6 +444,10 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		var tight: bool = sim.power_used > sim.power_supply * 0.9
 		power_label.add_theme_color_override("font_color", BAD if tight else TEXT_DIM)
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
+	var service_word: String = sim.services_word()
+	services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
+	services_label.add_theme_color_override("font_color",
+		BAD if service_word == "poor" else (GOOD if service_word == "excellent" else TEXT_DIM))
 	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
 	tax_label.add_theme_color_override("font_color", BAD if sim.appeal() < 0.3 else TEXT)
 	demand_box.queue_redraw()

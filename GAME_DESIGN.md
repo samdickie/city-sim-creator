@@ -30,7 +30,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A zone grows when a road is within 2 tiles and the town wants more of it. Each zone grows in 3 levels.
 - Homes add 20 people per level; shops 8 jobs; industry 15 jobs.
 - Demand: people from the region want to move in (100 plus 4% of the population), more for spare jobs and fewer when people are out of work. Shops and offices want 0.2 jobs per resident; industry employs the remaining workers.
-- Taxes (default 9%) set the town's appeal: each 1% above 9% cuts the pull by 10% (each 1% below adds 10%). From about 19%, people and businesses leave. Roads cost £0.50 per tile per month.
+- Taxes (default 9%) and services together set the town's appeal. Each 1% above 9% cuts the pull by 10% (each 1% below adds 10%), but people put up with taxes they can see paying for services: with every home fully covered, high taxes hurt only 0.3x as much; with no services, 1.3x. Bigger towns also expect services (full cover expected from 4,000 people, up to 70%), and better or worse than expected moves appeal up or down.
+- People only leave when appeal drops below 0 (high taxes AND poor services), and the worst-served plots shrink first. A well-served town still grows at 20% tax. The HUD shows services (good, patchy, poor) and how taxes are going down. Roads cost £0.50 per tile per month.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
 ## Zoning density
@@ -87,7 +88,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*
-3. **Real game** — services (done), land value (done), overlay maps (done), happiness, goals. *Done when a friend asks for more.*
+3. **Real game** — services (done), land value (done), overlay maps (done), taxes vs services (done), happiness, goals. *Done when a friend asks for more.*
 4. **Polish and share** — 3D art, sound, tutorial, publish on itch.io.
 
 ## Working rules

@@ -49,6 +49,7 @@ var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 
 var services := [0, 0, 0, 0]          # how many of each service the town has
 var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
 var burned := PackedInt32Array()      # plots that burned down last month
+var service_score := 0.0              # 0-1: how well services cover the town's homes, on average
 var _coverage_dirty := true
 var layout_version := 0               # goes up whenever a tile changes type (roads, zones...)
 
@@ -169,7 +170,7 @@ func _zone_check(i: int) -> Array:
 	var next_stage: int = stage_at(i, lv + 1)
 	if demand_for(t) < step_size(i) * 0.5:
 		if appeal() < 0.5:
-			return [Growth.WAITING, "waiting, taxes are too high for anyone to move in"]
+			return [Growth.WAITING, "waiting, people won't move in: taxes are high for the services they get"]
 		match t:
 			Tile.HOMES:
 				return [Growth.WAITING, "waiting, the town needs more jobs first"]
@@ -361,7 +362,7 @@ func _grow() -> void:
 			_net_spare[_net_id[i]] -= 1
 			grew.append(i)
 		elif lv > 0 and (not connected or not has_power or want < -down_step * 2.0) \
-				and _rng.randf() < Settings.DECLINE_CHANCE:
+				and _rng.randf() < Settings.DECLINE_CHANCE * (1.6 - local_service(i)):
 			levels[i] = lv - 1
 			wanted[t] = want + down_step
 			shrank.append(i)
@@ -738,12 +739,49 @@ func jobs() -> int:
 
 
 func appeal() -> float:
-	# How keen people and businesses are to come here: 1 at the default tax rate,
-	# more with lower taxes, less with higher; below 0 they start to leave.
-	return clampf(1.0 - (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT, -1.0, 2.0)
+	# How keen people and businesses are to come here (1 = normal). Low taxes and
+	# good services raise it. High taxes lower it, but much less when people can
+	# see them paying for good services. Only high taxes AND poor services drive
+	# people away (below 0).
+	var pain := (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT
+	if pain > 0.0:
+		pain *= lerpf(Settings.TAX_TOLERANCE_POOR, Settings.TAX_TOLERANCE_GOOD, service_score)
+	return clampf(1.0 - pain + services_feeling(), -1.0, 2.0)
+
+
+func services_expected() -> float:
+	# A village doesn't expect much; a town expects good cover.
+	return clampf(float(population) / Settings.SERVICES_EXPECTED_POP, 0.0, 0.7)
+
+
+func services_feeling() -> float:
+	# Above 0 when services are better than people expect, below when worse.
+	return (service_score - services_expected()) * Settings.SERVICES_EFFECT
+
+
+func local_service(i: int) -> float:
+	# Average cover of the four services at one plot, 0 to 1.
+	_update_coverage()
+	var total := 0.0
+	for s in 4:
+		total += coverage[s * w * h + i]
+	return total / 4.0
+
+
+func _measure_services() -> void:
+	# How well the town's homes are covered, weighted by how many live in each.
+	var people := 0
+	var covered_total := 0.0
+	for i in w * h:
+		if tiles[i] == Tile.HOMES and levels[i] > 0:
+			var n := units(i)
+			people += n
+			covered_total += n * local_service(i)
+	service_score = covered_total / people if people > 0 else 0.0
 
 
 func _update_demand() -> void:
+	_measure_services()
 	var a := appeal()
 	var workers := population * Settings.WORKER_SHARE
 	var spare_jobs := jobs() - workers          # below 0 = people out of work
@@ -770,15 +808,29 @@ func _business_demand(gap: float, jobs_now: int, a: float) -> float:
 func tax_word() -> String:
 	# How the tax rate is going down, for the HUD.
 	var a := appeal()
+	var high := tax_rate > Settings.DEFAULT_TAX_RATE + 0.005
 	if a >= 1.3:
 		return "attracting people"
 	if a >= 0.7:
-		return "about right"
+		return "worth it for the services" if high else "about right"
 	if a >= 0.3:
 		return "putting people off"
 	if a >= 0.0:
 		return "stopping growth"
-	return "people are leaving"
+	return "people are leaving" if not high else "people are leaving (high taxes, poor services)"
+
+
+func services_word() -> String:
+	var gap := service_score - services_expected()
+	if population < 300:
+		return "not needed yet"
+	if gap >= 0.15:
+		return "excellent"
+	if gap >= 0.0:
+		return "good"
+	if gap >= -0.25:
+		return "patchy"
+	return "poor"
 
 
 func demand_bar(t: int) -> float:

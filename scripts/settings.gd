@@ -40,6 +40,14 @@ const MAX_TAX_RATE := 0.20
 # Each 1% above 9% cuts the town's pull by 10% (each 1% below adds 10%).
 # From about 19%, people and businesses start leaving.
 const TAX_DEMAND_EFFECT := 10.0
+# People put up with higher taxes when they can see them paying for good services:
+# with every home fully covered, taxes above 9% hurt only this much as much...
+const TAX_TOLERANCE_GOOD := 0.3
+# ...and with no services at all, this much more.
+const TAX_TOLERANCE_POOR := 1.3
+# Bigger towns expect services: this many people expect full cover (up to 70%).
+const SERVICES_EXPECTED_POP := 4000
+const SERVICES_EFFECT := 0.6      # how much better (or worse) than expected services move appeal
 const TAX_BASE := 2.0             # £ per resident or job per month at a 100% rate
 const ROAD_UPKEEP := 0.5          # £ per road tile per month
 
