@@ -439,7 +439,8 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		var tight: bool = sim.power_used > sim.power_supply * 0.9
 		power_label.add_theme_color_override("font_color", BAD if tight else TEXT_DIM)
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
-	tax_label.text = "Tax rate %d%%" % roundi(sim.tax_rate * 100.0)
+	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
+	tax_label.add_theme_color_override("font_color", BAD if sim.appeal() < 0.3 else TEXT)
 	demand_box.queue_redraw()
 
 

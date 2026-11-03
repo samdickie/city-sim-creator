@@ -29,8 +29,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - One game month every 3 seconds (Space pauses, F fast-forwards).
 - A zone grows when a road is within 2 tiles and the town wants more of it. Each zone grows in 3 levels.
 - Homes add 20 people per level; shops 8 jobs; industry 15 jobs.
-- Demand: homes follow jobs, shops follow residents, industry soaks up spare workers.
-- Taxes (default 9%) come in monthly from residents and jobs; roads cost £0.50 per tile per month. Higher taxes cut demand.
+- Demand: people from the region want to move in (100 plus 4% of the population), more for spare jobs and fewer when people are out of work. Shops and offices want 0.2 jobs per resident; industry employs the remaining workers.
+- Taxes (default 9%) set the town's appeal: each 1% above 9% cuts the pull by 10% (each 1% below adds 10%). From about 19%, people and businesses leave. Roads cost £0.50 per tile per month.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
 ## Zoning density
@@ -78,7 +78,9 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
 
 ## Look and feel
-- Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more; houses get garden trees.
+- Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
+- Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
+- Every straight street gets trees on both sides (one kind per street, like an avenue), except beside industry and power plants. Gardens, tenement courts, landscaped courts and shop car parks get trees too.
 - Cars drive on the left along the roads, more as the population grows (purely visual).
 - A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. A "Day & night" button turns it off.
 

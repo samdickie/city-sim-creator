@@ -28,14 +28,18 @@ const DECLINE_CHANCE := 0.05      # chance per month that an unwanted zone shrin
 
 # --- Demand ---
 const WORKER_SHARE := 0.5         # share of residents who work
-const TOWN_PULL := 100            # jobs-worth of pull that attracts the first residents
-const SHOP_JOBS_PER_PERSON := 0.1 # shop jobs a town supports per resident
-const INDUSTRY_PULL := 20         # extra industry jobs wanted beyond the workforce
+# Shop and office jobs a town supports per resident (industry employs the rest of the workers).
+const SHOP_JOBS_PER_PERSON := 0.2
+const TOWN_PULL := 100            # people who'd like to move to even a brand-new town
+const REGION_GROWTH := 0.04       # plus this share of the population, each month, from the region
+const JOB_PULL := 1.5             # each spare job draws this many residents (each jobless worker deters as many)
 
 # --- Taxes and upkeep ---
 const DEFAULT_TAX_RATE := 0.09    # 9%
 const MAX_TAX_RATE := 0.20
-const TAX_DEMAND_EFFECT := 4.0    # each 1% above 9% cuts demand by 4%
+# Each 1% above 9% cuts the town's pull by 10% (each 1% below adds 10%).
+# From about 19%, people and businesses start leaving.
+const TAX_DEMAND_EFFECT := 10.0
 const TAX_BASE := 2.0             # £ per resident or job per month at a 100% rate
 const ROAD_UPKEEP := 0.5          # £ per road tile per month
 

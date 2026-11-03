@@ -8,6 +8,7 @@ const TERRAIN_SHADER = preload("res://shaders/terrain.gdshader")
 const SEA_SHADER = preload("res://shaders/sea.gdshader")
 const BUILDING_SHADER = preload("res://shaders/building.gdshader")
 const ROOF_SHADER = preload("res://shaders/roof.gdshader")
+const FOLIAGE_SHADER = preload("res://shaders/foliage.gdshader")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
@@ -116,7 +117,7 @@ var _paving_items: Array = []
 var _prop_items: Array = []
 var _parked_items: Array = []
 var _values := PackedFloat32Array()   # land value per tile, for building quality
-var _extra_trees: Array = []          # [position (Vector2), height] planted in courts
+var _extra_trees: Array = []          # [position (Vector2), height, kind] planted on plots
 # Leftover open land inside the town gets put to use (looks only, not simulated):
 var _infill := PackedByteArray()      # 0 = none, 1 = pocket park, 2 = allotments, 3 = car park
 const INFILL_PARK := 1
@@ -153,11 +154,17 @@ var crowns := MultiMeshInstance3D.new()        # broadleaf canopies
 var cones := MultiMeshInstance3D.new()         # conifers
 var city_trunks := MultiMeshInstance3D.new()
 var city_crowns := MultiMeshInstance3D.new()
-var _tree_trunk_xf: Array[Transform3D] = []
-var _tree_crown_xf: Array[Transform3D] = []
-var _tree_conifer := PackedByteArray()
-var _tree_crown_idx := PackedInt32Array()
-var _trees_in_tile := {}                       # tile index -> Array of tree numbers
+var city_cones := MultiMeshInstance3D.new()
+# Natural trees are built once; building on a tile hides its trees. Each tree is
+# a trunk plus a few canopy pieces ("parts"), remembered so they can be hidden.
+var _part_xf: Array[Transform3D] = []
+var _part_mesh := PackedByteArray()            # 0 = trunk, 1 = canopy blob, 2 = cone
+var _part_index := PackedInt32Array()          # instance number in that MultiMesh
+var _parts_in_tile := {}                       # tile index -> Array of part numbers
+enum TreeKind { BROADLEAF, BIRCH, COLUMNAR, PINE, SPRUCE, ORNAMENTAL, COPPER, GARDEN }
+const BARK := Color(0.30, 0.22, 0.15)
+const BIRCH_BARK := Color(0.80, 0.78, 0.72)
+const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
 enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES }
@@ -648,7 +655,7 @@ func refresh_buildings() -> void:
 		cabins.append([car[2], Color.WHITE])
 	_fill(parked_bodies.multimesh, bodies, false)
 	_fill(parked_cabins.multimesh, cabins, false)
-	_build_city_trees(tiles, levels)
+	_build_city_trees(tiles)
 
 
 func _colours_of(items: Array) -> PackedColorArray:
@@ -681,7 +688,7 @@ func set_overlay(kind: int) -> void:
 	roof_material.set_shader_parameter("overlay_on", on)
 	# Trees, paving and parked cars would hide the colours on the ground.
 	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
-			trunks, crowns, cones, city_trunks, city_crowns]:
+			trunks, crowns, cones, city_trunks, city_crowns, city_cones]:
 		node.visible = not on
 	if on:
 		_paint_overlay()
@@ -1261,7 +1268,7 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 			for k in 4:
 				var at := _place(i, front, -21.5 + k * 14.3, depth - 3.0, 1.0, 1.0)
 				var pos: Vector3 = at["pos"]
-				_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(7.0, 10.0)])
+				_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(8.0, 12.0), TreeKind.BROADLEAF])
 		Tile.HOSPITAL:
 			# A modern white block with a glass entrance, a red cross, a helipad on the
 			# roof, and ambulances by the door.
@@ -1512,6 +1519,13 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		for k in 7:
 			if rng.randf() < 0.6:
 				_parked_car(i, front, -18.0 + k * 6.0, mid, rng.randf() < 0.5, rng)
+		# A few trees round the edge of the back court.
+		for edge: float in [18.5, back_row - 2.0]:
+			if edge > mid + 3.5 or edge < mid - 3.0:
+				for along: float in [-20.0, 0.0, 20.0]:
+					if rng.randf() < 0.7:
+						_plant(i, front, along + rng.randf_range(-2.0, 2.0), edge,
+							rng.randf_range(6.0, 10.0), _park_kind(rng), rng)
 		return
 
 	if lv == 2 and sim.density[i] >= 1:
@@ -1546,6 +1560,17 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 				_parked_car(i, front, drive_along, drive_from + 0.8, rng.randf() < 0.3, rng)
 			# Hedge along the front of the garden.
 			_prop(i, front, house_along, drive_from + 0.3, w, 0.8, 1.1, green)
+		# Garden trees: a couple behind each house, sometimes one out front.
+		var garden_to: float = lane_at - 1.5 if (row == 0 and lv >= 2) else depth - 2.5
+		for along: float in [-17.25, -5.75, 5.75, 17.25]:
+			var garden_from: float = back + 11.0
+			if garden_to - garden_from > 2.0:
+				for k in rng.randi_range(1, 2):
+					_plant(i, front, along + rng.randf_range(-3.5, 3.5),
+						rng.randf_range(garden_from, garden_to), rng.randf_range(5.0, 10.0), TreeKind.GARDEN, rng)
+			if row == 0 and rng.randf() < 0.35:
+				_plant(i, front, along + rng.randf_range(-3.0, 1.0), rng.randf_range(2.0, 4.0),
+					rng.randf_range(4.0, 6.5), TreeKind.ORNAMENTAL, rng)
 		# Hedges between neighbouring lots, front to back.
 		var row_from := 0.3 if row == 0 else lane_at + 3.3
 		var row_to := lane_at if (row == 0 and lv >= 2) else depth - 0.5
@@ -1574,6 +1599,13 @@ func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGene
 	# A back lane between the two rows of back gardens, with a few cars.
 	var lane: float = (4.0 + 8.5 + back_row) * 0.5 - 1.5
 	_slab(i, front, 0.0, lane, 48.0, 3.0, DRIVEWAY)
+	# Trees in the back gardens on both sides of the lane.
+	for strip: Vector2 in [Vector2(14.5, lane - 1.5), Vector2(lane + 4.5, back_row - 1.5)]:
+		if strip.y - strip.x < 2.0:
+			continue
+		for k in rng.randi_range(2, 4):
+			_plant(i, front, rng.randf_range(-21.0, 21.0), rng.randf_range(strip.x, strip.y),
+				rng.randf_range(5.0, 9.0), TreeKind.GARDEN, rng)
 	for k in 4:
 		if rng.randf() < 0.5:
 			_parked_car(i, front, -18.0 + k * 12.0, lane - 0.7, rng.randf() < 0.5, rng)
@@ -1724,7 +1756,7 @@ func _premium_court(i: int, front: Vector2i, from: float, to: float, rng: Random
 		var back: float = rng.randf_range(from + 2.0, to - 2.0)
 		var spot := _place(i, front, along, back, 1.0, 1.0)
 		var at: Vector3 = spot["pos"]
-		_extra_trees.append([Vector2(at.x, at.z), rng.randf_range(7.0, 10.0)])
+		_extra_trees.append([Vector2(at.x, at.z), rng.randf_range(7.0, 11.0), _park_kind(rng)])
 
 
 func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
@@ -1784,6 +1816,11 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	_slab(i, front, 0.0, park_from, 47.0, park_depth, CAR_PARK)
 	# Rows of marked bays: each double row is 2 x 5 m bays plus a 6 m aisle.
 	_parking_bays(i, front, park_from + 1.0, park_from + park_depth - 0.5, 0.55, rng)
+	# Trees round the edge of the car park.
+	for along: float in [-22.5, 22.5]:
+		for k in 2:
+			_plant(i, front, along, park_from + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),
+				TreeKind.BROADLEAF, rng)
 
 
 func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
@@ -1842,13 +1879,18 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 
 # -------------------------------------------------------------------- trees
 
-func _tree_multimesh(node: MultiMeshInstance3D, mesh: Mesh, shadows: bool) -> void:
-	var mat := StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.vertex_color_is_srgb = true
-	mat.roughness = 0.95
+func _tree_multimesh(node: MultiMeshInstance3D, mesh: Mesh, shadows: bool, canopy: bool) -> void:
+	if canopy:
+		var leaves := ShaderMaterial.new()
+		leaves.shader = FOLIAGE_SHADER
+		node.material_override = leaves
+	else:
+		var bark := StandardMaterial3D.new()
+		bark.vertex_color_use_as_albedo = true
+		bark.vertex_color_is_srgb = true
+		bark.roughness = 0.95
+		node.material_override = bark
 	node.multimesh = _new_multimesh(mesh, false)
-	node.material_override = mat
 	node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if shadows \
 		else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(node)
@@ -1856,27 +1898,28 @@ func _tree_multimesh(node: MultiMeshInstance3D, mesh: Mesh, shadows: bool) -> vo
 
 func _build_trees() -> void:
 	var trunk_mesh := CylinderMesh.new()
-	trunk_mesh.top_radius = 0.35
+	trunk_mesh.top_radius = 0.3
 	trunk_mesh.bottom_radius = 0.5
 	trunk_mesh.height = 1.0
 	trunk_mesh.radial_segments = 6
 	trunk_mesh.rings = 1
-	var crown_mesh := SphereMesh.new()
+	var crown_mesh := SphereMesh.new()       # one blob of a canopy
 	crown_mesh.radius = 0.5
 	crown_mesh.height = 1.0
-	crown_mesh.radial_segments = 10
+	crown_mesh.radial_segments = 9
 	crown_mesh.rings = 6
-	var cone_mesh := CylinderMesh.new()
+	var cone_mesh := CylinderMesh.new()      # one tier of a spruce
 	cone_mesh.top_radius = 0.0
 	cone_mesh.bottom_radius = 0.5
 	cone_mesh.height = 1.0
-	cone_mesh.radial_segments = 8
-	cone_mesh.rings = 1
-	_tree_multimesh(trunks, trunk_mesh, false)
-	_tree_multimesh(crowns, crown_mesh, true)
-	_tree_multimesh(cones, cone_mesh, true)
-	_tree_multimesh(city_trunks, trunk_mesh, false)
-	_tree_multimesh(city_crowns, crown_mesh, true)
+	cone_mesh.radial_segments = 9
+	cone_mesh.rings = 2
+	_tree_multimesh(trunks, trunk_mesh, false, false)
+	_tree_multimesh(crowns, crown_mesh, true, true)
+	_tree_multimesh(cones, cone_mesh, true, true)
+	_tree_multimesh(city_trunks, trunk_mesh, false, false)
+	_tree_multimesh(city_crowns, crown_mesh, true, true)
+	_tree_multimesh(city_cones, cone_mesh, true, true)
 
 	# Woods where the noise is high, open fields where it's low, the odd lone tree.
 	var noise := FastNoiseLite.new()
@@ -1885,9 +1928,7 @@ func _build_trees() -> void:
 	noise.fractal_octaves = 3
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2026
-	var trunk_items: Array = []
-	var crown_items: Array = []
-	var cone_items: Array = []
+	var lists: Array = [[], [], []]          # trunk, canopy and cone items
 	_tile_has_trees.resize(map_w * map_h)
 	_tile_has_trees.fill(1)
 	for y in map_h:
@@ -1900,81 +1941,196 @@ func _build_trees() -> void:
 			if count == 0 and rng.randf() < 0.06:
 				count = 1
 			for k in count:
-				var px := (x + rng.randf_range(0.06, 0.94)) * cell
-				var pz := (y + rng.randf_range(0.06, 0.94)) * cell
-				var conifer := woods > 0.55 and rng.randf() < 0.5
-				var n := _tree_trunk_xf.size()
-				var parts := _tree_parts(Vector2(px, pz), rng.randf_range(8.0, 16.0), conifer, rng)
-				_tree_trunk_xf.append(parts[0])
-				_tree_crown_xf.append(parts[1])
-				_tree_conifer.append(1 if conifer else 0)
-				trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
-				if conifer:
-					_tree_crown_idx.append(cone_items.size())
-					cone_items.append([parts[1], parts[2]])
-				else:
-					_tree_crown_idx.append(crown_items.size())
-					crown_items.append([parts[1], parts[2]])
-				if not _trees_in_tile.has(i):
-					_trees_in_tile[i] = []
-				_trees_in_tile[i].append(n)
-	_fill(trunks.multimesh, trunk_items, false)
-	_fill(crowns.multimesh, crown_items, false)
-	_fill(cones.multimesh, cone_items, false)
+				var at := Vector2((x + rng.randf_range(0.06, 0.94)) * cell, (y + rng.randf_range(0.06, 0.94)) * cell)
+				var kind := _wood_kind(woods, rng)
+				var tree := _tree(at, rng.randf_range(8.0, 17.0), kind, rng, 1.0, true)
+				var parts: Array = []
+				for mesh_id: int in 3:
+					var items: Array = tree[mesh_id]
+					var target: Array = lists[mesh_id]
+					for item: Array in items:
+						parts.append(_part_xf.size())
+						_part_xf.append(item[0])
+						_part_mesh.append(mesh_id)
+						_part_index.append(target.size())
+						target.append(item)
+				if not _parts_in_tile.has(i):
+					_parts_in_tile[i] = []
+				var in_tile: Array = _parts_in_tile[i]
+				in_tile.append_array(parts)
+	_fill(trunks.multimesh, lists[0], false)
+	_fill(crowns.multimesh, lists[1], false)
+	_fill(cones.multimesh, lists[2], false)
 
 
-func _tree_parts(at: Vector2, tall: float, conifer: bool, rng: RandomNumberGenerator) -> Array:
-	# [trunk transform, canopy transform, canopy colour] for one tree.
+func _wood_kind(woods: float, rng: RandomNumberGenerator) -> int:
+	# Dense woods have spruce plantations; elsewhere mostly broadleaf, some birch and pine.
+	var r := rng.randf()
+	if woods > 0.55 and r < 0.35:
+		return TreeKind.SPRUCE
+	if r < 0.12:
+		return TreeKind.PINE
+	if r < 0.30:
+		return TreeKind.BIRCH
+	return TreeKind.BROADLEAF
+
+
+func _park_kind(rng: RandomNumberGenerator) -> int:
+	var r := rng.randf()
+	if r < 0.45:
+		return TreeKind.BROADLEAF
+	if r < 0.62:
+		return TreeKind.BIRCH
+	if r < 0.72:
+		return TreeKind.COPPER
+	if r < 0.82:
+		return TreeKind.ORNAMENTAL
+	if r < 0.90:
+		return TreeKind.COLUMNAR
+	return TreeKind.PINE
+
+
+func _garden_kind(rng: RandomNumberGenerator) -> int:
+	var r := rng.randf()
+	if r < 0.28:
+		return TreeKind.ORNAMENTAL
+	if r < 0.46:
+		return TreeKind.BIRCH
+	if r < 0.64:
+		return TreeKind.BROADLEAF
+	if r < 0.80:
+		return TreeKind.COLUMNAR      # leylandii and the like
+	if r < 0.92:
+		return TreeKind.COPPER
+	return TreeKind.SPRUCE
+
+
+func _plant(i: int, front: Vector2i, along: float, back: float, tall: float, kind: int,
+		rng: RandomNumberGenerator) -> void:
+	# A tree on a plot, planted with the other city trees.
+	var spot := _place(i, front, along, back, 1.0, 1.0)
+	var pos: Vector3 = spot["pos"]
+	var k: int = _garden_kind(rng) if kind == TreeKind.GARDEN else kind
+	_extra_trees.append([Vector2(pos.x, pos.z), tall, k])
+
+
+func _leaf_colour(base: Color, rng: RandomNumberGenerator) -> Color:
+	return Color(base.r * rng.randf_range(0.85, 1.15), base.g * rng.randf_range(0.88, 1.12),
+		base.b * rng.randf_range(0.85, 1.15))
+
+
+func _blob(spin: Basis, centre: Vector3, size: Vector3, colour: Color) -> Array:
+	return [Transform3D(spin * Basis.from_scale(size), centre), colour]
+
+
+func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim: float = 1.0,
+		lite: bool = false) -> Array:
+	# One tree as [trunk items, canopy blob items, cone items]; each item is
+	# [transform, colour]. Every kind has its own shape, size and colour.
+	# slim < 1 makes the canopy narrower (street trees, pruned to fit); lite uses
+	# fewer pieces (for the thousands of trees in the woods).
 	var ground := height_at(at.x, at.y)
 	var spin := Basis(Vector3.UP, rng.randf() * TAU)
-	var trunk_h := tall * (0.3 if conifer else 0.45)
-	var trunk := Transform3D(spin.scaled(Vector3(0.7, trunk_h, 0.7)),
-		Vector3(at.x, ground + trunk_h * 0.5 - 0.3, at.y))
-	var crown: Transform3D
-	var colour: Color
-	if conifer:
-		var cone_h := tall * 0.85
-		crown = Transform3D(spin.scaled(Vector3(tall * 0.32, cone_h, tall * 0.32)),
-			Vector3(at.x, ground + tall * 0.15 + cone_h * 0.5, at.y))
-		colour = Color(rng.randf_range(0.10, 0.15), rng.randf_range(0.22, 0.30), rng.randf_range(0.12, 0.17))
-	else:
-		var width := tall * rng.randf_range(0.5, 0.7)
-		crown = Transform3D(spin.scaled(Vector3(width, tall * 0.55, width)),
-			Vector3(at.x, ground + tall * 0.68, at.y))
-		colour = Color(rng.randf_range(0.18, 0.30), rng.randf_range(0.30, 0.42), rng.randf_range(0.10, 0.17))
-	return [trunk, crown, colour]
+	var base := Vector3(at.x, ground, at.y)
+	var trunk_h := tall * 0.45
+	var thick := 0.35 + tall * 0.035
+	var bark := BARK
+	var blobs: Array = []
+	var tiers: Array = []
+	match kind:
+		TreeKind.BIRCH:
+			# Slender white trunk, a narrow airy crown in light green.
+			trunk_h = tall * 0.6
+			thick = 0.22 + tall * 0.015
+			bark = BIRCH_BARK
+			var green := Color(0.36, 0.48, 0.18)
+			var w := tall * rng.randf_range(0.28, 0.36) * slim
+			for k in (2 if lite else 3):
+				var off := Vector3(rng.randf_range(-0.7, 0.7), 0.0, rng.randf_range(-0.7, 0.7))
+				blobs.append(_blob(spin, base + off + Vector3.UP * tall * (0.56 + k * 0.13),
+					Vector3(w, tall * 0.36, w) * (1.0 - k * 0.15), _leaf_colour(green, rng)))
+		TreeKind.COLUMNAR:
+			# Tall and narrow: a poplar, or a leylandii hedge-tree.
+			trunk_h = tall * 0.18
+			var green := Color(0.16, 0.30, 0.15) if rng.randf() < 0.5 else Color(0.24, 0.38, 0.16)
+			var w := tall * rng.randf_range(0.18, 0.24)
+			blobs.append(_blob(spin, base + Vector3.UP * tall * 0.52, Vector3(w, tall * 0.8, w),
+				_leaf_colour(green, rng)))
+			blobs.append(_blob(spin, base + Vector3.UP * tall * 0.72, Vector3(w * 0.8, tall * 0.45, w * 0.8),
+				_leaf_colour(green, rng)))
+		TreeKind.PINE:
+			# Scots pine: a tall bare reddish trunk with flat clumps at the top.
+			trunk_h = tall * 0.78
+			thick = 0.3 + tall * 0.03
+			bark = PINE_BARK
+			var green := Color(0.13, 0.23, 0.15)
+			for k in (2 if lite else rng.randi_range(2, 4)):
+				var off := Vector3(rng.randf_range(-1.6, 1.6), rng.randf_range(-0.8, 0.8), rng.randf_range(-1.6, 1.6))
+				var w := tall * rng.randf_range(0.22, 0.34)
+				blobs.append(_blob(spin, base + off + Vector3.UP * tall * 0.84, Vector3(w, tall * 0.16, w * 0.9),
+					_leaf_colour(green, rng)))
+		TreeKind.SPRUCE:
+			# Three stacked tiers, widest at the bottom.
+			trunk_h = tall * 0.25
+			var green := Color(0.10, 0.22, 0.14)
+			for k in 3:
+				var w := tall * (0.42 - k * 0.1)
+				var tier_h := tall * (0.5 - k * 0.08)
+				tiers.append(_blob(spin, base + Vector3.UP * (tall * (0.12 + k * 0.24) + tier_h * 0.5),
+					Vector3(w, tier_h, w), _leaf_colour(green, rng)))
+		_:
+			# Broadleaf (oak, sycamore, lime), small ornamentals and copper beech:
+			# a main canopy with a few smaller blobs round it.
+			var green := Color(rng.randf_range(0.20, 0.28), rng.randf_range(0.33, 0.42), rng.randf_range(0.11, 0.16))
+			var spread := rng.randf_range(0.5, 0.75)
+			if kind == TreeKind.ORNAMENTAL:
+				green = Color(0.30, 0.42, 0.16)
+				spread = rng.randf_range(0.7, 0.9)
+				trunk_h = tall * 0.38
+			elif kind == TreeKind.COPPER:
+				green = Color(0.30, 0.13, 0.12)
+			var w := tall * spread * slim
+			var centre := base + Vector3.UP * tall * 0.64
+			blobs.append(_blob(spin, centre, Vector3(w, tall * 0.48, w * rng.randf_range(0.85, 1.0)),
+				_leaf_colour(green, rng)))
+			for k in (1 if lite else rng.randi_range(2, 4)):
+				var angle := rng.randf() * TAU
+				var off := Vector3(cos(angle), 0.0, sin(angle)) * w * rng.randf_range(0.22, 0.34)
+				off.y = tall * rng.randf_range(-0.1, 0.16)
+				var size := rng.randf_range(0.45, 0.65)
+				blobs.append(_blob(spin, centre + off, Vector3(w, tall * 0.48, w) * size,
+					_leaf_colour(green, rng)))
+	var trunk := [Transform3D(spin * Basis.from_scale(Vector3(thick, trunk_h + 0.3, thick)),
+		base + Vector3.UP * (trunk_h * 0.5 - 0.3)), bark]
+	return [[trunk], blobs, tiers]
 
 
 func _update_natural_trees(tiles: PackedByteArray) -> void:
 	# Trees stay on open land and in parks; building anything else clears them.
+	var meshes: Array[MultiMesh] = [trunks.multimesh, crowns.multimesh, cones.multimesh]
 	for i in tiles.size():
 		var show := 1 if ((tiles[i] == Tile.EMPTY and _infill[i] == 0) or tiles[i] == Tile.PARK) else 0
 		if show == _tile_has_trees[i]:
 			continue
 		_tile_has_trees[i] = show
-		if not _trees_in_tile.has(i):
+		if not _parts_in_tile.has(i):
 			continue
-		for n in _trees_in_tile[i]:
-			trunks.multimesh.set_instance_transform(n, _tree_trunk_xf[n] if show == 1 else _hidden)
-			var mm := cones.multimesh if _tree_conifer[n] == 1 else crowns.multimesh
-			mm.set_instance_transform(_tree_crown_idx[n], _tree_crown_xf[n] if show == 1 else _hidden)
+		for part: int in _parts_in_tile[i]:
+			var mm: MultiMesh = meshes[_part_mesh[part]]
+			mm.set_instance_transform(_part_index[part], _part_xf[part] if show == 1 else _hidden)
 
 
-func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
-	# Planted trees: lots in parks, a couple in the back gardens of houses.
-	var trunk_items: Array = []
-	var crown_items: Array = []
+func _build_city_trees(tiles: PackedByteArray) -> void:
+	# Planted trees: in parks and pocket parks, on plots (gardens, courts, car
+	# parks; see the plot plans) and along the streets.
+	var lists: Array = [[], [], []]
 	for i in tiles.size():
 		var t := tiles[i]
 		var count := 0
 		if t == Tile.PARK:
-			count = 9
+			count = 10
 		elif t == Tile.EMPTY and _infill[i] == INFILL_PARK:
 			count = 6
-		elif t == Tile.HOMES and sim.stage(i) == 1:
-			count = 4
-		elif t == Tile.HOMES and sim.stage(i) == 2:
-			count = 2
 		if count == 0:
 			continue
 		var rng := RandomNumberGenerator.new()
@@ -1982,26 +2138,30 @@ func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
 		var c := tile_centre(Vector2i(i % map_w, i / map_w))
 		for k in count:
 			var spot := c + Vector2(rng.randf_range(-21.0, 21.0), rng.randf_range(-21.0, 21.0))
-			if t == Tile.HOMES:
-				# Back gardens: the far half of the plot from the street.
-				var away := -Vector2(_frontage(i))
-				var across := Vector2(away.y, -away.x)
-				# Back gardens: the rear of the plot (the very back strip once there's a second row).
-				var from: float = 2.0 if sim.stage(i) == 1 else 20.5
-				spot = c + away * rng.randf_range(from, 22.5) + across * rng.randf_range(-20.0, 20.0)
-			var parts := _tree_parts(spot, rng.randf_range(6.0, 11.0), false, rng)
-			trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
-			crown_items.append([parts[1], parts[2]])
-	# Trees planted in landscaped courts.
-	var court_rng := RandomNumberGenerator.new()
-	court_rng.seed = 7
-	for tree in _extra_trees:
+			_add_tree(lists, _tree(spot, rng.randf_range(7.0, 15.0), _park_kind(rng), rng))
+	var plot_rng := RandomNumberGenerator.new()
+	plot_rng.seed = 7
+	for tree: Array in _extra_trees:
 		var at: Vector2 = tree[0]
 		var tall: float = tree[1]
-		var parts := _tree_parts(at, tall, false, court_rng)
-		trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
-		crown_items.append([parts[1], parts[2]])
-	# Street trees along straight roads, on any side not taken by a building plot.
+		var kind: int = tree[2]
+		_add_tree(lists, _tree(at, tall, kind, plot_rng))
+	_plant_street_trees(tiles, lists)
+	_fill(city_trunks.multimesh, lists[0], false)
+	_fill(city_crowns.multimesh, lists[1], false)
+	_fill(city_cones.multimesh, lists[2], false)
+
+
+func _add_tree(lists: Array, tree: Array) -> void:
+	for mesh_id: int in 3:
+		var target: Array = lists[mesh_id]
+		target.append_array(tree[mesh_id])
+
+
+func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
+	# Street trees along both sides of every straight road (not at junctions or
+	# bends, or beside industry and power plants). Each street has one kind of
+	# tree, as an avenue would.
 	for i in tiles.size():
 		if tiles[i] != Tile.ROAD:
 			continue
@@ -2009,27 +2169,35 @@ func _build_city_trees(tiles: PackedByteArray, levels: PackedByteArray) -> void:
 		for axis: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
 			if not (_is_road(tile + axis) and _is_road(tile - axis)):
 				continue
-			if _is_road(tile + Vector2i(axis.y, axis.x)) or _is_road(tile - Vector2i(axis.y, axis.x)):
+			var normal_axis := Vector2i(axis.y, axis.x)
+			if _is_road(tile + normal_axis) or _is_road(tile - normal_axis):
 				continue   # a junction, keep it clear
 			var c := tile_centre(tile)
+			# One species per street: the street's row (or column) picks it.
+			var line := tile.y if axis.x == 1 else tile.x + 1000
+			var street_rng := RandomNumberGenerator.new()
+			street_rng.seed = line * 7919 + 3
+			var kind: int = [TreeKind.BROADLEAF, TreeKind.BROADLEAF, TreeKind.ORNAMENTAL,
+				TreeKind.BIRCH, TreeKind.COPPER][street_rng.randi_range(0, 4)]
 			var rng := RandomNumberGenerator.new()
 			rng.seed = i * 17 + 5
 			for side: int in [-1, 1]:
-				var normal: Vector2i = Vector2i(axis.y, axis.x) * side
+				var normal: Vector2i = normal_axis * side
 				var beside: Vector2i = tile + normal
-				var open := true
+				var offset := ROAD_HALF_WIDTH + 3.5    # open verge
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
-					open = bt == Tile.EMPTY or bt == Tile.PARK or bt == Tile.POWER_LINE
-				if not open:
-					continue
+					if bt == Tile.INDUSTRY or bt == Tile.POWER_PLANT:
+						continue
+					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE:
+						offset = ROAD_HALF_WIDTH + 2.6   # in the pavement in front of the buildings
 				for k in 4:
-					var spot := c + Vector2(axis) * (-18.75 + k * 12.5) + Vector2(normal) * (ROAD_HALF_WIDTH + 3.5)
-					var parts := _tree_parts(spot, rng.randf_range(7.0, 10.0), false, rng)
-					trunk_items.append([parts[0], Color(0.30, 0.22, 0.15)])
-					crown_items.append([parts[1], parts[2]])
-	_fill(city_trunks.multimesh, trunk_items, false)
-	_fill(city_crowns.multimesh, crown_items, false)
+					if rng.randf() < 0.12:
+						continue   # the odd gap
+					var spot := c + Vector2(axis) * (-18.75 + k * 12.5 + rng.randf_range(-0.8, 0.8)) \
+						+ Vector2(normal) * offset
+					var tall := rng.randf_range(6.5, 10.5) if kind != TreeKind.ORNAMENTAL else rng.randf_range(5.0, 7.0)
+					_add_tree(lists, _tree(spot, tall, kind, rng, 0.72))
 
 
 # -------------------------------------------------------------- day and night

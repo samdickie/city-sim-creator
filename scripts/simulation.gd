@@ -168,6 +168,8 @@ func _zone_check(i: int) -> Array:
 		return [Growth.FULL, "fully built up"]
 	var next_stage: int = stage_at(i, lv + 1)
 	if demand_for(t) < step_size(i) * 0.5:
+		if appeal() < 0.5:
+			return [Growth.WAITING, "waiting, taxes are too high for anyone to move in"]
 		match t:
 			Tile.HOMES:
 				return [Growth.WAITING, "waiting, the town needs more jobs first"]
@@ -735,25 +737,59 @@ func jobs() -> int:
 	return shop_jobs + industry_jobs
 
 
-func _update_demand() -> void:
-	var workers := population * Settings.WORKER_SHARE
-	# People move in when there are jobs (plus a pull to get the town started).
-	var homes := (jobs() + Settings.TOWN_PULL) / Settings.WORKER_SHARE - population
-	# Shops follow residents.
-	var shops := population * Settings.SHOP_JOBS_PER_PERSON - shop_jobs
-	# Industry soaks up workers that shops don't employ.
-	var industry := workers + Settings.INDUSTRY_PULL - jobs()
+func appeal() -> float:
+	# How keen people and businesses are to come here: 1 at the default tax rate,
+	# more with lower taxes, less with higher; below 0 they start to leave.
+	return clampf(1.0 - (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT, -1.0, 2.0)
 
-	# Taxes above the default put people and businesses off (and below, attract them).
-	var tax_effect := maxf(0.0, 1.0 - (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT)
-	demand[Tile.HOMES] = homes * tax_effect if homes > 0 else homes
-	demand[Tile.SHOPS] = shops * tax_effect if shops > 0 else shops
-	demand[Tile.INDUSTRY] = industry * tax_effect if industry > 0 else industry
+
+func _update_demand() -> void:
+	var a := appeal()
+	var workers := population * Settings.WORKER_SHARE
+	var spare_jobs := jobs() - workers          # below 0 = people out of work
+	# Homes: people from the region who'd like to move here (more for a bigger,
+	# cheaper town), plus people coming for spare jobs (or put off by unemployment).
+	var homes := (Settings.TOWN_PULL + population * Settings.REGION_GROWTH) * a \
+		+ spare_jobs * Settings.JOB_PULL
+	# Shops and offices follow residents; industry employs the workers they don't.
+	var shop_target := population * Settings.SHOP_JOBS_PER_PERSON
+	demand[Tile.HOMES] = homes
+	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, a)
+	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs, industry_jobs, a)
+
+
+func _business_demand(gap: float, jobs_now: int, a: float) -> float:
+	# Businesses expand into a gap only as keenly as taxes allow; with very high
+	# taxes they start closing down.
+	var d := gap * clampf(a, 0.0, 1.5) if gap > 0.0 else gap
+	if a < 0.0:
+		d += a * jobs_now * 0.2
+	return d
+
+
+func tax_word() -> String:
+	# How the tax rate is going down, for the HUD.
+	var a := appeal()
+	if a >= 1.3:
+		return "attracting people"
+	if a >= 0.7:
+		return "about right"
+	if a >= 0.3:
+		return "putting people off"
+	if a >= 0.0:
+		return "stopping growth"
+	return "people are leaving"
 
 
 func demand_bar(t: int) -> float:
-	# Demand scaled to -1..1 for the on-screen bars.
-	var scale := float(_capacity_per_level(t)) * 10.0
+	# Demand scaled to -1..1 for the on-screen bars (relative to the town's size,
+	# so a big town needs a big demand to fill a bar).
+	var size := float(population) * 0.5
+	if t == Tile.SHOPS:
+		size = shop_jobs
+	elif t == Tile.INDUSTRY:
+		size = industry_jobs
+	var scale := float(_capacity_per_level(t)) * 10.0 + size * 0.1
 	return clampf(float(demand[t]) / scale, -1.0, 1.0)
 
 
