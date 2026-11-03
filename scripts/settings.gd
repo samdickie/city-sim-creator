@@ -52,10 +52,8 @@ const TAX_BASE := 2.0             # £ per resident or job per month at a 100% r
 const ROAD_UPKEEP := 0.5          # £ per road tile per month
 
 # --- Power ---
-const POWER_PLANT_COST := 3000
 const POWER_LINE_COST := 5
-const POWER_PER_PLANT := 200      # one plant powers this many zone levels
-const POWER_PLANT_UPKEEP := 100   # £ per plant per month
+# (Power plants, wind and solar are in BUILDINGS below.)
 
 # --- Parks ---
 const PARK_COST := 100
@@ -77,6 +75,62 @@ const HOSPITAL_NEEDED_POP := 2500  # bigger towns: homes with no hospital grow a
 const FIRE_START_POP := 500        # fires can break out once the town is this big
 const FIRE_CHANCE := 0.0005        # chance per built plot per month with no fire cover (industry x2)
 
+# --- Other buildings: power, utilities, leisure and transport ---
+# Each one: name, cost (per tile for "area" ones you drag over), monthly upkeep,
+# the population it unlocks at, and what it does:
+#   power / water / rubbish   how much it supplies (power and water in zone levels,
+#                             rubbish in residents' worth)
+#   uses_power                power it needs to work (0 = none)
+#   value, radius             land value it adds (or takes away) round about, in tiles
+#   appeal                    how much it makes the whole town more appealing
+#   bus                       tiles round a bus depot where plots can be 3 tiles from a road
+#   visitors                  extra shop demand it brings, as a share of the population
+#   port_jobs                 extra industry demand a harbour brings
+#   near_sea                  must be built next to the sea
+#   only_one                  the town can only have one
+const BUILDINGS := {
+	"coal": {"name": "Coal power plant", "cost": 3000, "upkeep": 100, "power": 200,
+		"value": -0.30, "radius": 5, "about": "Cheap power, but smoky: lowers land value nearby"},
+	"gas": {"name": "Gas power plant", "cost": 5000, "upkeep": 150, "power": 400, "unlock": 1000,
+		"value": -0.15, "radius": 4, "about": "Twice the power of coal and cleaner"},
+	"nuclear": {"name": "Nuclear power plant", "cost": 15000, "upkeep": 350, "power": 1500, "unlock": 5000,
+		"value": -0.20, "radius": 6, "about": "Huge output for a big town; people don't like living next to it"},
+	"wind": {"name": "Wind turbine", "cost": 400, "upkeep": 8, "power": 25, "area": true,
+		"value": -0.02, "radius": 1, "about": "Clean power, one turbine per tile (drag to build a wind farm)"},
+	"solar": {"name": "Solar farm", "cost": 300, "upkeep": 5, "power": 15, "area": true, "unlock": 300,
+		"about": "Clean, quiet power (drag over a field)"},
+	"water_pump": {"name": "Water pump", "cost": 800, "upkeep": 30, "water": 400, "uses_power": 2,
+		"about": "Supplies water for 400 zone levels; water travels through roads and buildings"},
+	"water_tower": {"name": "Water tower", "cost": 300, "upkeep": 10, "water": 120, "uses_power": 1,
+		"about": "A small, cheap water supply"},
+	"landfill": {"name": "Landfill", "cost": 100, "upkeep": 5, "rubbish": 800, "area": true,
+		"value": -0.12, "radius": 3, "about": "Takes the rubbish of 800 residents per tile; nobody wants to live by it"},
+	"recycling": {"name": "Recycling centre", "cost": 2500, "upkeep": 70, "rubbish": 2500, "uses_power": 3,
+		"unlock": 1000, "value": -0.03, "radius": 2, "about": "Takes the rubbish of 2,500 residents, cleanly"},
+	"golf": {"name": "Golf course", "cost": 150, "upkeep": 2, "area": true, "value": 0.07, "radius": 3,
+		"appeal": 0.004, "about": "Fairways, greens and bunkers (drag to lay out holes); raises land value"},
+	"library": {"name": "Library", "cost": 1200, "upkeep": 40, "uses_power": 2, "unlock": 500,
+		"value": 0.05, "radius": 6, "appeal": 0.02, "about": "Raises land value and appeal"},
+	"museum": {"name": "Museum", "cost": 3500, "upkeep": 80, "uses_power": 3, "unlock": 2000,
+		"value": 0.08, "radius": 8, "appeal": 0.04, "about": "A big draw: land value and appeal"},
+	"stadium": {"name": "Stadium", "cost": 8000, "upkeep": 150, "uses_power": 6, "unlock": 5000,
+		"value": 0.02, "radius": 8, "appeal": 0.08, "only_one": true, "about": "A football ground: a big boost to appeal"},
+	"marina": {"name": "Marina", "cost": 4000, "upkeep": 60, "uses_power": 2, "unlock": 1500, "near_sea": true,
+		"value": 0.12, "radius": 5, "appeal": 0.03, "about": "Yachts by the shore: land value soars nearby"},
+	"town_hall": {"name": "Town hall", "cost": 5000, "upkeep": 100, "uses_power": 3, "unlock": 1000,
+		"value": 0.06, "radius": 6, "appeal": 0.06, "only_one": true, "about": "The heart of the town: appeal and land value"},
+	"bus_depot": {"name": "Bus depot", "cost": 2000, "upkeep": 80, "uses_power": 3, "unlock": 500,
+		"value": 0.03, "radius": 6, "bus": 14, "about": "Buses let plots up to 3 tiles from a road grow (within 700 m)"},
+	"station": {"name": "Railway station", "cost": 6000, "upkeep": 120, "uses_power": 4, "unlock": 2000,
+		"value": 0.08, "radius": 6, "visitors": 0.03, "about": "Visitors by train: more demand for shops, higher land value"},
+	"harbour": {"name": "Harbour", "cost": 7000, "upkeep": 120, "uses_power": 4, "unlock": 1000, "near_sea": true,
+		"value": -0.05, "radius": 3, "port_jobs": 80, "about": "Ships bring trade: more demand for industry"},
+}
+const LEISURE_APPEAL_MAX := 0.3   # all the leisure buildings together add at most this much appeal
+const RUBBISH_START_POP := 400    # below this the town's rubbish isn't a problem
+const RUBBISH_PER_JOB := 0.5      # a job makes half as much rubbish as a resident
+const RUBBISH_EFFECT := 0.5       # appeal lost when none of the rubbish is collected
+
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
@@ -94,7 +148,6 @@ const SEA_VIEW_TILES := 6
 const PARK_BONUS := 0.07          # per park tile within 3 tiles
 const SHOP_BONUS := 0.012         # per level of shops within 3 tiles
 const INDUSTRY_PENALTY := 0.03    # per level of industry within 4 tiles
-const PLANT_PENALTY := 0.30       # a power plant within 5 tiles
 const BASE_HOME_PRICE := 160000   # £ for a home on average land with no shortage
 const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this much
 

@@ -5,7 +5,9 @@ extends Node3D
 ## following the same straight runs and bends the roads are drawn with.
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
-	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
+	POLICE, FIRE, SCHOOL, HOSPITAL,
+	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
 
 const LANE_OFFSET := 2.4        # metres left of the road's centre line
 const SPEED_MIN := 11.0         # metres per second (about 25 to 35 mph)

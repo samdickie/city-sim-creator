@@ -16,7 +16,7 @@ signal save_pressed
 signal load_pressed
 signal day_cycle_toggled(on: bool)
 signal overlay_chosen(kind: int)
-signal service_chosen(service: int)
+signal item_chosen(index: int)        # a building picked from a group (Power, Services...)
 signal funding_changed(step: float)
 
 const Settings = preload("res://scripts/settings.gd")
@@ -26,13 +26,14 @@ const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
-const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services"]
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
 	"Which plots have electricity, and what carries it",
 	"How far each plot is from a road (zones need one within 2 tiles)",
 	"Why each zone is or isn't growing",
-	"How many of police, fire, schools and hospitals cover each area"]
+	"How many of police, fire, schools and hospitals cover each area",
+	"Which plots have water (anything bigger than a first-level plot needs it)"]
 
 var tool_buttons := {}
 var density_buttons := {}
@@ -53,8 +54,10 @@ var message_label: Label
 var help_panel: PanelContainer
 var demand_box: Control
 var overlay_buttons := {}
-var service_buttons := {}
-var service_panel: PanelContainer
+var group_panel: PanelContainer
+var group_row: HBoxContainer
+var funding_row: HBoxContainer
+var utility_label: Label
 var funding_label: Label
 var legend_box: VBoxContainer
 var confirm_new: ConfirmationDialog
@@ -159,6 +162,8 @@ func _build_top_right(root: Control) -> void:
 	box.add_child(power_label)
 	services_label = _label("", 14, TEXT_DIM)
 	box.add_child(services_label)
+	utility_label = _label("", 14, TEXT_DIM)
+	box.add_child(utility_label)
 	growth_label = _label("", 14, TEXT_DIM)
 	box.add_child(growth_label)
 	box.add_child(_divider())
@@ -198,7 +203,7 @@ func _build_toolbar(root: Control, tools: Array) -> void:
 	for t in tools:
 		var id: int = t[0]
 		var b := _button("%s\n%s" % [t[1], t[3]], true)
-		b.custom_minimum_size = Vector2(108, 58)
+		b.custom_minimum_size = Vector2(96, 58)
 		b.tooltip_text = "Key %s" % t[2]
 		# A coloured strip along the bottom shows what the tool builds.
 		var strip := ColorRect.new()
@@ -240,49 +245,38 @@ func _build_toolbar(root: Control, tools: Array) -> void:
 		density_buttons[d] = db
 	density_panel.visible = false
 
-	# Service picker and funding, shown above the toolbar while Services is selected.
-	service_panel = _panel(root)
-	service_panel.anchor_left = 0.5
-	service_panel.anchor_right = 0.5
-	service_panel.anchor_top = 1.0
-	service_panel.anchor_bottom = 1.0
-	service_panel.offset_bottom = -116.0
-	service_panel.offset_top = -116.0
-	service_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	service_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	var sbox := VBoxContainer.new()
-	sbox.add_theme_constant_override("separation", 6)
-	service_panel.add_child(sbox)
-	var srow := HBoxContainer.new()
-	srow.add_theme_constant_override("separation", 6)
-	sbox.add_child(srow)
-	srow.add_child(_label("Service (Tab)", 14, TEXT_DIM))
-	for s: int in [0, 1, 2, 3]:
-		var cost: int = Settings.SERVICE_COSTS[s]
-		var sb := _button("%s\n%s" % [Settings.SERVICE_NAMES[s], money_text(cost)], true)
-		sb.custom_minimum_size = Vector2(120, 0)
-		sb.tooltip_text = ["Police: in a bigger town, homes and shops without police grow at half speed",
-			"Fire: stops buildings nearby burning down",
-			"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
-			"Hospitals: in a bigger town, homes without one grow at half speed"][s]
-		sb.pressed.connect(func(): service_chosen.emit(s))
-		srow.add_child(sb)
-		service_buttons[s] = sb
-	var frow := HBoxContainer.new()
-	frow.add_theme_constant_override("separation", 6)
-	sbox.add_child(frow)
+	# Building picker for the group tools (Power, Utilities, Services, Leisure,
+	# Transport), shown above the toolbar; Services also get a funding row.
+	group_panel = _panel(root)
+	group_panel.anchor_left = 0.5
+	group_panel.anchor_right = 0.5
+	group_panel.anchor_top = 1.0
+	group_panel.anchor_bottom = 1.0
+	group_panel.offset_bottom = -116.0
+	group_panel.offset_top = -116.0
+	group_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	group_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var gbox := VBoxContainer.new()
+	gbox.add_theme_constant_override("separation", 6)
+	group_panel.add_child(gbox)
+	group_row = HBoxContainer.new()
+	group_row.add_theme_constant_override("separation", 6)
+	gbox.add_child(group_row)
+	funding_row = HBoxContainer.new()
+	funding_row.add_theme_constant_override("separation", 6)
+	gbox.add_child(funding_row)
 	funding_label = _label("", 14, TEXT)
 	funding_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	frow.add_child(funding_label)
+	funding_row.add_child(funding_label)
 	var less := _button("–", false)
 	less.tooltip_text = "Less funding: cheaper, but reaches less far (0% closes it)"
 	less.pressed.connect(func(): funding_changed.emit(-0.1))
-	frow.add_child(less)
+	funding_row.add_child(less)
 	var more := _button("+", false)
 	more.tooltip_text = "More funding: costs more, reaches further (up to 150%)"
 	more.pressed.connect(func(): funding_changed.emit(0.1))
-	frow.add_child(more)
-	service_panel.visible = false
+	funding_row.add_child(more)
+	group_panel.visible = false
 
 
 func _build_info(root: Control) -> void:
@@ -370,13 +364,17 @@ func _build_help(root: Control) -> void:
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
-		"Tools: keys 1-9     Pause: Space     Fast: F     Help: H\n" +
-		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services)\n" +
+		"Tools: keys 1-0, - and =     Pause: Space     Fast: F     Help: H\n" +
+		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services, water)\n" +
 		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
 		"They need a road and power. Bigger towns grow slowly without them; fires break out\n" +
 		"where there's no fire station. Funding (- / +) changes how far they reach.\n" +
 		"Taxes: people accept higher taxes when they get good services for them. High taxes\n" +
-		"with poor services stop growth, and eventually people leave (worst-served areas first).\n\n" +
+		"with poor services stop growth, and eventually people leave (worst-served areas first).\n" +
+		"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings:\n" +
+		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
+		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +
+		"Some buildings unlock as the town grows.\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
 		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
 		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
@@ -397,15 +395,27 @@ func set_density(d: int) -> void:
 		(density_buttons[k] as Button).set_pressed_no_signal(k == d)
 
 
-func set_service(s: int, funding_text: String) -> void:
-	for k in service_buttons:
-		(service_buttons[k] as Button).set_pressed_no_signal(k == s)
+func show_group(items: Array, selected: int, funding_text: String) -> void:
+	# items: [[name, price, about, locked], ...]; an empty list hides the picker.
+	group_panel.visible = not items.is_empty()
+	for child in group_row.get_children():
+		child.queue_free()
+	if items.is_empty():
+		return
+	group_row.add_child(_label("Pick (Tab)", 14, TEXT_DIM))
+	for n in items.size():
+		var item: Array = items[n]
+		var locked: String = item[3]
+		var b := _button("%s\n%s" % [item[0], locked if locked != "" else item[1]], true)
+		b.custom_minimum_size = Vector2(118, 0)
+		b.tooltip_text = item[2]
+		b.set_pressed_no_signal(n == selected)
+		if locked != "":
+			b.modulate = Color(1, 1, 1, 0.55)
+		b.pressed.connect(func(): item_chosen.emit(n))
+		group_row.add_child(b)
+	funding_row.visible = funding_text != ""
 	funding_label.text = funding_text
-
-
-func show_services(on: bool) -> void:
-	if service_panel:
-		service_panel.visible = on
 
 
 func show_density(on: bool) -> void:
@@ -444,6 +454,10 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		var tight: bool = sim.power_used > sim.power_supply * 0.9
 		power_label.add_theme_color_override("font_color", BAD if tight else TEXT_DIM)
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
+	var water_text := "no water supply yet" if sim.water_supply == 0 \
+		else "%d of %d used" % [sim.water_used, sim.water_supply]
+	utility_label.text = "Water %s   ·   rubbish %s" % [water_text, sim.rubbish_word()]
+	utility_label.add_theme_color_override("font_color", BAD if sim.rubbish_shortfall() > 0.3 else TEXT_DIM)
 	var service_word: String = sim.services_word()
 	services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
 	services_label.add_theme_color_override("font_color",

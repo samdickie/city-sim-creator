@@ -55,7 +55,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Power
 - Zones need electricity to grow; plots without it slowly shrink.
-- A power plant (£3,000, £100/month upkeep) powers 200 zone levels.
+- Power tool (6), pick with Tab: coal plant (£3,000, £100/month, 200 units, smoky), gas plant (£5,000, 400 units, from 1,000 people), nuclear (£15,000, 1,500 units, from 5,000 people), wind turbines (£400 a tile, 25 units each, drag a wind farm), solar farm (£300 a tile, 15 units, from 300 people), power lines (£5).
 - Power spreads through any touching built tiles: roads, zones, power lines (£5) and other plants.
 - When a network runs short, plots furthest from the plant lose power first.
 
@@ -66,6 +66,19 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Corner and through plots build along every road they touch.
 - Zoned plots waiting to grow show building sites; leftover open land inside the town becomes pocket parks, allotments or car parks (looks only).
 
+## Water and rubbish (Utilities, 7)
+- Anything bigger than a first-level plot needs water. Water pumps (£800, 400 units, need power) and water towers (£300, 120 units) supply it; it travels through roads and buildings like power, nearest plots first.
+- Towns over 400 people make rubbish (1 per resident, 0.5 per job). Landfill (£100 a tile, takes 800, lowers land value nearby) and recycling centres (£2,500, takes 2,500, from 1,000 people) collect it. Uncollected rubbish cuts appeal (up to -0.5).
+
+## Leisure and landmarks (-)
+- Golf course (£150 a tile, drag to lay out holes), library (from 500 people), museum (2,000), stadium (5,000, one only), marina (1,500, by the sea), town hall (1,000, one only). Each raises land value round it and the town's appeal (all together up to +0.3), and costs upkeep. They need a road (and power, except golf).
+
+## Transport (=)
+- Bus depot (from 500 people): plots within 700 m can grow 3 tiles from a road instead of 2.
+- Railway station (2,000): visitors add shop demand (3% of the population each, up to two stations); raises land value.
+- Harbour (1,000, by the sea): ships bring trade, +80 industry demand each.
+- All the numbers for these buildings are in `Settings.BUILDINGS`.
+
 ## Services
 - Services tool (0), then pick one (Tab or the buttons): police station £1,500, fire station £1,500, school £2,000, hospital £4,000. One tile each; they need a road and power (3 units) to work.
 - Each covers the area round it: fully close by, fading out at its reach (police 800 m, fire 700 m, school 600 m, hospital 1 km at 100% funding). Covered areas gain land value.
@@ -74,7 +87,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A Services map view shows how many of the four cover each area.
 
 ## Map views (overlays)
-- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services. Each has a colour key.
+- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water. Each has a colour key.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
 

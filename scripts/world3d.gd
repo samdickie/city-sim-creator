@@ -12,7 +12,9 @@ const FOLIAGE_SHADER = preload("res://shaders/foliage.gdshader")
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
-	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
+	POLICE, FIRE, SCHOOL, HOSPITAL,
+	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -137,8 +139,10 @@ var _alert_items: Array = []          # [sprite, ground point]; reused between r
 var _alert_count := 0                 # how many of them are showing
 var _alert_size := 30.0
 var _power_icon: Texture2D
+var _water_icon: Texture2D
 var _road_icon: Texture2D
 
+const WATER_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#3d8bff' stroke='#16181c' stroke-width='7'/><path d='M48 16 C40 32 28 44 28 58 A20 20 0 0 0 68 58 C68 44 56 32 48 16 Z' fill='white'/></svg>"
 const POWER_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#ffd21f' stroke='#16181c' stroke-width='7'/><path d='M54 14 L26 54 H45 L39 84 L70 40 H51 Z' fill='#16181c'/></svg>"
 const ROAD_ICON_SVG := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><circle cx='48' cy='48' r='42' fill='#e5484d' stroke='#16181c' stroke-width='7'/><rect x='22' y='41' width='52' height='14' rx='3' fill='white'/></svg>"
 var sun := DirectionalLight3D.new()
@@ -167,7 +171,7 @@ const BIRCH_BARK := Color(0.80, 0.78, 0.72)
 const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
-enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES }
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
@@ -177,6 +181,7 @@ const OV_GREEN := Color(0.18, 0.70, 0.30)
 const OV_BLUE := Color(0.30, 0.56, 0.95)
 const OV_GREY := Color(0.55, 0.56, 0.58)
 const OV_DARK_YELLOW := Color(0.62, 0.52, 0.16)
+const OV_DARK_BLUE := Color(0.16, 0.30, 0.58)
 var overlay: int = Overlay.NONE
 var overlay_image: Image
 var overlay_texture: ImageTexture
@@ -444,6 +449,7 @@ func _build_city_nodes() -> void:
 
 	_power_icon = _svg_texture(POWER_ICON_SVG)
 	_road_icon = _svg_texture(ROAD_ICON_SVG)
+	_water_icon = _svg_texture(WATER_ICON_SVG)
 	add_child(alerts)
 
 
@@ -524,17 +530,29 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				if t != Tile.INDUSTRY:
 					strength = ZONE_STRENGTH[sim.density[i]]
 				tint = Color(c, strength) if levels[i] == 0 else Color(0, 0, 0, 0)
-				if reach[i] > Settings.ROAD_REACH:
+				if not sim.has_road_access(i):
 					warn.r = 1.0
 				elif power[i] == 0:
 					warn.g = 1.0   # (shown as a floating icon, see _build_alerts)
+				elif sim.needs_water_to_grow(i):
+					warn.b = 1.0
 			elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
 				if reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
 				elif power[i] == 0:
 					warn.g = 1.0
-			elif t == Tile.POWER_PLANT:
-				tint = Color(0.55, 0.55, 0.55, 0.6)
+			elif sim.is_building(t):
+				if not sim.makes_power(t):
+					if reach[i] > Settings.ROAD_REACH:
+						warn.r = 1.0
+					elif not sim.building_working(i):
+						warn.g = 1.0
+				if t == Tile.POWER_PLANT or t == Tile.GAS or t == Tile.NUCLEAR or t == Tile.RECYCLING:
+					tint = Color(0.55, 0.55, 0.55, 0.6)
+				elif t == Tile.GOLF:
+					tint = Color(0.44, 0.74, 0.30, 0.6)      # fairway
+				elif t == Tile.LANDFILL:
+					tint = Color(0.42, 0.36, 0.27, 0.75)
 			elif t == Tile.PARK:
 				tint = Color(0.40, 0.72, 0.32, 0.45)
 			if _infill[i] == INFILL_PARK:
@@ -561,7 +579,7 @@ func _build_alerts() -> void:
 	for y in map_h:
 		for x in map_w:
 			var warn := warn_image.get_pixel(x, y)
-			if warn.r < 0.5 and warn.g < 0.5:
+			if warn.r < 0.5 and warn.g < 0.5 and warn.b < 0.5:
 				continue
 			if count == _alert_items.size():
 				var fresh := Sprite3D.new()
@@ -573,7 +591,7 @@ func _build_alerts() -> void:
 				_alert_items.append([fresh, Vector3.ZERO])
 			var item: Array = _alert_items[count]
 			var sprite: Sprite3D = item[0]
-			sprite.texture = _road_icon if warn.r >= 0.5 else _power_icon
+			sprite.texture = _road_icon if warn.r >= 0.5 else (_power_icon if warn.g >= 0.5 else _water_icon)
 			sprite.visible = true
 			item[1] = ground_point(Vector2i(x, y))
 			count += 1
@@ -627,6 +645,8 @@ func refresh_buildings() -> void:
 		var roofs_before := roof_list.size()
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
+		elif sim.is_building(t):
+			_plan_building(i, t, wall_list, roof_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
 		elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
@@ -714,6 +734,9 @@ func overlay_legend(kind: int) -> Array:
 		Overlay.SERVICES:
 			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
 				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
+		Overlay.WATER:
+			return [[OV_BLUE, "Has water"], [OV_DARK_BLUE, "Carries water"],
+				[OV_RED, "Needs water to grow"], [OV_GREY, "Not connected"]]
 	return []
 
 
@@ -754,15 +777,24 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 		Overlay.POWER:
 			if t == Tile.EMPTY:
 				return none
-			if zone or service:
+			if zone or service or sim.power_use(i) > 0:
 				return Color(OV_YELLOW if power[i] == 1 else OV_RED, 0.9)
 			return Color(OV_DARK_YELLOW if power[i] == 1 else OV_GREY, 0.8)
+		Overlay.WATER:
+			if t == Tile.EMPTY:
+				return none
+			var wet: PackedByteArray = sim.water_map()
+			if zone:
+				if sim.needs_water_to_grow(i):
+					return Color(OV_RED, 0.9)
+				return Color(OV_BLUE if wet[i] == 1 else OV_GREY, 0.9)
+			return Color(OV_DARK_BLUE if wet[i] == 1 else OV_GREY, 0.8)
 		Overlay.ROADS:
 			if t == Tile.ROAD:
 				return Color(OV_GREY, 0.8)
 			if reach[i] == 1:
 				return Color(OV_GREEN, 0.8)
-			if reach[i] <= Settings.ROAD_REACH:
+			if sim.has_road_access(i):
 				return Color(OV_LIGHT_GREEN, 0.7)
 			if zone:
 				return Color(OV_RED, 0.9)
@@ -1037,7 +1069,7 @@ func _build_power_lines(tiles: PackedByteArray) -> void:
 				if n.x >= map_w or n.y >= map_h:
 					continue
 				var nt := tiles[n.y * map_w + n.x]
-				if nt != Tile.POWER_LINE and nt != Tile.POWER_PLANT:
+				if nt != Tile.POWER_LINE and not sim.makes_power(nt):
 					continue
 				var a := base + Vector3(0, PYLON_HEIGHT - 2.0, 0)
 				var b := ground_point(n) + Vector3(0, PYLON_HEIGHT - 2.0, 0)
@@ -1049,7 +1081,7 @@ func _build_power_lines(tiles: PackedByteArray) -> void:
 			# Also link west/north into a plant, so plants join the line from any side.
 			for d: Vector2i in [Vector2i(-1, 0), Vector2i(0, -1)]:
 				var n: Vector2i = Vector2i(x, y) + d
-				if n.x < 0 or n.y < 0 or tiles[n.y * map_w + n.x] != Tile.POWER_PLANT:
+				if n.x < 0 or n.y < 0 or not sim.makes_power(tiles[n.y * map_w + n.x]):
 					continue
 				var a := base + Vector3(0, PYLON_HEIGHT - 2.0, 0)
 				var b := ground_point(n) + Vector3(0, PYLON_HEIGHT - 2.0, 0)
@@ -1858,6 +1890,315 @@ func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator
 			_parked_car(i, front, 12.0 + k * 3.0, 0.8, true, rng)
 
 
+# --------------------------------------------- power, utilities, leisure, transport
+
+const TURBINE_WHITE := Color(0.92, 0.93, 0.93)
+const PANEL_BLUE := Color(0.10, 0.15, 0.28)
+const TANK_GREY := Color(0.64, 0.70, 0.74)
+const GREEN_SPEC := Color(0.42, 0.68, 0.30)    # putting green
+const BUNKER_SAND := Color(0.86, 0.80, 0.62)
+const BUS_RED := Color(0.70, 0.12, 0.12)
+const TRAIN_RED := Color(0.62, 0.12, 0.18)
+const TEAM_BLUE := Color(0.12, 0.28, 0.62)
+const HULL_WHITE := Color(0.94, 0.94, 0.92)
+const SHIP_HULL := Color(0.20, 0.22, 0.26)
+
+
+func _box_item(list: Array, at: Vector3, x_axis: Vector3, z_axis: Vector3, size: Vector3,
+		colour: Color, style: int = -1) -> void:
+	# A box standing at a point, size along the given axes. Into the wall list
+	# (with a style) or the props list (style -1).
+	if x_axis.dot(Vector3.UP.cross(z_axis)) < 0.0:
+		x_axis = -x_axis      # keep it right-handed (a mirrored box would render inside out)
+	var xf := Transform3D(Basis(x_axis * size.x, Vector3.UP * size.y, z_axis * size.z), at)
+	if style >= 0:
+		list.append([xf, colour, Color(size.x, size.y, size.z, style)])
+	else:
+		list.append([xf, colour])
+
+
+func _cylinder(chimney_list: Array, at: Vector3, radius: float, height: float, colour: Color) -> void:
+	# A round tower or tank standing on a point.
+	chimney_list.append([Transform3D(Basis.from_scale(Vector3(radius, height, radius)),
+		at + Vector3.UP * height * 0.5), colour])
+
+
+func _sea_side(i: int) -> Vector2i:
+	# The direction of the sea from a tile by the shore (or (0, 0)).
+	var tile := Vector2i(i % map_w, i / map_w)
+	for d: Vector2i in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
+		var n := tile + d
+		if n.x >= 0 and n.y >= 0 and n.x < map_w and n.y < map_h and water[n.y * map_w + n.x] == 1:
+			return d
+	return Vector2i.ZERO
+
+
+func _columns(spot: Dictionary, d: float, count: int, span: float, height: float, colour: Color,
+		wall_list: Array, roof_list: Array) -> void:
+	# A classical portico: a row of columns in front of the door under a pediment.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	for k in count:
+		var along := -span * 0.5 + span * k / maxf(count - 1, 1)
+		var at: Vector3 = pos + x_axis * along - z_axis * (d * 0.5 + 2.5)
+		_box_item(wall_list, at, x_axis, z_axis, Vector3(0.9, height, 0.9), colour, STYLE_PAINT)
+	var top: Vector3 = pos + Vector3.UP * height - z_axis * (d * 0.5 + 1.5)
+	_box_item(wall_list, top, x_axis, z_axis, Vector3(span + 2.0, 0.9, 4.0), colour, STYLE_PAINT)
+	roof_list.append([Transform3D(Basis(x_axis * (span + 2.4), Vector3.UP * 2.4, z_axis * 4.4),
+		top + Vector3.UP * 0.9), colour.darkened(0.1)])
+
+
+func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = i * 4421 + t
+	var front := _frontage(i)
+	var depth := _depth(i, front)
+	var tile := Vector2i(i % map_w, i / map_w)
+	var c2 := tile_centre(tile)
+	var centre := Vector3(c2.x, maxf(height_at(c2.x, c2.y), 0.0), c2.y)
+	match t:
+		Tile.GAS:
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
+			var hall := _place(i, front, -6.0, 6.0, 30.0, 18.0)
+			_add_block(hall, 30.0, 18.0, 14.0, Color(0.52, 0.60, 0.68), STYLE_INDUSTRY, 2.0,
+				SHED_METAL.darkened(0.2), wall_list, roof_list)
+			var boiler := _place(i, front, -6.0, 27.0, 20.0, 12.0)
+			_add_block(boiler, 20.0, 12.0, 24.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+			for along: float in [10.0, 17.0]:
+				var stack := _place(i, front, along, 30.0, 3.0, 3.0)
+				_cylinder(chimney_list, stack["pos"], 1.6, 46.0, Color(0.78, 0.78, 0.76))
+			var tank := _place(i, front, 16.0, 10.0, 10.0, 10.0)
+			_cylinder(chimney_list, tank["pos"], 4.5, 8.0, Color(0.86, 0.86, 0.84))
+			_plan_fence(i, front, depth)
+		Tile.NUCLEAR:
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
+			for along: float in [-12.0, 12.0]:
+				var tower := _place(i, front, along, 32.0, 20.0, 20.0)
+				_cylinder(chimney_list, tower["pos"], 10.5, 44.0, Color(0.82, 0.82, 0.80))
+			var reactor := _place(i, front, -14.0, 5.0, 16.0, 14.0)
+			_add_block(reactor, 16.0, 14.0, 16.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+			var dome_at: Vector3 = reactor["pos"]
+			_cylinder(chimney_list, dome_at + Vector3.UP * 16.0, 6.5, 5.0, Color(0.74, 0.74, 0.72))
+			var turbine := _place(i, front, 10.0, 5.0, 24.0, 12.0)
+			_add_block(turbine, 24.0, 12.0, 12.0, Color(0.55, 0.62, 0.70), STYLE_INDUSTRY, 0.0, SLATE,
+				wall_list, roof_list)
+			_plan_fence(i, front, depth)
+		Tile.WIND:
+			# One turbine: a white tower, the nacelle facing the south-westerly wind,
+			# three blades at a random angle, and a gravel pad.
+			_slab(i, front, 0.0, 22.0, 8.0, 8.0, YARD)
+			var base: Vector3 = centre
+			var hub_h := 62.0
+			_cylinder(chimney_list, base, 1.5, hub_h, TURBINE_WHITE)
+			var into_wind := Vector3(-0.71, 0.0, 0.71)
+			var side := Vector3.UP.cross(into_wind).normalized()
+			var hub: Vector3 = base + Vector3.UP * hub_h
+			_box_item(_prop_items, hub - into_wind * 3.0 + Vector3.DOWN * 1.5, side, into_wind,
+				Vector3(3.0, 3.0, 9.0), TURBINE_WHITE)
+			var rotor: Vector3 = hub + into_wind * 1.8
+			var frame := Basis(side, Vector3.UP, into_wind)
+			var phase := rng.randf() * TAU
+			for k in 3:
+				var spin := Basis(into_wind, phase + k * TAU / 3.0)
+				var blade := spin * frame * Basis.from_scale(Vector3(1.4, 34.0, 0.35))
+				_prop_items.append([Transform3D(blade, rotor), TURBINE_WHITE])
+		Tile.SOLAR:
+			# Rows of panels tilted to the south.
+			for k in 6:
+				var at := centre + Vector3(0.0, 0.6, -18.0 + k * 7.2)
+				at.y = maxf(height_at(at.x, at.z), 0.0) + 0.6
+				var panel := Basis(Vector3.RIGHT, deg_to_rad(-25.0)) * Basis.from_scale(Vector3(44.0, 0.12, 3.6))
+				_prop_items.append([Transform3D(panel, at), PANEL_BLUE])
+				for leg: float in [-18.0, 0.0, 18.0]:
+					_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.2, 1.2, 0.2)),
+						at + Vector3(leg, -1.0, 0.0)), CHARCOAL])
+		Tile.WATER_PUMP:
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
+			var house := _place(i, front, -12.0, 5.0, 12.0, 9.0)
+			_add_block(house, 12.0, 9.0, 5.5, RED_SANDSTONE, STYLE_HOUSE, 3.0, SLATE, wall_list, roof_list)
+			for along: float in [6.0, 18.0]:
+				var tank := _place(i, front, along, 16.0, 10.0, 10.0)
+				_cylinder(chimney_list, tank["pos"], 5.0, 7.0, TANK_GREY)
+			_prop(i, front, 0.0, 12.0, 20.0, 0.8, 0.8, CHARCOAL)        # pipework
+			_plan_fence(i, front, depth)
+		Tile.WATER_TOWER:
+			_slab(i, front, 0.0, 0.0, 30.0, 30.0, YARD)
+			_cylinder(chimney_list, centre, 2.4, 26.0, CONCRETE)
+			_cylinder(chimney_list, centre + Vector3.UP * 26.0, 7.5, 9.0, Color(0.80, 0.82, 0.84))
+			var hut := _place(i, front, 14.0, 4.0, 6.0, 5.0)
+			_add_block(hut, 6.0, 5.0, 3.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+		Tile.LANDFILL:
+			# A stepped mound of covered tips, a track and a lorry or two.
+			_slab(i, front, 0.0, 6.0, 44.0, depth - 10.0, SOIL, 1.5)
+			_slab(i, front, 0.0, 10.0, 34.0, depth - 18.0, Color(0.40, 0.36, 0.30), 3.5)
+			_slab(i, front, 2.0, 15.0, 22.0, depth - 28.0, Color(0.36, 0.34, 0.29), 5.5)
+			_slab(i, front, -20.0, 0.0, 4.0, 10.0, YARD)
+			_prop(i, front, -20.0, 2.0, 2.6, 7.0, 3.2, CRANE_YELLOW)
+			_plan_fence(i, front, depth)
+		Tile.RECYCLING:
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
+			var shed := _place(i, front, -5.0, 8.0, 32.0, 20.0)
+			_add_block(shed, 32.0, 20.0, 10.0, SHED_GREEN, STYLE_INDUSTRY, 2.0, SHED_METAL.darkened(0.2),
+				wall_list, roof_list)
+			var skips := [Color(0.20, 0.45, 0.25), Color(0.15, 0.30, 0.60), Color(0.50, 0.35, 0.20),
+				Color(0.55, 0.55, 0.55)]
+			for k in 6:
+				_prop(i, front, -19.0 + k * 6.5, depth - 10.0, 2.6, 6.0, 2.4, skips[k % 4])
+		Tile.GOLF:
+			# Fairway (the ground colour), a green with its flag, bunkers, a tee and
+			# a few trees in the rough.
+			var green_at := Vector2(rng.randf_range(-12.0, 12.0), rng.randf_range(14.0, depth - 16.0))
+			_slab(i, front, green_at.x, green_at.y, 13.0, 11.0, GREEN_SPEC)
+			for k in rng.randi_range(2, 3):
+				var angle := rng.randf() * TAU
+				_slab(i, front, green_at.x + cos(angle) * 9.0, green_at.y + sin(angle) * 8.0,
+					rng.randf_range(4.0, 6.0), rng.randf_range(3.0, 4.5), BUNKER_SAND)
+			_slab(i, front, -green_at.x * 0.5, depth - 6.0, 6.0, 4.0, GREEN_SPEC)    # tee
+			var flag := _place(i, front, green_at.x + 2.0, green_at.y + 4.0, 0.1, 0.1)
+			var flag_pos: Vector3 = flag["pos"]
+			flag_pos.y = float(flag["ground"])
+			_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.08, 2.4, 0.08)), flag_pos), WHITE_RENDER])
+			_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.9, 0.6, 0.05)),
+				flag_pos + Vector3(0.45, 1.8, 0.0)), Color(0.85, 0.12, 0.10)])
+			for k in 3:
+				_plant(i, front, rng.randf_range(-23.0, 23.0) * (1 if k % 2 == 0 else -1),
+					rng.randf_range(4.0, depth - 4.0), rng.randf_range(6.0, 12.0),
+					TreeKind.PINE if rng.randf() < 0.5 else TreeKind.BROADLEAF, rng)
+		Tile.LIBRARY:
+			_slab(i, front, 0.0, 0.0, 49.0, 9.0, PAVEMENT)
+			var spot := _place(i, front, 0.0, 9.0, 26.0, 16.0)
+			_classical_block(spot, 26.0, 16.0, 2, CREAM_STONE, false, false, wall_list, roof_list)
+			_columns(spot, 16.0, 4, 10.0, 7.5, CREAM_STONE.lightened(0.1), wall_list, roof_list)
+			for k in 4:
+				_plant(i, front, -20.0 + (k % 2) * 40.0, 12.0 + (k / 2) * 14.0, rng.randf_range(7.0, 10.0),
+					TreeKind.BROADLEAF, rng)
+		Tile.MUSEUM:
+			_slab(i, front, 0.0, 0.0, 49.0, 10.0, PAVEMENT)
+			var spot := _place(i, front, -5.0, 10.0, 34.0, 20.0)
+			_classical_block(spot, 34.0, 20.0, 3, HONEY_STONE, false, false, wall_list, roof_list)
+			_columns(spot, 20.0, 6, 16.0, 10.5, HONEY_STONE.lightened(0.12), wall_list, roof_list)
+			var wing := _place(i, front, 18.0, 14.0, 12.0, 16.0)
+			_add_block(wing, 12.0, 16.0, 9.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+		Tile.STADIUM:
+			# A pitch with stands round it, roofs over the long sides and floodlights.
+			var mid := depth * 0.5
+			_slab(i, front, 0.0, mid - 11.0, 32.0, 22.0, LAWN)
+			_slab(i, front, 0.0, mid - 0.08, 0.15, 22.0, BAY_LINE, 0.03)
+			_slab(i, front, -16.0, mid - 11.0, 0.15, 22.0, BAY_LINE, 0.03)
+			_slab(i, front, 16.0, mid - 11.0, 0.15, 22.0, BAY_LINE, 0.03)
+			for back: float in [mid - 18.0, mid + 12.0]:
+				var stand := _place(i, front, 0.0, back, 42.0, 6.0)
+				_add_block(stand, 42.0, 6.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+				var roof_at: Vector3 = stand["pos"]
+				_box_item(wall_list, roof_at + Vector3.UP * 11.0, stand["x"], stand["z"],
+					Vector3(44.0, 0.5, 8.0), TEAM_BLUE, STYLE_PAINT)
+			for along: float in [-20.0, 20.0]:
+				var end := _place(i, front, along, mid - 11.0, 4.0, 22.0)
+				_add_block(end, 4.0, 22.0, 6.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+			for corner: Vector2 in [Vector2(-22.0, mid - 20.0), Vector2(22.0, mid - 20.0),
+					Vector2(-22.0, mid + 19.0), Vector2(22.0, mid + 19.0)]:
+				var post := _place(i, front, corner.x, corner.y, 1.0, 1.0)
+				var post_pos: Vector3 = post["pos"]
+				_cylinder(chimney_list, post_pos, 0.5, 30.0, CHARCOAL)
+				_prop_items.append([Transform3D(Basis.from_scale(Vector3(3.5, 1.6, 0.6)),
+					post_pos + Vector3.UP * 29.0), WHITE_RENDER])
+		Tile.MARINA:
+			# A clubhouse by the road; pontoons and yachts out on the water.
+			var club := _place(i, front, -8.0, 5.0, 18.0, 11.0)
+			_add_block(club, 18.0, 11.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			_slab(i, front, 10.0, 3.0, 22.0, 14.0, CAR_PARK)
+			_plan_on_water(i, rng, false)
+		Tile.TOWN_HALL:
+			_slab(i, front, 0.0, 0.0, 49.0, 12.0, PAVEMENT)
+			var spot := _place(i, front, 0.0, 12.0, 36.0, 18.0)
+			_classical_block(spot, 36.0, 18.0, 3, BLONDE_SANDSTONE, false, false, wall_list, roof_list)
+			_columns(spot, 18.0, 4, 10.0, 11.0, BLONDE_SANDSTONE.lightened(0.12), wall_list, roof_list)
+			var tower := _place(i, front, 0.0, 16.0, 7.0, 7.0)
+			var tower_pos: Vector3 = tower["pos"]
+			_add_block(tower, 7.0, 7.0, 32.0, BLONDE_SANDSTONE, STYLE_CLASSICAL, 5.0, SLATE, wall_list, roof_list)
+			_box_item(wall_list, tower_pos + Vector3.UP * 26.0 - Vector3(tower["z"]) * 3.62,
+				tower["x"], tower["z"], Vector3(2.6, 2.6, 0.2), WHITE_RENDER, STYLE_PAINT)   # clock
+			for along: float in [-18.0, 18.0]:
+				_plant(i, front, along, 5.0, rng.randf_range(7.0, 9.0), TreeKind.BROADLEAF, rng)
+		Tile.BUS_DEPOT:
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, CAR_PARK)
+			var shed := _place(i, front, 0.0, depth - 26.0, 44.0, 22.0)
+			_add_block(shed, 44.0, 22.0, 8.0, GREY_RENDER, STYLE_INDUSTRY, 1.6, SHED_METAL.darkened(0.2),
+				wall_list, roof_list)
+			for k in 6:
+				if rng.randf() < 0.8:
+					_prop(i, front, -17.5 + k * 7.0, 4.0, 2.6, 12.0, 3.4,
+						BUS_RED if rng.randf() < 0.6 else Color(0.15, 0.45, 0.30))
+		Tile.STATION:
+			# Station building by the street, a platform with a canopy, the tracks and a train.
+			var spot := _place(i, front, 0.0, 3.0, 26.0, 11.0)
+			_classical_block(spot, 26.0, 11.0, 2, RED_SANDSTONE, false, false, wall_list, roof_list)
+			_slab(i, front, 0.0, 15.0, 49.0, 4.0, PAVEMENT, 0.6)
+			var canopy := _place(i, front, 0.0, 15.0, 40.0, 4.0)
+			var canopy_pos: Vector3 = canopy["pos"]
+			_box_item(wall_list, canopy_pos + Vector3.UP * 4.2 + Vector3(canopy["z"]) * 2.0, canopy["x"],
+				canopy["z"], Vector3(42.0, 0.3, 5.0), TRIM, STYLE_PAINT)
+			_slab(i, front, 0.0, 20.0, 49.0, 10.0, Color(0.30, 0.29, 0.28))     # ballast
+			for back: float in [22.0, 23.5, 26.0, 27.5]:
+				_slab(i, front, 0.0, back, 49.0, 0.12, Color(0.55, 0.55, 0.56), 0.1)   # rails
+			_prop(i, front, -2.0, 21.6, 44.0, 3.0, 3.8, TRAIN_RED)
+		Tile.HARBOUR:
+			# A quay with cranes and containers, a warehouse, and a ship alongside.
+			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, CONCRETE)
+			var shed := _place(i, front, -10.0, 4.0, 26.0, 16.0)
+			_add_block(shed, 26.0, 16.0, 10.0, SHED_METAL, STYLE_INDUSTRY, 2.0, SHED_METAL.darkened(0.2),
+				wall_list, roof_list)
+			for k in 8:
+				_prop(i, front, 6.0 + (k % 4) * 4.0, 8.0 + (k / 4) * 7.0, 2.5, 6.1, 2.6 * (1 + k % 2),
+					CONTAINERS[k % CONTAINERS.size()])
+			_plan_on_water(i, rng, true)
+
+
+func _plan_fence(i: int, front: Vector2i, depth: float) -> void:
+	var fence := Color(0.35, 0.38, 0.36)
+	_prop(i, front, 0.0, 0.5, 48.0, 0.15, 2.4, fence)
+	_prop(i, front, 0.0, depth - 1.5, 48.0, 0.15, 2.4, fence)
+	_prop(i, front, -24.0, 0.5, 0.15, depth - 2.0, 2.4, fence)
+	_prop(i, front, 24.0, 0.5, 0.15, depth - 2.0, 2.4, fence)
+
+
+func _plan_on_water(i: int, rng: RandomNumberGenerator, harbour: bool) -> void:
+	# Out on the sea beside the plot: pontoons and yachts (marina) or a crane,
+	# the quay edge and a ship (harbour).
+	var sea := _sea_side(i)
+	if sea == Vector2i.ZERO:
+		return
+	var out := Vector3(sea.x, 0.0, sea.y)                # towards the sea
+	var along := Vector3(-sea.y, 0.0, sea.x)
+	var c2 := tile_centre(Vector2i(i % map_w, i / map_w))
+	var shore := Vector3(c2.x, 0.0, c2.y) + out * (cell * 0.5)
+	if harbour:
+		_box_item(_prop_items, shore + Vector3.DOWN * 2.0, along, out, Vector3(50.0, 3.2, 6.0), CONCRETE)
+		for k in 2:
+			var base := shore - out * 2.0 + along * (-12.0 + k * 24.0)
+			_box_item(_prop_items, base, along, out, Vector3(1.6, 30.0, 1.6), CRANE_YELLOW)
+			_box_item(_prop_items, base + Vector3.UP * 28.0 + out * 10.0, along, out,
+				Vector3(1.4, 1.4, 28.0), CRANE_YELLOW)
+		var ship := shore + out * 12.0 + Vector3.DOWN * 1.5
+		_box_item(_prop_items, ship, along, out, Vector3(44.0, 6.5, 10.0), SHIP_HULL)
+		_box_item(_prop_items, ship + Vector3.UP * 6.5 - along * 16.0, along, out, Vector3(8.0, 8.0, 9.0), HULL_WHITE)
+		return
+	# Marina: a main pontoon out from the shore with fingers and yachts.
+	_box_item(_prop_items, shore + out * 18.0 + Vector3.DOWN * 0.2, along, out, Vector3(2.4, 0.5, 36.0),
+		Color(0.55, 0.50, 0.42))
+	for k in 5:
+		var at := shore + out * (6.0 + k * 7.0) + Vector3.DOWN * 0.2
+		for s: float in [-1.0, 1.0]:
+			_box_item(_prop_items, at + along * s * 5.0, along, out, Vector3(8.0, 0.5, 1.2),
+				Color(0.55, 0.50, 0.42))
+			if rng.randf() < 0.7:
+				var boat := at + along * s * 5.5 + out * 3.0 + Vector3.DOWN * 0.3
+				_box_item(_prop_items, boat, out, along, Vector3(2.6, 1.3, 8.0), HULL_WHITE)
+				_box_item(_prop_items, boat + Vector3.UP * 1.3, out, along, Vector3(1.8, 1.0, 3.0), HULL_WHITE)
+				_box_item(_prop_items, boat + Vector3.UP * 1.3, out, along, Vector3(0.15, 11.0, 0.15), WHITE_RENDER)
+
+
 func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 	var front := _frontage(i)
 	var depth := _depth(i, front)
@@ -1869,12 +2210,7 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 		var pos: Vector3 = stack["pos"]
 		chimney_list.append([Transform3D(Basis.from_scale(Vector3(3.0, 65.0, 3.0)),
 			pos + Vector3.UP * 32.5), Color(0.75, 0.74, 0.72)])
-	# Security fence round the edge.
-	var fence := Color(0.35, 0.38, 0.36)
-	_prop(i, front, 0.0, 0.5, 48.0, 0.15, 2.4, fence)
-	_prop(i, front, 0.0, depth - 1.5, 48.0, 0.15, 2.4, fence)
-	_prop(i, front, -24.0, 0.5, 0.15, depth - 2.0, 2.4, fence)
-	_prop(i, front, 24.0, 0.5, 0.15, depth - 2.0, 2.4, fence)
+	_plan_fence(i, front, depth)       # security fence round the edge
 
 
 # -------------------------------------------------------------------- trees
@@ -2187,7 +2523,8 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 				var offset := ROAD_HALF_WIDTH + 3.5    # open verge
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
-					if bt == Tile.INDUSTRY or bt == Tile.POWER_PLANT:
+					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
+							or bt == Tile.HARBOUR or bt == Tile.RECYCLING:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE:
 						offset = ROAD_HALF_WIDTH + 2.6   # in the pavement in front of the buildings

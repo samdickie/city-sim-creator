@@ -7,7 +7,19 @@ extends RefCounted
 const Settings = preload("res://scripts/settings.gd")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
-	POLICE, FIRE, SCHOOL, HOSPITAL }
+	POLICE, FIRE, SCHOOL, HOSPITAL,
+	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }
+# Which entry in Settings.BUILDINGS describes each of the other buildings.
+const BUILDING_KEYS := {
+	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
+	Tile.SOLAR: "solar", Tile.WATER_PUMP: "water_pump", Tile.WATER_TOWER: "water_tower",
+	Tile.LANDFILL: "landfill", Tile.RECYCLING: "recycling", Tile.GOLF: "golf",
+	Tile.LIBRARY: "library", Tile.MUSEUM: "museum", Tile.STADIUM: "stadium", Tile.MARINA: "marina",
+	Tile.TOWN_HALL: "town_hall", Tile.BUS_DEPOT: "bus_depot", Tile.STATION: "station",
+	Tile.HARBOUR: "harbour",
+}
+const LAST_TILE := Tile.HARBOUR
 enum Service { POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as the service tiles
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # for the growth map
 
@@ -27,9 +39,15 @@ var population := 0
 var shop_jobs := 0
 var industry_jobs := 0
 var road_tiles := 0
-var plants := 0
+var plants := 0                       # anything that makes power
 var park_tiles := 0
+var counts := {}                      # tile type -> how many the town has
 var power_supply := 0                 # zone levels the plants can power
+var water_supply := 0                 # zone levels the pumps and towers can supply
+var water_used := 0
+var rubbish_made := 0                 # in residents' worth
+var rubbish_capacity := 0
+var leisure_appeal := 0.0             # extra appeal from leisure buildings and landmarks
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
 # Negative means too many already.
@@ -59,6 +77,11 @@ var powered := PackedByteArray()      # 1 = this tile has electricity
 var _net_id := PackedInt32Array()     # which power network a tile is on (-1 = none)
 var _net_spare: Array[int] = []       # spare power on each network
 var _power_dirty := true
+var watered := PackedByteArray()      # 1 = this tile has water
+var _wnet_id := PackedInt32Array()    # which water network a tile is on (-1 = none)
+var _wnet_spare: Array[int] = []
+var _water_dirty := true
+var _bus_cover := PackedByteArray()   # 1 = within reach of a working bus depot
 var _rng := RandomNumberGenerator.new()
 
 
@@ -71,6 +94,9 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	density.resize(w * h)
 	powered.resize(w * h)
 	_net_id.resize(w * h)
+	watered.resize(w * h)
+	_wnet_id.resize(w * h)
+	_bus_cover.resize(w * h)
 	land_value.resize(w * h)
 	coverage.resize(w * h * 4)
 	_measure_sea()
@@ -117,12 +143,27 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	density[i] = new_density if is_zone(t) else 1
 	_roads_dirty = true
 	_power_dirty = true
+	_water_dirty = true
 	_value_dirty = true
 	_coverage_dirty = true
 	layout_version += 1
 
 
 func has_road_access(i: int) -> bool:
+	# A road within ROAD_REACH tiles, or one tile further where buses run.
+	_update_road_distance()
+	_update_coverage()
+	return _connected(i)
+
+
+func _connected(i: int) -> bool:
+	# (Road distances and bus cover must be up to date.)
+	return _road_dist[i] <= Settings.ROAD_REACH \
+		or (_road_dist[i] == Settings.ROAD_REACH + 1 and _bus_cover[i] == 1)
+
+
+func near_road(i: int) -> bool:
+	# Plain road access, without buses (what buildings themselves need).
 	_update_road_distance()
 	return _road_dist[i] <= Settings.ROAD_REACH
 
@@ -163,6 +204,11 @@ func _zone_check(i: int) -> Array:
 	var lv: int = levels[i]
 	if lv < max_level(i) and _net_spare[_net_id[i]] <= 0:
 		return [Growth.BLOCKED, "waiting, the power plant is full, build another"]
+	if lv < max_level(i) and _needs_water(i, stage_at(i, lv + 1)):
+		_update_water()
+		if _wnet_id[i] < 0:
+			return [Growth.BLOCKED, "needs water to grow any bigger: build a water pump or tower (water travels through roads and buildings)"]
+		return [Growth.BLOCKED, "needs more water to grow: build another water pump or tower"]
 	if lv >= max_level(i):
 		if t != Tile.INDUSTRY and density[i] < 2:
 			return [Growth.FULL, "fully built for %s density (zone it higher to let it grow more)" % density_name(i)]
@@ -170,6 +216,8 @@ func _zone_check(i: int) -> Array:
 	var next_stage: int = stage_at(i, lv + 1)
 	if demand_for(t) < step_size(i) * 0.5:
 		if appeal() < 0.5:
+			if rubbish_shortfall() > 0.3:
+				return [Growth.WAITING, "waiting, people won't move in: rubbish is piling up (build a landfill or recycling centre)"]
 			return [Growth.WAITING, "waiting, people won't move in: taxes are high for the services they get"]
 		match t:
 			Tile.HOMES:
@@ -294,12 +342,15 @@ func _grow() -> void:
 
 	grew.clear()
 	shrank.clear()
+	_update_road_distance()
+	_update_coverage()
+	_update_water()
 	var wanted: Dictionary = demand.duplicate()
 
 	# How much more the plots that can grow freely (road + power) could still take.
 	var room: Dictionary = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	for i in zones:
-		if _road_dist[i] > Settings.ROAD_REACH or powered[i] == 0:
+		if not _connected(i) or powered[i] == 0:
 			continue
 		var t: int = tiles[i]
 		var free_top: int = mini(stage_at(i, max_level(i)), Settings.FREE_STAGE)
@@ -319,7 +370,7 @@ func _grow() -> void:
 	var tall_candidates: Array[int] = []
 	for i in zones:
 		if levels[i] < max_level(i) and stage_at(i, levels[i] + 1) > Settings.FREE_STAGE \
-				and _road_dist[i] <= Settings.ROAD_REACH and powered[i] == 1:
+				and _connected(i) and powered[i] == 1:
 			tall_candidates.append(i)
 	tall_candidates.sort_custom(func(a: int, b: int) -> bool: return land_value[a] > land_value[b])
 	var grown := {}
@@ -331,7 +382,8 @@ func _grow() -> void:
 		var short: float = shortage[t]
 		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
 		var needed: float = Settings.TALL_VALUE_NEEDED[stage_at(i, lv + 1)]
-		var allowed: bool = (density[i] == 2 or short > 0.0) and not _needs_school(i, stage_at(i, lv + 1))
+		var allowed: bool = (density[i] == 2 or short > 0.0) and not _needs_school(i, stage_at(i, lv + 1)) \
+			and not _needs_water(i, stage_at(i, lv + 1))
 		if allowed and spare > 0 and want >= step * 0.5 and land_value[i] >= needed \
 				and _rng.randf() < Settings.TALL_GROWTH_CHANCE * (0.5 + short) * _service_factor(i):
 			levels[i] = lv + 1
@@ -346,7 +398,7 @@ func _grow() -> void:
 			continue
 		var t: int = tiles[i]
 		var lv: int = levels[i]
-		var connected: bool = _road_dist[i] <= Settings.ROAD_REACH
+		var connected: bool = _connected(i)
 		var has_power: bool = powered[i] == 1
 		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
 		var want: float = wanted[t]
@@ -355,7 +407,7 @@ func _grow() -> void:
 		var step: int = step_size(i)
 		var down_step: int = units(i) - units_at_stage(t, stage_at(i, lv - 1)) if lv > 0 else 0
 		if connected and has_power and spare > 0 and can_rise and next_stage <= Settings.FREE_STAGE \
-				and want >= step * 0.5 and not _needs_school(i, next_stage) \
+				and want >= step * 0.5 and not _needs_school(i, next_stage) and not _needs_water(i, next_stage) \
 				and _rng.randf() < Settings.GROWTH_CHANCE * _service_factor(i):
 			levels[i] = lv + 1
 			wanted[t] = want - step
@@ -376,8 +428,8 @@ func _collect_taxes() -> void:
 		if is_zone(tiles[i]) and levels[i] > 0:
 			taxable += units(i) * (0.6 + 0.8 * land_value[i])
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
-	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + plants * Settings.POWER_PLANT_UPKEEP
-		+ park_tiles * Settings.PARK_UPKEEP + service_upkeep())
+	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + park_tiles * Settings.PARK_UPKEEP
+		+ service_upkeep() + building_upkeep())
 	money += last_income - last_upkeep
 
 
@@ -391,16 +443,26 @@ func recount() -> void:
 	plants = 0
 	park_tiles = 0
 	power_used = 0
+	power_supply = 0
+	water_supply = 0
 	services = [0, 0, 0, 0]
+	counts = {}
 	for i in w * h:
+		var t: int = tiles[i]
+		counts[t] = int(counts.get(t, 0)) + 1
 		power_used += power_use(i)
-		if is_service(tiles[i]):
-			services[tiles[i] - Tile.POLICE] += 1
-		match tiles[i]:
+		if is_service(t):
+			services[t - Tile.POLICE] += 1
+		if is_building(t):
+			var made: int = info(t).get("power", 0)
+			if made > 0:
+				plants += 1
+				power_supply += made
+			var supplied: int = info(t).get("water", 0)
+			water_supply += supplied
+		match t:
 			Tile.ROAD:
 				road_tiles += 1
-			Tile.POWER_PLANT:
-				plants += 1
 			Tile.PARK:
 				park_tiles += 1
 			Tile.HOMES:
@@ -409,8 +471,10 @@ func recount() -> void:
 				shop_jobs += units(i)
 			Tile.INDUSTRY:
 				industry_jobs += units(i)
-	power_supply = plants * Settings.POWER_PER_PLANT
 	_update_power()
+	_update_water()
+	_measure_rubbish()
+	_measure_leisure()
 	_update_demand()
 	_update_land_value()
 	var price_total := 0.0
@@ -431,12 +495,230 @@ func is_service(t: int) -> bool:
 
 
 func power_use(i: int) -> int:
-	# Zones use one unit per stage; services a fixed amount; nothing else uses power.
-	if is_zone(tiles[i]):
+	# Zones use one unit per stage; services and other buildings a fixed amount.
+	var t: int = tiles[i]
+	if is_zone(t):
 		return stage(i)
-	if is_service(tiles[i]):
+	if is_service(t):
 		return Settings.SERVICE_POWER
+	if is_building(t):
+		var use: int = info(t).get("uses_power", 0)
+		return use
 	return 0
+
+
+# ------------------------------------------------------------- other buildings
+
+func is_building(t: int) -> bool:
+	# Power plants, utilities, leisure and transport (everything in Settings.BUILDINGS).
+	return BUILDING_KEYS.has(t)
+
+
+func info(t: int) -> Dictionary:
+	# This building's entry in Settings.BUILDINGS ({} for anything else).
+	if not BUILDING_KEYS.has(t):
+		return {}
+	var d: Dictionary = Settings.BUILDINGS[BUILDING_KEYS[t]]
+	return d
+
+
+func building_name(t: int) -> String:
+	var n: String = info(t).get("name", "")
+	return n
+
+
+func count_of(t: int) -> int:
+	var n: int = counts.get(t, 0)
+	return n
+
+
+func makes_power(t: int) -> bool:
+	return int(info(t).get("power", 0)) > 0
+
+
+func can_build_here(t: int, i: int) -> String:
+	# "" if this building may go on this tile; otherwise why not.
+	var d := info(t)
+	var unlock: int = d.get("unlock", 0)
+	if population < unlock:
+		return "%s needs a town of %d people (you have %d)." % [d["name"], unlock, population]
+	if bool(d.get("only_one", false)) and count_of(t) > 0:
+		return "The town already has a %s." % String(d["name"]).to_lower()
+	if bool(d.get("near_sea", false)) and not _beside_sea(i):
+		return "A %s has to be built right by the sea." % String(d["name"]).to_lower()
+	return ""
+
+
+func _beside_sea(i: int) -> bool:
+	var x := i % w
+	var y := i / w
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var nx := x + d.x
+		var ny := y + d.y
+		if nx >= 0 and ny >= 0 and nx < w and ny < h and water[ny * w + nx] == 1:
+			return true
+	return false
+
+
+func building_working(i: int) -> bool:
+	# Power plants just work. Everything else needs a road, and power if it uses any.
+	var t: int = tiles[i]
+	if makes_power(t):
+		return true
+	if not near_road(i):
+		return false
+	if int(info(t).get("uses_power", 0)) > 0:
+		_update_power()
+		return powered[i] == 1
+	return true
+
+
+func building_status(i: int) -> String:
+	var t: int = tiles[i]
+	if makes_power(t):
+		return "making %d units of power" % int(info(t)["power"])
+	if not near_road(i):
+		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
+	if int(info(t).get("uses_power", 0)) > 0:
+		_update_power()
+		if powered[i] == 0:
+			return "not working, no power"
+	return "working"
+
+
+func building_upkeep() -> int:
+	var total := 0
+	for t: int in BUILDING_KEYS:
+		var each: int = info(t).get("upkeep", 0)
+		total += each * count_of(t)
+	return total
+
+
+func _measure_rubbish() -> void:
+	# Rubbish made by residents and jobs, against what working landfills and
+	# recycling centres can take.
+	rubbish_made = roundi(population + jobs() * Settings.RUBBISH_PER_JOB)
+	rubbish_capacity = 0
+	for i in w * h:
+		var t: int = tiles[i]
+		if t == Tile.LANDFILL or t == Tile.RECYCLING:
+			if building_working(i):
+				var cap: int = info(t).get("rubbish", 0)
+				rubbish_capacity += cap
+
+
+func rubbish_shortfall() -> float:
+	# 0 = all collected, 1 = none of it.
+	if population < Settings.RUBBISH_START_POP or rubbish_made <= 0:
+		return 0.0
+	return clampf(float(rubbish_made - rubbish_capacity) / rubbish_made, 0.0, 1.0)
+
+
+func rubbish_word() -> String:
+	var r := rubbish_shortfall()
+	if population < Settings.RUBBISH_START_POP:
+		return "not a problem yet"
+	if r <= 0.0:
+		return "all collected"
+	if r < 0.3:
+		return "some piling up"
+	return "piling up"
+
+
+func _measure_leisure() -> void:
+	# Leisure buildings and landmarks that are working add appeal (up to a limit).
+	var total := 0.0
+	for i in w * h:
+		var t: int = tiles[i]
+		if is_building(t):
+			var a: float = info(t).get("appeal", 0.0)
+			if a > 0.0 and building_working(i):
+				total += a
+	leisure_appeal = minf(total, Settings.LEISURE_APPEAL_MAX)
+
+
+func _working_count(t: int) -> int:
+	var n := 0
+	for i in w * h:
+		if tiles[i] == t and building_working(i):
+			n += 1
+	return n
+
+
+# ------------------------------------------------------------- water
+
+func water_map() -> PackedByteArray:
+	_update_water()
+	return watered
+
+
+func needs_water_to_grow(i: int) -> bool:
+	# A zone plot that would grow if it had (more) water.
+	var lv: int = levels[i]
+	return is_zone(tiles[i]) and lv < max_level(i) and _needs_water(i, stage_at(i, lv + 1))
+
+
+func _needs_water(i: int, next_stage: int) -> bool:
+	# Anything bigger than the first stage (villas, corner shops, small works) needs water.
+	if next_stage < 2:
+		return false
+	_update_water()
+	return watered[i] == 0 or _wnet_spare[_wnet_id[i]] <= 0
+
+
+func _update_water() -> void:
+	# Like power: water spreads from each working pump or tower through every
+	# touching built tile, and plots nearest the supply get it first.
+	_update_power()
+	if not _water_dirty:
+		return
+	_water_dirty = false
+	watered.fill(0)
+	_wnet_id.fill(-1)
+	_wnet_spare.clear()
+	water_used = 0
+	for start in w * h:
+		var st: int = tiles[start]
+		if (st != Tile.WATER_PUMP and st != Tile.WATER_TOWER) or _wnet_id[start] != -1:
+			continue
+		var net := _wnet_spare.size()
+		var members: Array[int] = [start]
+		_wnet_id[start] = net
+		var head := 0
+		while head < members.size():
+			var i := members[head]
+			head += 1
+			var x := i % w
+			if x > 0:
+				_join_water(i - 1, net, members)
+			if x < w - 1:
+				_join_water(i + 1, net, members)
+			if i >= w:
+				_join_water(i - w, net, members)
+			if i < w * (h - 1):
+				_join_water(i + w, net, members)
+		var left := 0
+		for i in members:
+			var t: int = tiles[i]
+			if (t == Tile.WATER_PUMP or t == Tile.WATER_TOWER) and building_working(i):
+				var supplied: int = info(t).get("water", 0)
+				left += supplied
+		for i in members:
+			if is_zone(tiles[i]):
+				var use: int = stage(i)
+				if use <= left:
+					left -= use
+					water_used += use
+					watered[i] = 1
+			else:
+				watered[i] = 1 if left > 0 else 0
+		_wnet_spare.append(left)
+
+
+func _join_water(n: int, net: int, members: Array[int]) -> void:
+	if tiles[n] != Tile.EMPTY and _wnet_id[n] == -1:
+		_wnet_id[n] = net
+		members.append(n)
 
 
 func home_price(i: int) -> int:
@@ -465,18 +747,16 @@ func land_value_word(i: int) -> String:
 
 func service_working(i: int) -> bool:
 	# A service needs a road and power to do anything (and some funding).
-	_update_road_distance()
 	_update_power()
 	var f: float = funding[tiles[i] - Tile.POLICE]
-	return _road_dist[i] <= Settings.ROAD_REACH and powered[i] == 1 and f > 0.0
+	return near_road(i) and powered[i] == 1 and f > 0.0
 
 
 func service_status(i: int) -> String:
 	var f: float = funding[tiles[i] - Tile.POLICE]
 	if f <= 0.0:
 		return "closed (no funding)"
-	_update_road_distance()
-	if _road_dist[i] > Settings.ROAD_REACH:
+	if not near_road(i):
 		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
 	_update_power()
 	if powered[i] == 0:
@@ -532,6 +812,16 @@ func _update_coverage() -> void:
 		return
 	_coverage_dirty = false
 	coverage.fill(0.0)
+	_bus_cover.fill(0)
+	for i in w * h:
+		if tiles[i] == Tile.BUS_DEPOT and building_working(i):
+			var r: int = info(Tile.BUS_DEPOT).get("bus", 0)
+			var bx := i % w
+			var by := i / w
+			for y in range(maxi(by - r, 0), mini(by + r, h - 1) + 1):
+				for x in range(maxi(bx - r, 0), mini(bx + r, w - 1) + 1):
+					if Vector2(x - bx, y - by).length() <= r:
+						_bus_cover[y * w + x] = 1
 	for i in w * h:
 		if not is_service(tiles[i]) or not service_working(i):
 			continue
@@ -654,8 +944,12 @@ func _update_land_value() -> void:
 					_spread(i, 3, Settings.SHOP_BONUS * stage(i))
 			Tile.INDUSTRY:
 				_spread(i, 4, -Settings.INDUSTRY_PENALTY * maxi(stage(i), 1))
-			Tile.POWER_PLANT:
-				_spread(i, 5, -Settings.PLANT_PENALTY)
+			_:
+				if is_building(t):
+					var amount: float = info(t).get("value", 0.0)
+					var radius: int = info(t).get("radius", 0)
+					if amount != 0.0:
+						_spread(i, radius, amount)
 	# Being covered by police, fire, schools and hospitals adds value too.
 	_update_coverage()
 	for s in 4:
@@ -691,11 +985,12 @@ func _update_power() -> void:
 	if not _power_dirty:
 		return
 	_power_dirty = false
+	_water_dirty = true               # pumps need power, so water follows
 	powered.fill(0)
 	_net_id.fill(-1)
 	_net_spare.clear()
 	for start in w * h:
-		if tiles[start] != Tile.POWER_PLANT or _net_id[start] != -1:
+		if not makes_power(tiles[start]) or _net_id[start] != -1:
 			continue
 		var net := _net_spare.size()
 		var members: Array[int] = [start]
@@ -715,11 +1010,11 @@ func _update_power() -> void:
 				_join_network(i + w, net, members)
 		var left := 0
 		for i in members:
-			if tiles[i] == Tile.POWER_PLANT:
-				left += Settings.POWER_PER_PLANT
+			var made: int = info(tiles[i]).get("power", 0)
+			left += made
 		for i in members:
-			if is_zone(tiles[i]) or is_service(tiles[i]):
-				var use: int = power_use(i)
+			var use: int = power_use(i)
+			if use > 0:
 				if use <= left:
 					left -= use
 					powered[i] = 1
@@ -746,7 +1041,8 @@ func appeal() -> float:
 	var pain := (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT
 	if pain > 0.0:
 		pain *= lerpf(Settings.TAX_TOLERANCE_POOR, Settings.TAX_TOLERANCE_GOOD, service_score)
-	return clampf(1.0 - pain + services_feeling(), -1.0, 2.0)
+	return clampf(1.0 - pain + services_feeling() + leisure_appeal
+		- rubbish_shortfall() * Settings.RUBBISH_EFFECT, -1.0, 2.0)
 
 
 func services_expected() -> float:
@@ -792,8 +1088,14 @@ func _update_demand() -> void:
 	# Shops and offices follow residents; industry employs the workers they don't.
 	var shop_target := population * Settings.SHOP_JOBS_PER_PERSON
 	demand[Tile.HOMES] = homes
+	# Railway stations bring visitors (shop demand); harbours bring trade (industry).
+	var stations := mini(_working_count(Tile.STATION), 2)
+	var visitors: float = info(Tile.STATION).get("visitors", 0.0)
+	shop_target += population * visitors * stations
+	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
+	var trade := port_jobs * _working_count(Tile.HARBOUR)
 	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, a)
-	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs, industry_jobs, a)
+	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs + trade, industry_jobs, a)
 
 
 func _business_demand(gap: float, jobs_now: int, a: float) -> float:
@@ -875,7 +1177,7 @@ func _update_road_distance() -> void:
 		var i := queue[head]
 		head += 1
 		var d := _road_dist[i]
-		if d >= Settings.ROAD_REACH:
+		if d >= Settings.ROAD_REACH + 1:      # one further, for bus routes
 			continue
 		var x := i % w
 		if x > 0:
@@ -915,7 +1217,7 @@ func from_save(data: Dictionary) -> void:
 	levels.fill(0)
 	for i in mini(saved_tiles.size(), tiles.size()):
 		var t: int = int(saved_tiles[i])
-		tiles[i] = t if t >= Tile.EMPTY and t <= Tile.HOSPITAL and water[i] == 0 else Tile.EMPTY
+		tiles[i] = t if t >= Tile.EMPTY and t <= LAST_TILE and water[i] == 0 else Tile.EMPTY
 	for i in mini(saved_levels.size(), levels.size()):
 		levels[i] = clampi(int(saved_levels[i]), 0, 6) if is_zone(tiles[i]) else 0
 	var saved_density: Array = data.get("density", [])

@@ -16,8 +16,10 @@ const SAVE_FILE := "user://troon_save.json"
 const SAVE_VERSION := 3
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
-	POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as simulation.gd
-enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER_PLANT, POWER_LINE, PARK, GRID, SERVICE }
+	POLICE, FIRE, SCHOOL, HOSPITAL,
+	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
+enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -25,22 +27,34 @@ const TOOL_NAMES := {
 	Tool.SHOPS: "Shops",
 	Tool.INDUSTRY: "Industry",
 	Tool.BULLDOZE: "Bulldoze",
-	Tool.POWER_PLANT: "Power plant",
-	Tool.POWER_LINE: "Power line",
+	Tool.POWER: "Power",
+	Tool.UTILITY: "Utilities",
 	Tool.PARK: "Park",
 	Tool.GRID: "Street grid",
 	Tool.SERVICE: "Services",
+	Tool.LEISURE: "Leisure",
+	Tool.TRANSPORT: "Transport",
+}
+const TOOL_KEYS := {
+	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
+	Tool.POWER: "6", Tool.UTILITY: "7", Tool.PARK: "8", Tool.GRID: "9", Tool.SERVICE: "0",
+	Tool.LEISURE: "-", Tool.TRANSPORT: "=",
+}
+# Tools that open a picker of several buildings (Tab or the buttons choose one).
+const GROUPS := {
+	Tool.POWER: [Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WIND, Tile.SOLAR, Tile.POWER_LINE],
+	Tool.UTILITY: [Tile.WATER_PUMP, Tile.WATER_TOWER, Tile.LANDFILL, Tile.RECYCLING],
+	Tool.SERVICE: [Tile.POLICE, Tile.FIRE, Tile.SCHOOL, Tile.HOSPITAL],
+	Tool.LEISURE: [Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
+	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR],
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
 	Tool.HOMES: Tile.HOMES,
 	Tool.SHOPS: Tile.SHOPS,
 	Tool.INDUSTRY: Tile.INDUSTRY,
-	Tool.POWER_PLANT: Tile.POWER_PLANT,
-	Tool.POWER_LINE: Tile.POWER_LINE,
 	Tool.PARK: Tile.PARK,
 	Tool.GRID: Tile.ROAD,
-	Tool.SERVICE: Tile.POLICE,   # (whichever service is picked, see _target_tile)
 }
 const TOOL_COLOURS := {
 	Tool.ROAD: Color(0.45, 0.45, 0.48),
@@ -48,11 +62,13 @@ const TOOL_COLOURS := {
 	Tool.SHOPS: Color(0.26, 0.58, 0.92),
 	Tool.INDUSTRY: Color(0.96, 0.70, 0.15),
 	Tool.BULLDOZE: Color(0.9, 0.3, 0.3),
-	Tool.POWER_PLANT: Color(0.62, 0.45, 0.85),
-	Tool.POWER_LINE: Color(0.98, 0.88, 0.25),
+	Tool.POWER: Color(0.98, 0.88, 0.25),
+	Tool.UTILITY: Color(0.35, 0.60, 0.95),
 	Tool.PARK: Color(0.40, 0.78, 0.36),
 	Tool.GRID: Color(0.62, 0.62, 0.66),
 	Tool.SERVICE: Color(0.30, 0.78, 0.86),
+	Tool.LEISURE: Color(0.86, 0.55, 0.86),
+	Tool.TRANSPORT: Color(0.95, 0.55, 0.25),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -93,7 +109,7 @@ var day_cycle := true
 # --- Interaction ---
 var current_tool: int = Tool.ROAD
 var current_density: int = 1          # 0 = low, 1 = medium, 2 = high (homes and shops)
-var current_service: int = 0          # 0 = police, 1 = fire, 2 = school, 3 = hospital
+var _choice := {}                      # group tool -> which of its buildings is picked
 var painting := false
 var orbiting := false
 var dragging_map := false
@@ -130,7 +146,7 @@ func _ready() -> void:
 
 	var tools := []
 	for id in TOOL_NAMES:
-		tools.append([id, TOOL_NAMES[id], str((id + 1) % 10), _price_text(id), TOOL_COLOURS[id]])
+		tools.append([id, TOOL_NAMES[id], TOOL_KEYS[id], _price_text(id), TOOL_COLOURS[id]])
 	add_child(hud)
 	hud.build(tools, {
 		Tile.HOMES: [TOOL_COLOURS[Tool.HOMES], "Homes"],
@@ -146,12 +162,11 @@ func _ready() -> void:
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 	hud.overlay_chosen.connect(_set_overlay)
-	hud.service_chosen.connect(_set_service)
+	hud.item_chosen.connect(_set_item)
 	hud.funding_changed.connect(_change_funding)
 
 	_select_tool(Tool.ROAD)
 	hud.set_density(current_density)
-	_set_service(current_service, false)
 	_set_overlay(WorldView.Overlay.NONE)
 	_set_speed(1)
 	_refresh_hud()
@@ -269,18 +284,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_5, KEY_B:
 				_select_tool(Tool.BULLDOZE)
 			KEY_6:
-				_select_tool(Tool.POWER_PLANT)
+				_select_tool(Tool.POWER)
 			KEY_7:
-				_select_tool(Tool.POWER_LINE)
+				_select_tool(Tool.UTILITY)
 			KEY_8:
 				_select_tool(Tool.PARK)
 			KEY_9:
 				_select_tool(Tool.GRID)
 			KEY_0:
 				_select_tool(Tool.SERVICE)
+			KEY_MINUS:
+				_select_tool(Tool.LEISURE)
+			KEY_EQUAL:
+				_select_tool(Tool.TRANSPORT)
 			KEY_TAB:
-				if current_tool == Tool.SERVICE:
-					_set_service((current_service + 1) % 4)
+				if GROUPS.has(current_tool):
+					var items: Array = GROUPS[current_tool]
+					_set_item((_item_index() + 1) % items.size())
 				else:
 					_set_density((current_density + 1) % 3)
 			KEY_ESCAPE:
@@ -455,14 +475,21 @@ func _cancel_drag() -> void:
 
 func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 	match current_tool:
-		Tool.ROAD, Tool.POWER_LINE:
+		Tool.ROAD:
 			return _l_path(a, b)
-		Tool.POWER_PLANT, Tool.SERVICE:
-			return [b]
 		Tool.GRID:
 			return _grid_tiles(a, b)
 		Tool.BULLDOZE:
 			return _box(a, b)
+	if GROUPS.has(current_tool):
+		# Power lines run like roads; farms, landfill and golf courses are dragged
+		# as a box; everything else is one building on the tile under the mouse.
+		var t := _target_tile()
+		if t == Tile.POWER_LINE:
+			return _l_path(a, b)
+		if bool(sim.info(t).get("area", false)):
+			return _box(a, b)
+		return [b]
 	# Zones and parks.
 	if sim.tiles[a.y * map_w + a.x] == Tile.ROAD:
 		return _roadside(a, b)
@@ -567,10 +594,11 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			# Same zone again does nothing, unless it changes the density.
 			if not _has_density() or sim.density[i] == current_density:
 				return "-"
-		# Zones, parks and services go round roads, power and plants rather than replacing
-		# them; the street grid only goes on open land. (Bulldoze first to replace.)
-		var infrastructure := here == Tile.ROAD or here == Tile.POWER_LINE or here == Tile.POWER_PLANT
-		if current_tool in [Tool.HOMES, Tool.SHOPS, Tool.INDUSTRY, Tool.PARK, Tool.SERVICE] and infrastructure:
+		# Everything but roads goes round roads, power lines and power plants
+		# rather than replacing them; the street grid only goes on open land.
+		# (Bulldoze first to replace.)
+		var infrastructure := here == Tile.ROAD or here == Tile.POWER_LINE or sim.makes_power(here)
+		if current_tool != Tool.ROAD and infrastructure:
 			return "-"
 		if current_tool == Tool.GRID and here != Tile.EMPTY:
 			return "-"
@@ -578,6 +606,10 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			return "You can't build on water."
 		if slope[i] > Settings.MAX_SLOPE_M:
 			return "Too steep to build here."
+		if sim.is_building(_target_tile()):
+			var why := sim.can_build_here(_target_tile(), i)
+			if why != "":
+				return why
 	var cost := _tool_cost(p)
 	if check_money and cost > sim.money:
 		return "Not enough money: that costs %s." % Hud.money_text(cost)
@@ -598,18 +630,24 @@ func _base_cost(tool_id: int) -> int:
 			return Settings.INDUSTRY_COST
 		Tool.BULLDOZE:
 			return Settings.BULLDOZE_COST
-		Tool.POWER_PLANT:
-			return Settings.POWER_PLANT_COST
-		Tool.POWER_LINE:
-			return Settings.POWER_LINE_COST
 		Tool.PARK:
 			return Settings.PARK_COST
 		Tool.GRID:
 			return Settings.ROAD_COST
-		Tool.SERVICE:
-			var service_cost: int = Settings.SERVICE_COSTS[current_service]
-			return service_cost
+	if GROUPS.has(tool_id):
+		return _cost_of(_target_tile())
 	return 0
+
+
+func _cost_of(t: int) -> int:
+	# What one tile of a group building costs.
+	if t == Tile.POWER_LINE:
+		return Settings.POWER_LINE_COST
+	if sim.is_service(t):
+		var service_cost: int = Settings.SERVICE_COSTS[t - Tile.POLICE]
+		return service_cost
+	var cost: int = sim.info(t).get("cost", 0)
+	return cost
 
 
 func _tool_cost(p: Vector2i) -> int:
@@ -621,8 +659,11 @@ func _tool_cost(p: Vector2i) -> int:
 
 
 func _price_text(tool_id: int) -> String:
-	if tool_id == Tool.SERVICE:
-		return "from " + Hud.money_text(Settings.SERVICE_COSTS[0])
+	if GROUPS.has(tool_id):
+		var cheapest := 1 << 30
+		for t: int in GROUPS[tool_id]:
+			cheapest = mini(cheapest, _cost_of(t))
+		return "from " + Hud.money_text(cheapest)
 	if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
 		return "from " + Hud.money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
 	return Hud.money_text(_base_cost(tool_id))
@@ -630,41 +671,85 @@ func _price_text(tool_id: int) -> String:
 
 func _target_tile() -> int:
 	# The tile the current tool builds.
-	if current_tool == Tool.SERVICE:
-		return Tile.POLICE + current_service
+	if GROUPS.has(current_tool):
+		var items: Array = GROUPS[current_tool]
+		var picked: int = items[_item_index()]
+		return picked
 	var t: int = TOOL_TO_TILE.get(current_tool, Tile.EMPTY)
 	return t
 
 
+func _item_index() -> int:
+	var n: int = _choice.get(current_tool, 0)
+	return n
+
+
+func _name_of(t: int) -> String:
+	if sim.is_building(t):
+		return sim.building_name(t)
+	var n: String = TILE_NAMES.get(t, "")
+	return n
+
+
 func _tool_label() -> String:
-	if current_tool == Tool.SERVICE:
-		var service_name: String = Settings.SERVICE_NAMES[current_service]
-		return service_name
+	if GROUPS.has(current_tool):
+		return _name_of(_target_tile())
 	var tool_name: String = TOOL_NAMES[current_tool]
 	return tool_name
 
 
-func _set_service(s: int, announce: bool = true) -> void:
-	current_service = s
-	hud.set_service(s, _funding_text())
+func _set_item(index: int, announce: bool = true) -> void:
+	# Pick one building from the current group.
+	if not GROUPS.has(current_tool):
+		return
+	_choice[current_tool] = index
+	_show_group()
 	if announce:
-		var service_name: String = Settings.SERVICE_NAMES[s]
-		hud.flash("Building: %s" % service_name.to_lower())
+		hud.flash("Building: %s" % _name_of(_target_tile()).to_lower())
 	if painting:
 		_update_drag()
 	else:
 		_update_info()
 
 
+func _show_group() -> void:
+	# The picker above the toolbar: each building with its price, or what it's waiting for.
+	if not GROUPS.has(current_tool):
+		hud.show_group([], 0, "")
+		return
+	var items: Array = []
+	for t: int in GROUPS[current_tool]:
+		var about := ""
+		var locked := ""
+		if sim.is_building(t):
+			about = sim.info(t).get("about", "")
+			var unlock: int = sim.info(t).get("unlock", 0)
+			if sim.population < unlock:
+				locked = "needs %s people" % Hud.thousands(unlock)
+		elif sim.is_service(t):
+			about = ["Police: in a bigger town, homes and shops without police grow at half speed",
+				"Fire: stops buildings nearby burning down",
+				"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
+				"Hospitals: in a bigger town, homes without one grow at half speed"][t - Tile.POLICE]
+		elif t == Tile.POWER_LINE:
+			about = "Carries power across open land (roads and buildings carry it too)"
+		items.append([_name_of(t), Hud.money_text(_cost_of(t)), about, locked])
+	var funding := _funding_text() if current_tool == Tool.SERVICE else ""
+	hud.show_group(items, _item_index(), funding)
+
+
 func _change_funding(step: float) -> void:
-	sim.set_funding(current_service, sim.funding[current_service] + step)
-	hud.set_service(current_service, _funding_text())
+	if current_tool != Tool.SERVICE:
+		return
+	var s := _target_tile() - Tile.POLICE
+	sim.set_funding(s, sim.funding[s] + step)
+	_show_group()
 	_ground_dirty = true          # coverage and land value change
 	_refresh_hud()
 
 
 func _funding_text() -> String:
-	var s := current_service
+	var s := _target_tile() - Tile.POLICE
 	var word: String = Settings.SERVICE_WORDS[s]
 	var upkeep: float = Settings.SERVICE_UPKEEP[s]
 	return "%s funding %d%%  ·  %s a month each  ·  reaches %d m" % [word.capitalize(),
@@ -689,7 +774,7 @@ func _select_tool(tool_id: int) -> void:
 	current_tool = tool_id
 	hud.set_tool(tool_id)
 	hud.show_density(_has_density())
-	hud.show_services(current_tool == Tool.SERVICE)
+	_show_group()
 	if _in_map(hover):
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
@@ -786,6 +871,8 @@ func _refresh_hud() -> void:
 	var net := sim.last_income - sim.last_upkeep
 	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
 		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
+	if GROUPS.has(current_tool):
+		_show_group()                 # buildings unlock as the town grows
 	_update_info()
 
 
@@ -793,7 +880,7 @@ func _update_info() -> void:
 	if hud.info_label == null:
 		return
 	if not _in_map(hover):
-		hud.show_info("%s selected. Point at the map to see what's there." % TOOL_NAMES[current_tool])
+		hud.show_info("%s selected. Point at the map to see what's there." % _tool_label())
 		return
 	var i := hover.y * map_w + hover.x
 	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
@@ -808,8 +895,9 @@ func _update_info() -> void:
 
 func _tile_text(i: int) -> String:
 	var t := sim.tiles[i]
-	if t == Tile.POWER_PLANT:
-		return "Power plant (powers %d zone levels)" % Settings.POWER_PER_PLANT
+	if sim.is_building(t):
+		var about: String = sim.info(t).get("about", "")
+		return "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
 	if sim.is_service(t):
