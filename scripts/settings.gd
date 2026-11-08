@@ -201,8 +201,17 @@ const POLLUTION_APPEAL_EFFECT := 0.15     # appeal lost if every resident lived 
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
-const PEOPLE_PER_CAR := 25        # one car on the roads per this many residents
-const MAX_CARS := 400
+
+# --- People and traffic (looks only; T turns them off and on) ---
+const TRAFFIC_ON := true          # cars and people on the streets when the game starts
+const MAX_CARS := 300             # most cars and buses drawn at once (only round the camera)
+const MAX_PEOPLE := 400           # most people walking at once (only round the camera)
+const PEOPLE_PER_CAR := 200       # residents and jobs on the plots beside a street, per car on it
+const PEOPLE_PER_WALKER := 40     # the same, per person walking (shops count 3x, homes 0.25x)
+const CARS_PER_STREET := 2.0      # the busiest streets: at most this many cars per road tile
+const WALKERS_PER_STREET := 4.0   # ...and people per road tile
+const NIGHT_TRAFFIC := 0.3        # share of the daytime cars still out at night
+const NIGHT_WALKERS := 0.12       # share of the daytime people still out at night
 
 # --- Density, land value and prices ---
 # Once demand for homes (or shops) is more than the low-rise plots can still take,

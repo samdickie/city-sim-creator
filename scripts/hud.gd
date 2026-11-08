@@ -566,6 +566,7 @@ func _build_help(root: Control) -> void:
 		"Move: two-finger scroll, middle-drag, or WASD\n" +
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
+		"Cars and people on the streets: T turns them off and on\n" +
 		"Tools: keys 1-0, - and =     Pause: Space     Fast: F     Help: H\n" +
 		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services, water, pollution)\n" +
 		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
