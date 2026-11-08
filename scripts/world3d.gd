@@ -177,6 +177,12 @@ var alerts := Node3D.new()            # floating warning icons above plots
 var _alert_items: Array = []          # [sprite, ground point]; reused between refreshes
 var _alert_count := 0                 # how many of them are showing
 var _alert_size := 30.0
+# Smoke drifting from coal plant chimneys (looks only; a handful of particle streams).
+const MAX_SMOKE := 24
+var smoke := Node3D.new()
+var _smoke_points: Array[Vector3] = []          # chimney tops, gathered while planning buildings
+var _smoke_items: Array[CPUParticles3D] = []    # reused between refreshes
+var _smoke_mesh := QuadMesh.new()
 var _power_icon: Texture2D
 var _water_icon: Texture2D
 var _road_icon: Texture2D
@@ -210,7 +216,7 @@ const BIRCH_BARK := Color(0.80, 0.78, 0.72)
 const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
-enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS }
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS, POLLUTION }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
@@ -493,6 +499,7 @@ func _build_city_nodes() -> void:
 	_road_icon = _svg_texture(ROAD_ICON_SVG)
 	_water_icon = _svg_texture(WATER_ICON_SVG)
 	add_child(alerts)
+	_build_smoke()
 
 
 func _svg_texture(svg: String) -> Texture2D:
@@ -679,6 +686,7 @@ func refresh_buildings() -> void:
 	_extra_trees.clear()
 	_spire_items.clear()
 	_model_items.clear()
+	_smoke_points.clear()
 	_values = sim.land_value_map()
 	_wall_owner.clear()
 	_roof_owner.clear()
@@ -713,6 +721,7 @@ func refresh_buildings() -> void:
 		_recolour_buildings()
 	chimney_list.append_array(_spire_items)
 	_fill(chimneys.multimesh, chimney_list, false)
+	_place_smoke()
 	_fill(paving.multimesh, _paving_items, false)
 	_fill(props.multimesh, _prop_items, false)
 	var bodies: Array = []
@@ -759,6 +768,7 @@ func set_overlay(kind: int) -> void:
 	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
 			trunks, crowns, cones, city_trunks, city_crowns, city_cones]:
 		node.visible = not on
+	smoke.visible = not on
 	if on:
 		_paint_overlay()
 	else:
@@ -789,6 +799,9 @@ func overlay_legend(kind: int) -> Array:
 		Overlay.WATER:
 			return [[OV_BLUE, "Has water"], [OV_DARK_BLUE, "Carries water"],
 				[OV_RED, "Needs water to grow"], [OV_GREY, "Not connected"]]
+		Overlay.POLLUTION:
+			return [[OV_GREEN, "Clean air"], [OV_LIGHT_GREEN, "A little"], [OV_YELLOW, "Some"],
+				[OV_ORANGE, "Polluted"], [OV_RED, "Heavy"]]
 	return []
 
 
@@ -887,6 +900,13 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 			if t == Tile.EMPTY or t == Tile.PARK:
 				return Color(c, 0.45) if n > 0 else none
 			return none
+		Overlay.POLLUTION:
+			# Bands match the hover text (simulation.gd pollution_band).
+			var band: int = sim.pollution_band(i)
+			var bands: Array[Color] = [OV_GREEN, OV_LIGHT_GREEN, OV_YELLOW, OV_ORANGE, OV_RED]
+			if t == Tile.EMPTY:
+				return Color(bands[band], 0.6) if band > 0 else none
+			return Color(bands[band], 0.9)
 	return none
 
 
@@ -2582,7 +2602,80 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 		var pos: Vector3 = stack["pos"]
 		chimney_list.append([Transform3D(Basis.from_scale(Vector3(3.0, 65.0, 3.0)),
 			pos + Vector3.UP * 32.5), Color(0.75, 0.74, 0.72)])
+		_smoke_points.append(pos + Vector3.UP * 66.0)
 	_plan_fence(i, front, depth)       # security fence round the edge
+
+
+# -------------------------------------------------------------------- smoke
+
+func _build_smoke() -> void:
+	# A soft grey puff that always faces the camera; each chimney gets a stream of them.
+	var puff := Gradient.new()
+	puff.set_color(0, Color(1, 1, 1, 1))
+	puff.set_color(1, Color(1, 1, 1, 0))
+	var tex := GradientTexture2D.new()
+	tex.gradient = puff
+	tex.fill = GradientTexture2D.FILL_RADIAL
+	tex.fill_from = Vector2(0.5, 0.5)
+	tex.fill_to = Vector2(0.5, 0.0)
+	tex.width = 64
+	tex.height = 64
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.vertex_color_use_as_albedo = true
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	mat.billboard_keep_scale = true
+	mat.roughness = 1.0
+	_smoke_mesh.size = Vector2(1, 1)
+	_smoke_mesh.material = mat
+	add_child(smoke)
+
+
+func _new_smoke_stream() -> CPUParticles3D:
+	var p := CPUParticles3D.new()
+	p.mesh = _smoke_mesh
+	p.amount = 20
+	p.lifetime = 12.0
+	p.preprocess = 12.0                 # already billowing when it first appears
+	p.local_coords = false              # puffs stay where they are if the plant is rebuilt
+	p.direction = Vector3.UP
+	p.spread = 10.0
+	p.initial_velocity_min = 5.0
+	p.initial_velocity_max = 7.0
+	p.damping_min = 0.3
+	p.damping_max = 0.5
+	p.gravity = Vector3(2.0, 0.8, 0.8)  # rises slowly and drifts on the breeze
+	p.scale_amount_min = 14.0
+	p.scale_amount_max = 20.0
+	var grow := Curve.new()
+	grow.add_point(Vector2(0.0, 0.35))
+	grow.add_point(Vector2(1.0, 1.0))
+	p.scale_amount_curve = grow
+	var fade := Gradient.new()
+	fade.set_color(0, Color(0.62, 0.62, 0.60, 0.55))
+	fade.set_color(1, Color(0.75, 0.75, 0.74, 0.0))
+	p.color_ramp = fade
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	smoke.add_child(p)
+	return p
+
+
+func _place_smoke() -> void:
+	# One stream per chimney top (up to MAX_SMOKE); spare streams are switched off.
+	var count := mini(_smoke_points.size(), MAX_SMOKE)
+	for n: int in count:
+		if n == _smoke_items.size():
+			_smoke_items.append(_new_smoke_stream())
+		var stream := _smoke_items[n]
+		stream.position = _smoke_points[n]
+		stream.visible = true
+		if not stream.emitting:
+			stream.emitting = true
+	for n: int in range(count, _smoke_items.size()):
+		var spare := _smoke_items[n]
+		spare.emitting = false
+		spare.visible = false
 
 
 # -------------------------------------------------------------------- trees

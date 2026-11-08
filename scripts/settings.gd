@@ -101,9 +101,9 @@ const SKYSCRAPER_TRANSIT := 12      # ...and a working station or bus depot with
 #   only_one                  the town can only have one
 const BUILDINGS := {
 	"coal": {"name": "Coal power plant", "cost": 3000, "upkeep": 100, "power": 200,
-		"value": -0.30, "radius": 5, "about": "Cheap power, but smoky: lowers land value nearby"},
+		"value": -0.15, "radius": 5, "about": "Cheap power, but smoky: pollutes the air and lowers land value nearby"},
 	"gas": {"name": "Gas power plant", "cost": 5000, "upkeep": 150, "power": 400, "unlock": 1000,
-		"value": -0.15, "radius": 4, "about": "Twice the power of coal and cleaner"},
+		"value": -0.08, "radius": 4, "about": "Twice the power of coal and cleaner"},
 	"nuclear": {"name": "Nuclear power plant", "cost": 15000, "upkeep": 350, "power": 1500, "unlock": 5000,
 		"value": -0.20, "radius": 6, "about": "Huge output for a big town; people don't like living next to it"},
 	"wind": {"name": "Wind turbine", "cost": 400, "upkeep": 8, "power": 25, "area": true,
@@ -115,9 +115,9 @@ const BUILDINGS := {
 	"water_tower": {"name": "Water tower", "cost": 300, "upkeep": 10, "water": 120, "uses_power": 1,
 		"about": "A small, cheap water supply"},
 	"landfill": {"name": "Landfill", "cost": 100, "upkeep": 5, "rubbish": 800, "area": true,
-		"value": -0.12, "radius": 3, "about": "Takes the rubbish of 800 residents per tile; nobody wants to live by it"},
+		"value": -0.06, "radius": 3, "about": "Takes the rubbish of 800 residents per tile; nobody wants to live by it"},
 	"recycling": {"name": "Recycling centre", "cost": 2500, "upkeep": 70, "rubbish": 2500, "uses_power": 3,
-		"unlock": 1000, "value": -0.03, "radius": 2, "about": "Takes the rubbish of 2,500 residents, cleanly"},
+		"unlock": 1000, "value": -0.01, "radius": 2, "about": "Takes the rubbish of 2,500 residents, cleanly"},
 	"golf": {"name": "Golf course", "cost": 150, "upkeep": 2, "area": true, "value": 0.07, "radius": 3,
 		"appeal": 0.004, "about": "Fairways, greens and bunkers (drag to lay out holes); raises land value"},
 	"library": {"name": "Library", "cost": 1200, "upkeep": 40, "uses_power": 2, "unlock": 500,
@@ -135,12 +135,38 @@ const BUILDINGS := {
 	"station": {"name": "Railway station", "cost": 6000, "upkeep": 120, "uses_power": 4, "unlock": 2000,
 		"value": 0.08, "radius": 6, "visitors": 0.03, "about": "Visitors by train: more demand for shops, higher land value"},
 	"harbour": {"name": "Harbour", "cost": 7000, "upkeep": 120, "uses_power": 4, "unlock": 1000, "near_sea": true,
-		"value": -0.05, "radius": 3, "port_jobs": 80, "about": "Ships bring trade: more demand for industry"},
+		"value": -0.02, "radius": 3, "port_jobs": 80, "about": "Ships bring trade: more demand for industry"},
 }
 const LEISURE_APPEAL_MAX := 0.3   # all the leisure buildings together add at most this much appeal
 const RUBBISH_START_POP := 400    # below this the town's rubbish isn't a problem
 const RUBBISH_PER_JOB := 0.5      # a job makes half as much rubbish as a resident
 const RUBBISH_EFFECT := 0.5       # appeal lost when none of the rubbish is collected
+
+# --- Pollution ---
+# Pollution runs from 0 (clean air) to 1 (heavy). Each source adds its strength on
+# its own tile, fading to nothing at the edge of its spread (in tiles; 1 tile = 50 m).
+# Overlapping sources add up, so a big industrial estate is far worse than one works.
+# Land value penalties in BUILDINGS (and INDUSTRY_PENALTY) are only the eyesore and
+# noise; the smoke is counted here.
+const INDUSTRY_POLLUTION := 0.06          # per stage of industry: small works 0.06, large factory 0.18
+const INDUSTRY_POLLUTION_SPREAD := 4      # 200 m
+# Other buildings that pollute (only while working): [strength, spread in tiles].
+# Nuclear, wind and solar are clean.
+const POLLUTION_SOURCES := {
+	"coal": [1.2, 9],                     # heavy, reaches 450 m
+	"gas": [0.5, 6],
+	"landfill": [0.12, 4],                # per tile, so a big tip smells more
+	"recycling": [0.08, 2],
+	"harbour": [0.35, 5],                 # ships' engines
+}
+const PARK_CLEANING := 0.1                # each park tile soaks up this much within its spread (golf half)
+const PARK_CLEANING_SPREAD := 2
+# Bands for the map and hover text: clean · a little · some · polluted · heavy.
+const POLLUTION_BANDS := [0.05, 0.15, 0.3, 0.5]
+const POLLUTED := 0.3                     # from here a plot counts as "polluted"
+const POLLUTION_VALUE_EFFECT := 0.2       # land value lost in full pollution
+const POLLUTION_GROWTH_EFFECT := 0.6      # homes in full pollution grow this much slower (0.6 = 60%)
+const POLLUTION_APPEAL_EFFECT := 0.15     # appeal lost if every resident lived in polluted air
 
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
@@ -158,7 +184,7 @@ const SEA_BONUS := 0.30           # right by the sea (fades out over SEA_VIEW_TI
 const SEA_VIEW_TILES := 6
 const PARK_BONUS := 0.07          # per park tile within 3 tiles
 const SHOP_BONUS := 0.012         # per level of shops within 3 tiles
-const INDUSTRY_PENALTY := 0.03    # per level of industry within 4 tiles
+const INDUSTRY_PENALTY := 0.015   # per level of industry within 4 tiles (its smoke is in Pollution above)
 const BASE_HOME_PRICE := 160000   # £ for a home on average land with no shortage
 const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this much
 
