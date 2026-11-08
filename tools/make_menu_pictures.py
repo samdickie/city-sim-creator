@@ -141,7 +141,7 @@ def model_materials(wall, roof, r):
         "pot": material("plain", (0.55, 0.30, 0.20)), "fascia": material("plain", pick((r * 5.3) % 1, fascias), 0.35),
         "render": material("plain", wall), "awning": material("plain", pick((r * 2.9) % 1, awnings)),
         "lead": material("plain", (0.30, 0.32, 0.34), 0.6), "cladding": material("plain", wall, 0.5, 0.35),
-        "sheet": material("plain", roof, 0.5, 0.35),
+        "sheet": material("plain", roof, 0.5, 0.35), "accent": material("plain", roof, 0.4),
     }
     return [parts[name] for name in mb.MATERIALS]
 
@@ -172,10 +172,12 @@ def _mesh_object(name, builder, materials):
     return obj
 
 
-def model(name, along, back, w, d, total_h, wall=BLONDE_SANDSTONE, roof=SLATE, r=0.3):
+def model(name, along, back, w, d, total_h=None, wall=BLONDE_SANDSTONE, roof=SLATE, r=0.3, z0=0.0):
     builder, dims = mb.MODELS[name]()
+    if total_h is None:
+        total_h = dims[2] + dims[3]          # as built, unstretched
     obj = _mesh_object(name, builder, model_materials(wall, roof, r))
-    obj.location = (along, _y(back, d), 0.0)
+    obj.location = (along, _y(back, d), z0)
     obj.scale = (w / dims[0], d / dims[1], total_h / (dims[2] + dims[3]))
     return obj
 
@@ -313,14 +315,26 @@ def homes_1():
         tree(along, 17.0, 8.0)
 
 
+def modern_block(along, back, w, d, storeys, cladding, glassy=False, variant="modern_floor"):
+    """A modern block stacked from storeys, as the game builds it, with balconies."""
+    floor = "glass_floor" if glassy else variant
+    model("modern_base", along, back, w, d, 4.6, cladding)
+    body = max(storeys - 3, 1)
+    for f in range(body):
+        model(floor, along, back, w, d, 3.2, cladding, z0=4.6 + f * 3.2)
+        side = 0.22 if f % 2 == 0 else -0.22
+        box(along + w * side, back - 1.6, w * 0.44, 1.6, 0.22, TRIM, 4.6 + f * 3.2)
+        box(along + w * side, back - 1.6, w * 0.44, 0.08, 1.05, (0.55, 0.66, 0.72), 4.82 + f * 3.2, rough=0.1)
+    model("modern_top", along, back, w, d, None, cladding, z0=4.6 + body * 3.2)
+
+
+TIMBER = (0.56, 0.38, 0.23)
+
+
 def homes_2():
     ground("grass")
     model("classical6_bays", -12.5, 3.0, 21.0, 13.0, 27.6, HONEY_STONE)
-    # A modern block beside it: glazing between white frames, with balconies.
-    box(12.5, 3.0, 21.0, 13.0, 26.0, (0.10, 0.17, 0.24), rough=0.08)
-    for f in range(9):
-        box(12.5, 3.0 - 0.2, 21.4, 13.4, 0.35, MODERN_WHITE, 2.9 + f * 2.9)
-        box(12.5, 2.0, 12.0, 1.4, 1.0, (0.55, 0.66, 0.72), 3.0 + f * 2.9, rough=0.1)
+    modern_block(12.5, 3.0, 21.0, 13.0, 8, TIMBER)
     slab(0.0, 17.5, 46.0, 15.0, LAWN)
     for along in (-15, 0, 15):
         tree(along, 25.0, 9.0)
@@ -522,10 +536,8 @@ def fire():
     ground()
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     slab(-5.0, 3.0, 34.0, 5.0, CONCRETE)
-    gabled(-5.0, 8.0, 34.0, 18.0, 9.5, 0.0, RED_SANDSTONE)
-    for k in range(3):
-        box(-16.0 + k * 11.0, 7.75, 8.0, 0.3, 5.2, FIRE_RED)
-    gabled(19.0, 12.0, 6.0, 6.0, 22.0, 0.0, RED_SANDSTONE)
+    model("fire_station", -5.0, 8.0, 34.0, 18.0, None, RED_SANDSTONE, FIRE_RED)
+    model("fire_tower", 19.0, 12.0, 6.0, 6.0, None, RED_SANDSTONE)
     slab(0.0, 27.0, 49.0, 22.0, YARD)
     box(-12.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)
     box(-6.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)
@@ -534,8 +546,7 @@ def fire():
 def school():
     ground()
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
-    gabled(-4.0, 4.0, 38.0, 13.0, 9.0, 4.5, RED_SANDSTONE)
-    gabled(-4.0, 2.2, 8.0, 3.0, 10.5, 3.0, RED_SANDSTONE, windows=False)
+    model("school", -4.0, 4.0, 38.0, 13.0, None, RED_SANDSTONE)
     slab(20.0, 3.0, 8.0, 15.0, CAR_PARK)
     slab(0.0, 19.0, 46.0, 29.0, LAWN)
     for b in (21.0, 46.0):
@@ -548,13 +559,12 @@ def school():
 def hospital():
     ground()
     slab(18.5, 3.0, 12.0, 45.0, CAR_PARK)
-    box(-6.0, 13.0, 34.0, 22.0, 19.8, MODERN_WHITE)
-    for f in range(6):
-        box(-6.0, 12.9, 30.0, 0.1, 1.9, (0.10, 0.17, 0.24), 1.0 + f * 3.2, rough=0.08)
+    model("hospital", -6.0, 13.0, 34.0, 22.0, None, MODERN_WHITE, CROSS_RED)
     box(-6.0, 4.0, 16.0, 9.0, 5.0, (0.10, 0.17, 0.24), rough=0.08)
-    box(5.0, 12.8, 1.3, 0.2, 4.2, CROSS_RED, 13.8)
-    box(5.0, 12.8, 4.2, 0.2, 1.3, CROSS_RED, 15.25)
-    box(-6.0, 20.0, 14.0, 14.0, 0.3, CHARCOAL, 19.8)
+    box(-6.0, 4.0 - 0.6, 18.0, 0.6, 0.5, TRIM, 5.0)
+    box(-6.0, 17.0, 14.0, 14.0, 0.3, CHARCOAL, 19.9)
+    for along, w, d in ((-8.5, 1.0, 6.0), (-3.5, 1.0, 6.0), (-6.0, 4.0, 1.0)):
+        box(along, 24.0 - d / 2, w, d, 0.05, WHITE_RENDER, 20.2)
     for along in (15.5, 21.0):
         box(along, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
 
@@ -667,9 +677,9 @@ def _district(colour, tall):
     ground()
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
     if tall:
-        box(-10.0, 6.0, 16.0, 14.0, 70.0, (0.10, 0.17, 0.24), rough=0.08)
-        for f in range(0, 70, 4):
-            box(-10.0, 5.9, 16.2, 14.2, 0.3, (0.9, 0.9, 0.88), f)
+        for f in range(20):
+            model("glass_floor", -10.0, 6.0, 16.0, 14.0, 3.5, z0=f * 3.5)
+        box(-10.0, 9.0, 8.0, 6.0, 3.0, CONCRETE, 70.0)
         model("classical6_shops", 12.0, 4.0, 21.0, 13.0, 27.6, HONEY_STONE)
     else:
         model("tenement4", -12.0, 3.0, 22.0, 13.0, 17.3, RED_SANDSTONE)
@@ -742,7 +752,7 @@ def clear_items(keep):
 
 def main():
     out_dir, tex_dir = sys.argv[1], sys.argv[2]
-    only = sys.argv[3] if len(sys.argv) > 3 else ""
+    only = set(filter(None, (sys.argv[3] if len(sys.argv) > 3 else "").split(",")))   # e.g. fire,school
     os.makedirs(out_dir, exist_ok=True)
     bpy.ops.wm.read_factory_settings(use_empty=True)
     _load_textures(tex_dir)
@@ -750,7 +760,7 @@ def main():
     keep = {"sun", "cam"}
     import mathutils
     for name, make in ITEMS.items():
-        if only and name != only:
+        if only and name not in only:
             continue
         clear_items(keep)
         make()

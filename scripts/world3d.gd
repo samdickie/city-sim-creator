@@ -25,15 +25,21 @@ const MODEL_DIMS := {
 	"classical2": Vector4(21.0, 13.0, 9.1, 4.0), "classical3": Vector4(21.0, 13.0, 12.5, 4.0),
 	"classical4": Vector4(21.0, 13.0, 15.9, 4.0), "classical5": Vector4(21.0, 13.0, 19.3, 4.0),
 	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
+	"fire_station": Vector4(34.0, 18.0, 11.5, 0.0), "fire_tower": Vector4(6.0, 6.0, 23.0, 0.0),
+	"school": Vector4(38.0, 13.0, 9.0, 4.5), "hospital": Vector4(34.0, 22.0, 20.8, 0.0),
+	# Modern blocks are stacked: a glazed ground floor, upper storeys, then the roof.
+	"modern_base": Vector4(21.0, 13.0, 4.6, 0.0), "modern_floor": Vector4(21.0, 13.0, 3.2, 0.0),
+	"glass_floor": Vector4(21.0, 13.0, 3.2, 0.0), "modern_top": Vector4(21.0, 13.0, 6.85, 0.0),
 }
 # Other designs with the same size as a model above; one is picked for each building.
 const MODEL_VARIANTS := {
 	"villa": ["villa", "villa_b", "villa_c"], "bungalow": ["bungalow", "bungalow_b"],
 	"terrace": ["terrace", "terrace_b"], "tenement3": ["tenement3", "tenement3_b"],
 	"tenement4": ["tenement4", "tenement4_b"], "shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
+	"modern_floor": ["modern_floor", "modern_floor_b"],
 }
 const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot", "fascia", "render",
-	"awning", "lead", "cladding", "sheet"]
+	"awning", "lead", "cladding", "sheet", "accent"]
 const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
@@ -1359,6 +1365,20 @@ func _add_model(model_name: String, spot: Dictionary, w: float, d: float, total_
 		Color(roof_colour.r, roof_colour.g, roof_colour.b, variety), _current_owner])
 
 
+func _model_total(model_name: String) -> float:
+	# A model's full height as built (used to place it without stretching).
+	var dims := _model_dims(model_name)
+	return dims.z + dims.w
+
+
+func _raised(spot: Dictionary, up: float) -> Dictionary:
+	# The same spot, lifted (for stacking storeys).
+	var copy := spot.duplicate()
+	var pos: Vector3 = spot["pos"]
+	copy["pos"] = pos + Vector3.UP * up
+	return copy
+
+
 func _fill_models() -> void:
 	# Group the planned models by kind and 400 m square, one MultiMesh each.
 	var groups := {}
@@ -1501,21 +1521,31 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 		Tile.FIRE:
 			# Red sandstone with three engine bays, an apron, a drill tower and a yard.
 			var spot := _place(i, front, -5.0, 8.0, 34.0, 18.0)
-			_add_block(spot, 34.0, 18.0, 9.5, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
-			for k in 3:
-				_front_panel(spot, 18.0, -11.0 + k * 11.0, 0.0, 8.0, 5.2, FIRE_RED, wall_list)
+			if _models.has("fire_station"):
+				_add_model("fire_station", spot, 34.0, 18.0, _model_total("fire_station"), RED_SANDSTONE, FIRE_RED)
+			else:
+				_add_block(spot, 34.0, 18.0, 9.5, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
+				for k in 3:
+					_front_panel(spot, 18.0, -11.0 + k * 11.0, 0.0, 8.0, 5.2, FIRE_RED, wall_list)
 			_slab(i, front, -5.0, 3.0, 34.0, 5.0, CONCRETE)
 			var tower := _place(i, front, 19.0, 12.0, 6.0, 6.0)
-			_add_block(tower, 6.0, 6.0, 22.0, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
+			if _models.has("fire_tower"):
+				_add_model("fire_tower", tower, 6.0, 6.0, _model_total("fire_tower"), RED_SANDSTONE, SLATE)
+			else:
+				_add_block(tower, 6.0, 6.0, 22.0, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
 			_slab(i, front, 0.0, 27.0, 49.0, depth - 29.0, YARD)
 			_prop(i, front, -12.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)       # a fire engine
 			_prop(i, front, -6.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)
 		Tile.SCHOOL:
 			# A Victorian sandstone school with a slate roof, a playground and a playing field.
 			var spot := _place(i, front, -4.0, 4.0, 38.0, 13.0)
-			_add_block(spot, 38.0, 13.0, 9.0, RED_SANDSTONE, STYLE_CLASSICAL, 4.5, SLATE, wall_list, roof_list)
-			var porch := _place(i, front, -4.0, 2.2, 8.0, 3.0)
-			_add_block(porch, 8.0, 3.0, 10.5, RED_SANDSTONE, STYLE_CLASSICAL, 3.0, SLATE, wall_list, roof_list)
+			if _models.has("school"):
+				# The model has its own porch and wings standing forward of the front.
+				_add_model("school", spot, 38.0, 13.0, _model_total("school"), RED_SANDSTONE, SLATE)
+			else:
+				_add_block(spot, 38.0, 13.0, 9.0, RED_SANDSTONE, STYLE_CLASSICAL, 4.5, SLATE, wall_list, roof_list)
+				var porch := _place(i, front, -4.0, 2.2, 8.0, 3.0)
+				_add_block(porch, 8.0, 3.0, 10.5, RED_SANDSTONE, STYLE_CLASSICAL, 3.0, SLATE, wall_list, roof_list)
 			_slab(i, front, 20.0, 3.0, 8.0, 15.0, CAR_PARK)        # playground
 			var field_from := 19.0
 			var field_d := depth - field_from - 2.0
@@ -1540,12 +1570,17 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 			var floors := 6
 			var h: float = floors * 3.2 + 0.6
 			var main := _place(i, front, -6.0, 13.0, 34.0, 22.0)
-			_add_block(main, 34.0, 22.0, h, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			if _models.has("hospital"):
+				# The model has the red cross on its front (in the accent colour).
+				_add_model("hospital", main, 34.0, 22.0, _model_total("hospital"), MODERN_WHITE, CROSS_RED)
+				h += 0.1    # the helipad sits on its roof, inside the parapet
+			else:
+				_add_block(main, 34.0, 22.0, h, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+				_front_panel(main, 22.0, 11.0, h - 6.0, 1.3, 4.2, CROSS_RED, wall_list)
+				_front_panel(main, 22.0, 11.0, h - 4.55, 4.2, 1.3, CROSS_RED, wall_list)
 			var entrance := _place(i, front, -6.0, 4.0, 16.0, 9.0)
 			_add_block(entrance, 16.0, 9.0, 5.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
 			_front_panel(entrance, 9.0, 0.0, 5.0, 18.0, 0.5, TRIM, wall_list)      # canopy edge
-			_front_panel(main, 22.0, 11.0, h - 6.0, 1.3, 4.2, CROSS_RED, wall_list)
-			_front_panel(main, 22.0, 11.0, h - 4.55, 4.2, 1.3, CROSS_RED, wall_list)
 			_roof_panel(main, h, 0.0, 0.0, 14.0, 14.0, CHARCOAL, wall_list)      # helipad
 			_roof_panel(main, h + 0.05, -2.5, 0.0, 1.0, 6.0, WHITE_RENDER, wall_list)
 			_roof_panel(main, h + 0.05, 2.5, 0.0, 1.0, 6.0, WHITE_RENDER, wall_list)
@@ -1959,6 +1994,8 @@ func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: flo
 	var style := STYLE_GLASS if glassy else STYLE_MODERN
 	var colour: Color = GLASS_FRAME if glassy else cladding
 	var floor_h := 3.6 if offices else 3.2
+	var floor_model := "glass_floor" if glassy else "modern_floor"
+	var stacked := _models.has(floor_model)
 	var storeys := rng.randi_range(20, 26) if lv == 7 else rng.randi_range(32, 42)
 	# Tiers: [width, depth, share of the storeys]
 	var tiers: Array = [[24.0, 19.0, 0.88], [18.0, 14.0, 0.12]]
@@ -1969,7 +2006,13 @@ func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: flo
 		var td: float = tier[1]
 		var floors: int = maxi(roundi(storeys * float(tier[2])), 2)
 		var th: float = floors * floor_h
-		_box_item(wall_list, at, x_axis, z_axis, Vector3(tw, th, td), colour, style)
+		if stacked:
+			# The storey models, stretched to this tier's size.
+			var tier_spot := {"pos": at, "x": x_axis, "z": z_axis}
+			for f: int in floors:
+				_add_model(floor_model, _raised(tier_spot, f * floor_h), tw, td, floor_h, colour, colour)
+		else:
+			_box_item(wall_list, at, x_axis, z_axis, Vector3(tw, th, td), colour, style)
 		# A light slab edge where each tier steps in.
 		_box_item(wall_list, at + Vector3.UP * th, x_axis, z_axis, Vector3(tw + 0.6, 0.5, td + 0.6),
 			TRIM if glassy else cladding.lightened(0.2), STYLE_PAINT)
@@ -2053,12 +2096,16 @@ func _modern_block(spot: Dictionary, w: float, d: float, storeys: int, cladding:
 	var base_h: float = 4.6
 	var body_floors: int = maxi(storeys - 3, 1)
 	var body_h: float = body_floors * 3.2
-	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * base_h, z_axis * d), pos),
-		GLASS_FRAME, Color(w, base_h, d, STYLE_GLASS)])
-	var body_style: int = STYLE_GLASS if glassy else STYLE_MODERN
-	var body_colour: Color = GLASS_FRAME if glassy else cladding
-	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * body_h, z_axis * d), pos + Vector3.UP * base_h),
-		body_colour, Color(w, body_h, d, body_style)])
+	var floor_model := "glass_floor" if glassy else "modern_floor"
+	var stacked: bool = _models.has("modern_base") and _models.has("modern_top") and _models.has(floor_model)
+	if stacked:
+		# The detailed models, storey by storey (the roof has the penthouse and terrace).
+		_add_model("modern_base", spot, w, d, base_h, cladding, cladding)
+		for f: int in body_floors:
+			_add_model(floor_model, _raised(spot, base_h + f * 3.2), w, d, 3.2, cladding, cladding)
+		_add_model("modern_top", _raised(spot, base_h + body_h), w, d, _model_total("modern_top"), cladding, cladding)
+	else:
+		_modern_block_boxes(spot, w, d, base_h, body_h, cladding, glassy, wall_list)
 	# Balconies on alternate sides, floor by floor: a slab and a glass balustrade.
 	for f: int in body_floors:
 		var y: float = base_h + f * 3.2
@@ -2067,6 +2114,20 @@ func _modern_block(spot: Dictionary, w: float, d: float, storeys: int, cladding:
 		_prop_items.append([Transform3D(Basis(x_axis * (w * 0.44), Vector3.UP * 0.22, z_axis * 1.6), at), TRIM])
 		_prop_items.append([Transform3D(Basis(x_axis * (w * 0.44), Vector3.UP * 1.05, z_axis * 0.08),
 			at + Vector3.UP * 0.22 - z_axis * 0.76), BALCONY_GLASS])
+
+
+func _modern_block_boxes(spot: Dictionary, w: float, d: float, base_h: float, body_h: float,
+		cladding: Color, glassy: bool, wall_list: Array) -> void:
+	# The simple version of a modern block, when the models aren't there.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * base_h, z_axis * d), pos),
+		GLASS_FRAME, Color(w, base_h, d, STYLE_GLASS)])
+	var body_style: int = STYLE_GLASS if glassy else STYLE_MODERN
+	var body_colour: Color = GLASS_FRAME if glassy else cladding
+	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * body_h, z_axis * d), pos + Vector3.UP * base_h),
+		body_colour, Color(w, body_h, d, body_style)])
 	# Penthouse: two floors set back, all glass, under a light canopy.
 	var top: float = base_h + body_h
 	var pw: float = w - 5.0

@@ -3,13 +3,14 @@
 // frames, doors and shopfronts, metal, chimney pots and so on.
 // Per building (from the MultiMesh):
 //   COLOR            wall colour (or, with a map overlay on, the plot's overlay colour)
-//   INSTANCE_CUSTOM  rgb = roof colour, a = a random number (door and shopfront colours,
+//   INSTANCE_CUSTOM  rgb = roof colour (or, on flat-roofed buildings, an accent colour:
+//                    fire station doors, the hospital cross), a = a random number (door and shopfront colours,
 //                    which windows are lit at night)
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
 uniform int part = 0;   // 0 stone, 1 roof, 2 glass, 3 frame, 4 door, 5 metal, 6 pot,
-						// 7 fascia, 8 render, 9 awning, 10 lead, 11 cladding, 12 sheet
+						// 7 fascia, 8 render, 9 awning, 10 lead, 11 cladding, 12 sheet, 13 accent
 uniform bool use_wall_tex = false;
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);
@@ -120,6 +121,9 @@ void fragment() {
 		c *= mix(0.85, 1.0, smoothstep(0.0, 2.0, height_up));
 		rough = 0.5;
 		metal = 0.35;
+	} else if (part == 13) {
+		c = extra.rgb;                    // painted in the building's second colour
+		rough = 0.4;
 	}
 	if (overlay_on) {
 		// Map overlay: the plot's colour dominates.
