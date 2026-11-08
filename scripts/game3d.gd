@@ -385,6 +385,10 @@ func _process(delta: float) -> void:
 				var n := sim.burned.size()
 				hud.flash("Fire! %d %s burned down. A fire station nearby would stop that." % [
 					n, "building" if n == 1 else "buildings"])
+			elif not sim.abandoned_now.is_empty():
+				var gone := sim.abandoned_now.size()
+				hud.flash("%d %s abandoned. Point at one to see why, or bulldoze it." % [
+					gone, "building was" if gone == 1 else "buildings were"])
 
 	# Redraw at most once a frame, however many tiles changed. Roads, power lines
 	# and traffic routes only change when the layout does.
@@ -1087,6 +1091,10 @@ func _tile_text(i: int) -> String:
 		kind += " (%s density)" % sim.density_name(i)
 	var text := "%s, level %d of %d%s: %s" % [kind, sim.levels[i], sim.max_level(i),
 		_stage_words(t, sim.stage(i)), sim.zone_status(i)]
+	if sim.is_abandoned(i):
+		# Boarded up: nobody lives or works here and it pays no tax.
+		text = "Abandoned — %s\n%s, level %d of %d%s: empty and boarded up, pays no tax (bulldoze it, or it's done up once things improve)" % [
+			sim.abandoned_reason(i), kind, sim.levels[i], sim.max_level(i), _stage_words(t, sim.stage(i))]
 	text += "\nLand value %s   ·   %s" % [sim.land_value_word(i), _services_text(i)]
 	if sim.district[i] != 0:
 		text += "   ·   %s" % sim.district_name(i)

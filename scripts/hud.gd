@@ -634,6 +634,11 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		var tight: bool = sim.power_used > sim.power_supply * 0.9
 		power_label.add_theme_color_override("font_color", BAD if tight else TEXT_DIM)
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
+	if sim.abandoned_count > 0:
+		growth_label.text += "   ·   %d abandoned" % sim.abandoned_count
+	if sim.run_down_count > 0:
+		growth_label.text += "   ·   %d run down" % sim.run_down_count
+	growth_label.add_theme_color_override("font_color", BAD if sim.abandoned_count > 0 else TEXT_DIM)
 	var water_text := "no water supply yet" if sim.water_supply == 0 \
 		else "%d of %d used" % [sim.water_used, sim.water_supply]
 	# Water and rubbish on their own lines, so each is only red when it's the problem.

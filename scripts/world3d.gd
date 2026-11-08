@@ -217,7 +217,7 @@ const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
 # --- Map overlays (land value, power, roads, growth) ---
 enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS, POLLUTION }
-enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # same order as simulation.gd
+enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL, ABANDONED }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
 const OV_YELLOW := Color(0.97, 0.80, 0.22)
@@ -229,6 +229,10 @@ const OV_DARK_YELLOW := Color(0.62, 0.52, 0.16)
 const OV_DARK_BLUE := Color(0.16, 0.30, 0.58)
 const OV_CBD := Color(0.62, 0.38, 0.92)
 const OV_CONSERVATION := Color(0.80, 0.56, 0.28)
+const OV_ABANDONED := Color(0.45, 0.30, 0.24)
+# Abandoned buildings: their instance colour's alpha is set to this, and the
+# building, roof and model shaders draw them run down (alpha below 0.75).
+const ABANDONED_ALPHA := 0.5
 var overlay: int = Overlay.NONE
 var overlay_image: Image
 var overlay_texture: ImageTexture
@@ -700,6 +704,8 @@ func refresh_buildings() -> void:
 			_plan_plant(i, wall_list, chimney_list)
 		elif sim.is_building(t):
 			_plan_building(i, t, wall_list, roof_list, chimney_list)
+		elif ZONE_TINTS.has(t) and lv > 0 and sim.is_abandoned(i):
+			_plan_abandoned(i, t, wall_list, roof_list, chimney_list, walls_before, roofs_before)
 		elif ZONE_TINTS.has(t) and lv > 0:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
 		elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
@@ -732,6 +738,33 @@ func refresh_buildings() -> void:
 	_fill(parked_bodies.multimesh, bodies, false)
 	_fill(parked_cabins.multimesh, cabins, false)
 	_build_city_trees(tiles)
+
+
+func _plan_abandoned(i: int, t: int, wall_list: Array, roof_list: Array, chimney_list: Array,
+		walls_before: int, roofs_before: int) -> void:
+	# The same buildings as before, but run down: the shaders read the flag from
+	# the colour's alpha (dark, grimy walls, boarded windows, no lights), and no
+	# cars are parked outside. Its own land value drop is left out, so the
+	# building keeps its look rather than turning into a cheaper one.
+	var models_before := _model_items.size()
+	var cars_before := _parked_items.size()
+	var own_value := _values[i]
+	_values[i] = minf(own_value + Settings.ABANDONED_VALUE_PENALTY, 1.0)
+	_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
+	_values[i] = own_value
+	_parked_items.resize(cars_before)
+	for n in range(walls_before, wall_list.size()):
+		var item: Array = wall_list[n]
+		var c: Color = item[1]
+		item[1] = Color(c.r, c.g, c.b, ABANDONED_ALPHA)
+	for n in range(roofs_before, roof_list.size()):
+		var item: Array = roof_list[n]
+		var c: Color = item[1]
+		item[1] = Color(c.r, c.g, c.b, ABANDONED_ALPHA)
+	for n in range(models_before, _model_items.size()):
+		var item: Array = _model_items[n]
+		var c: Color = item[2]
+		item[2] = Color(c.r, c.g, c.b, ABANDONED_ALPHA)
 
 
 func _colours_of(items: Array) -> PackedColorArray:
@@ -789,7 +822,7 @@ func overlay_legend(kind: int) -> Array:
 				[OV_LIGHT_GREEN, "Near enough to grow"], [OV_RED, "Zone too far from a road"]]
 		Overlay.GROWTH:
 			return [[OV_GREEN, "Growing"], [OV_YELLOW, "Waiting (demand, space, land value or a school)"],
-				[OV_RED, "Stuck (needs a road or power)"], [OV_BLUE, "Fully built"]]
+				[OV_RED, "Stuck (needs a road or power)"], [OV_BLUE, "Fully built"], [OV_ABANDONED, "Abandoned"]]
 		Overlay.SERVICES:
 			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
 				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
@@ -884,6 +917,8 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 					return Color(OV_RED, 0.9)
 				Growth.FULL:
 					return Color(OV_BLUE, 0.9)
+				Growth.ABANDONED:
+					return Color(OV_ABANDONED, 0.95)
 		Overlay.SERVICES:
 			if service:
 				return Color(OV_BLUE, 0.95)

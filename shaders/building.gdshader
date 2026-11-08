@@ -1,7 +1,8 @@
 // Walls of every building. Draws windows, floors, shop fronts and
 // weathering from the building's real size, so one simple box looks like a building.
 // Per building (from the MultiMesh):
-//   COLOR            wall colour
+//   COLOR            rgb = wall colour; a below 0.75 = abandoned (grimy walls, boarded
+//                    windows, no lights)
 //   INSTANCE_CUSTOM  x = width, y = height, z = depth (metres), w = style
 //                    style 0 = house, 1 = shop, 2 = industry, 3 = flats, 4 = power plant,
 //                    5 = modern glass (bands of glazing with slim mullions),
@@ -21,6 +22,7 @@ varying vec3 local_pos;
 varying vec3 local_normal;
 varying vec4 size_style;
 varying vec3 wall_colour;
+varying float derelict;        // 1 = an abandoned building
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -31,6 +33,7 @@ void vertex() {
 	local_normal = NORMAL;
 	size_style = INSTANCE_CUSTOM;
 	wall_colour = COLOR.rgb;
+	derelict = COLOR.a < 0.75 ? 1.0 : 0.0;
 }
 
 void fragment() {
@@ -56,6 +59,13 @@ void fragment() {
 	}
 	// Darker near the ground (dirt and shadow).
 	colour *= mix(0.7, 1.0, smoothstep(0.0, 1.5, v));
+	if (derelict > 0.5) {
+		// Abandoned: darker, faded walls with grime streaking down from the top.
+		float grey = dot(colour, vec3(0.3, 0.59, 0.11));
+		float streak = hash(vec2(floor(u * 1.7), size.x + size.z));
+		float dirt = mix(0.62, 0.9, streak) * mix(0.85, 1.0, smoothstep(0.0, 2.5, size.y - v));
+		colour = mix(colour, vec3(grey) * vec3(0.95, 0.92, 0.85), 0.6) * dirt;
+	}
 
 	float rough = 0.85;
 	float metal = 0.0;
@@ -183,6 +193,15 @@ void fragment() {
 				lamp = vec3(1.0, 0.92, 0.78);
 			}
 			glow = lamp * lit * night * 2.2 * (1.0 - sash_bar);
+			if (derelict > 0.5) {
+				// Boarded up with weathered plywood; the odd one just broken and dark.
+				float board = hash(window_id + vec2(5.3, 8.1));
+				colour = board < 0.8 ? vec3(0.24, 0.18, 0.11) * (0.8 + 0.3 * hash(window_id + 2.7))
+					: vec3(0.02, 0.02, 0.025);
+				rough = 0.9;
+				metal = 0.0;
+				glow = vec3(0.0);
+			}
 		} else if (cell_v < 0.32 && cell_v > 0.26 && (style < 2 || style == 3) && edge_margin && cell_u > 0.18 && cell_u < 0.82) {
 			// Stone sill under each window.
 			colour *= 1.25;

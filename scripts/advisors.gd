@@ -245,6 +245,15 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			+ "Homes there grow slowly and people are less keen to live in the town. Keep "
 			+ "homes away from them, or put parks in between.", WorldView.Overlay.POLLUTION)
 
+	# --- Abandoned buildings ---
+	if sim.abandoned_count > 0:
+		_add(out, "abandoned", WARNING if sim.abandoned_count >= 5 else ADVICE,
+			"%d %s abandoned: point at one to see why" % [sim.abandoned_count,
+				"building is" if sim.abandoned_count == 1 else "buildings are"],
+			"Buildings that go without power, water or a road for years, or that the town "
+			+ "has too many of, are left empty. Fix the problem and they'll be done up, or "
+			+ "bulldoze them. They're brown on the Growth map.", growth_kind)
+
 	# --- Happiness: the main complaint, when people are unhappy ---
 	var complaints: Array[String] = sim.complaint_keys(1)
 	if sim.happiness < 0.5 and not complaints.is_empty():
