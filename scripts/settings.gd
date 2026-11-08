@@ -29,14 +29,14 @@ const DECLINE_CHANCE := 0.05      # chance per month that an unwanted zone shrin
 # --- Abandoned buildings ---
 # A built plot is "in decline" in any month it has no road, no power, no water
 # (anything past the first stage), too little demand (more homes, shops or works
-# than the town needs) or the town is very unpopular (high taxes, poor services,
-# rubbish). Decline only trims a plot down to its last building; after enough
+# than the town needs) or the town is very unpopular (happiness below 40%, see
+# Happiness). Decline only trims a plot down to its last building; after enough
 # months in decline that building is abandoned: empty, boarded up, no tax.
 const ABANDON_MONTHS := 36         # months in decline before a building may be abandoned
 const ABANDON_WARN_MONTHS := 18    # from here the hover text warns it's run down
 const ABANDON_CHANCE := 0.1        # after that, the chance each month that it's abandoned
 const DECLINE_RECOVERY := 3        # each good month takes this many off a plot's decline count
-const ABANDON_APPEAL := 0.2        # town appeal below this counts as decline ("stopping growth")
+const ABANDON_APPEAL := 0.2        # town appeal below this counts as decline (0.2 = 40% happy)
 const ABANDON_OVERSUPPLY := 2.0    # demand below minus this many first-stage plots' worth counts as decline
 const REFURBISH_CHANCE := 0.1      # chance each month an abandoned building is done up once it's wanted again
 const ABANDONED_VALUE_PENALTY := 0.04   # land value an abandoned building takes off its plot (less nearby)

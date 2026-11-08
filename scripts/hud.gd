@@ -575,7 +575,7 @@ func _build_help(root: Control) -> void:
 		"Taxes: people accept higher taxes when they get good services for them. High taxes\n" +
 		"with poor services stop growth, and eventually people leave (worst-served areas first).\n" +
 		"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power,\n" +
-		"water and leisure. Below 50% people stop moving in; below 33% they leave.\n" +
+		"water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.\n" +
 		"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings:\n" +
 		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
 		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +

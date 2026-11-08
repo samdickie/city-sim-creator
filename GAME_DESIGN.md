@@ -42,7 +42,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Worked out from the town each month (and when taxes change), so nothing extra is saved. Numbers in `Settings` under Happiness; complaint wording in `COMPLAINTS` in `simulation.gd`.
 
 ## Abandoned buildings
-- A built plot is "in decline" in any month it has no road nearby, no power, no water (anything past the first stage), far more of its kind than the town wants (homes with no jobs, shops with no customers, industry with no workers) or the town is very unpopular (appeal below 0.2: high taxes with poor services, or rubbish piling up).
+- A built plot is "in decline" in any month it has no road nearby, no power, no water (anything past the first stage), far more of its kind than the town wants (homes with no jobs, shops with no customers, industry with no workers) or the town is very unpopular (appeal below 0.2, i.e. happiness below 40%; the hover text names residents' main complaint).
 - Decline still trims plots back a level at a time, but never removes the last building. After 36 months in decline (each good month counts 3 back off) there's a 10% chance a month the building is abandoned: it houses nobody, has no jobs, pays no tax, uses no power or water and takes a little land value off the plots round about (0.04 on its own plot, fading out over 2 tiles).
 - Abandoned buildings look run down: faded, grimy walls, mossy roofs, boarded-up windows and doors, no lights at night and no cars outside. The hover text says "Abandoned — why"; plots in decline for 18 months or more warn that they're run down.
 - Once nothing's wrong and the town wants what it held again, it's done up (10% a month) and fills up again. Or bulldoze it.

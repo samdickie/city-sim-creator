@@ -138,6 +138,8 @@ func _ready() -> void:
 	assert(Tile.keys() == Simulation.Tile.keys(), "game3d.gd Tile list differs from simulation.gd")
 	assert(Tile.keys() == WorldView.Tile.keys(), "world3d.gd Tile list differs from simulation.gd")
 	assert(Simulation.Growth.keys() == WorldView.Growth.keys(), "world3d.gd Growth list differs from simulation.gd")
+	assert(Hud.OVERLAY_NAMES.size() == WorldView.Overlay.size() and Hud.OVERLAY_TIPS.size() == WorldView.Overlay.size(),
+		"hud.gd OVERLAY_NAMES / OVERLAY_TIPS don't match world3d.gd's Overlay list")
 	_load_map()
 	_compute_slopes()
 	sim.setup(map_w, map_h, water)

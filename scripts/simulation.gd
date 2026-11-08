@@ -72,7 +72,7 @@ var leisure_appeal := 0.0             # extra appeal from leisure buildings and 
 # whenever taxes change, from the town itself, so it needs no saving.
 var happiness := 2.0 / 3.0
 # What happiness is made of, in appeal points: part name -> amount (below 0 = a
-# complaint). Names: taxes, services, leisure, rubbish, jobs, housing, power, water.
+# complaint). Names: taxes, services, leisure, rubbish, jobs, housing, power, water, pollution.
 var happiness_parts := {}
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
@@ -591,9 +591,11 @@ func _decline_reason(i: int, want: float) -> String:
 		if s >= 2 and watered[i] == 0:
 			return "no water"
 	if appeal() < Settings.ABANDON_APPEAL:
-		if rubbish_shortfall() > 0.3:
-			return "the town is unpopular, rubbish is piling up"
-		return "the town is unpopular, taxes are high for the services"
+		# Appeal is happiness now, so name whatever residents mind most.
+		var keys := complaint_keys(1)
+		if keys.is_empty():
+			return "the town is unpopular"
+		return "the town is unpopular: %s" % complaint_text(keys[0])
 	if want < -_capacity_per_level(t) * Settings.ABANDON_OVERSUPPLY:
 		match t:
 			Tile.HOMES:
@@ -1207,8 +1209,8 @@ func _spread(i: int, radius: int, amount: float) -> void:
 #   pollution_band(i)        0 clean, 1 a little, 2 some, 3 polluted, 4 heavy
 #   pollution_word(i)        that band in words, for hover text
 #   polluted_homes_share()   0-1: share of residents living in polluted air
-#   pollution_feeling()      appeal lost to pollution (already taken off in appeal(),
-#                            so a happiness score shouldn't take it off again)
+#   pollution_feeling()      appeal lost to pollution (happiness's "pollution" part,
+#                            so it's already in appeal(); don't take it off again)
 #   air_word()               the town's air overall, in words
 #   pollution_reach_m(t, m)  how far a building type's pollution reaches (0 = clean)
 # The map is worked out along with land value (whenever the town changes, and
@@ -1276,7 +1278,7 @@ func _pollution_source(i: int) -> Vector2:
 	# x = how much this tile pollutes, y = how far it spreads in tiles (0, 0 = clean).
 	var t: int = tiles[i]
 	if t == Tile.INDUSTRY:
-		if levels[i] == 0:
+		if levels[i] == 0 or abandoned[i] == 1:   # (boarded-up works make no smoke)
 			return Vector2.ZERO
 		return Vector2(Settings.INDUSTRY_POLLUTION * stage(i), Settings.INDUSTRY_POLLUTION_SPREAD)
 	if not BUILDING_KEYS.has(t):
