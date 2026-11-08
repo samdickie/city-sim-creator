@@ -53,6 +53,11 @@ TEAM_BLUE = (0.12, 0.28, 0.62)
 HULL_WHITE = (0.94, 0.94, 0.92)
 SHIP_HULL = (0.20, 0.22, 0.26)
 CHARCOAL = (0.22, 0.23, 0.25)
+PLANT_BLUE = (0.34, 0.41, 0.48)
+GAS_SILVER = (0.78, 0.80, 0.82)
+GAS_BLUE = (0.10, 0.36, 0.56)
+NUCLEAR_CONCRETE = (0.80, 0.80, 0.78)
+NUCLEAR_BLUE = (0.30, 0.42, 0.56)
 HEDGE = (0.16, 0.30, 0.12)
 CONTAINERS = [(0.62, 0.18, 0.12), (0.12, 0.30, 0.55), (0.75, 0.55, 0.10), (0.20, 0.45, 0.30)]
 CAR_PAINT = [(0.55, 0.05, 0.05), (0.05, 0.12, 0.35), (0.85, 0.85, 0.85), (0.08, 0.08, 0.08), (0.45, 0.45, 0.47)]
@@ -172,13 +177,15 @@ def _mesh_object(name, builder, materials):
     return obj
 
 
-def model(name, along, back, w, d, total_h=None, wall=BLONDE_SANDSTONE, roof=SLATE, r=0.3, z0=0.0):
+def model(name, along, back, w, d, total_h=None, wall=BLONDE_SANDSTONE, roof=SLATE, r=0.3, z0=0.0, turn=0):
+    """turn: quarter turns anticlockwise seen from above (w and d are the model's own, before turning)."""
     builder, dims = mb.MODELS[name]()
     if total_h is None:
         total_h = dims[2] + dims[3]          # as built, unstretched
     obj = _mesh_object(name, builder, model_materials(wall, roof, r))
-    obj.location = (along, _y(back, d), z0)
+    obj.location = (along, _y(back, d if turn % 2 == 0 else w), z0)
     obj.scale = (w / dims[0], d / dims[1], total_h / (dims[2] + dims[3]))
+    obj.rotation_euler = (0.0, 0.0, math.pi / 2 * turn)
     return obj
 
 
@@ -421,29 +428,19 @@ def park():
 
 def coal():
     ground(YARD)
-    gabled(-6.0, 6.0, 30.0, 26.0, 18.0, 0.0, CONCRETE)
-    for along in (12.0, 19.0):
-        cylinder(along, 30.0, 3.0, 65.0, (0.75, 0.74, 0.72), taper=0.8)
+    model("coal_plant", 0.0, 3.0, 44.0, 44.0, None, CONCRETE, PLANT_BLUE)
     fence()
 
 
 def gas():
     ground(YARD)
-    model("shed", -6.0, 6.0, 30.0, 18.0, 16.0, (0.52, 0.60, 0.68), (0.44, 0.46, 0.50))
-    box(-6.0, 27.0, 20.0, 12.0, 24.0, CONCRETE)
-    for along in (10.0, 17.0):
-        cylinder(along, 31.5, 1.6, 46.0, (0.78, 0.78, 0.76))
-    cylinder(16.0, 15.0, 4.5, 8.0, (0.86, 0.86, 0.84))
+    model("gas_plant", 0.0, 3.0, 44.0, 44.0, None, GAS_SILVER, GAS_BLUE)
     fence()
 
 
 def nuclear():
     ground(YARD)
-    for along in (-12.0, 12.0):
-        cylinder(along, 42.0, 10.5, 44.0, (0.82, 0.82, 0.80), taper=0.8)
-    box(-14.0, 5.0, 16.0, 14.0, 16.0, CONCRETE)
-    cylinder(-14.0, 12.0, 6.5, 5.0, (0.74, 0.74, 0.72), 16.0, 0.8)
-    box(10.0, 5.0, 24.0, 12.0, 12.0, (0.55, 0.62, 0.70))
+    model("nuclear_plant", 0.0, 2.0, 46.0, 46.0, None, NUCLEAR_CONCRETE, NUCLEAR_BLUE)
     fence()
 
 
@@ -499,8 +496,7 @@ def water_pump():
 def water_tower():
     ground()
     slab(0.0, 10.0, 30.0, 30.0, YARD)
-    cylinder(0.0, 25.0, 2.4, 26.0, CONCRETE)
-    cylinder(0.0, 25.0, 7.5, 9.0, (0.80, 0.82, 0.84), 26.0)
+    model("water_tower", 0.0, 17.0, 16.0, 16.0, None, CONCRETE)
     box(14.0, 4.0, 6.0, 5.0, 3.0, CONCRETE)
 
 
@@ -571,6 +567,10 @@ def hospital():
 
 def golf():
     ground((0.30, 0.48, 0.20))
+    model("clubhouse", -14.0, 2.0, 18.0, 11.0, None, MODERN_WHITE, TIMBER, r=0.4)
+    slab(2.0, 1.0, 12.0, 9.0, CAR_PARK)
+    car(-1.0, 2.0, CAR_PAINT[1])
+    car(4.0, 2.0, CAR_PAINT[2])
     slab(4.0, 18.0, 13.0, 11.0, GREEN_SPEC)
     slab(-6.0, 15.0, 5.0, 3.5, BUNKER_SAND)
     slab(13.0, 27.0, 4.5, 3.0, BUNKER_SAND)
@@ -600,7 +600,7 @@ def museum():
     for k in range(6):
         box(-13.0 + k * 3.2, 7.0, 0.9, 0.9, 10.5, (0.92, 0.82, 0.62))
     box(-5.0, 6.5, 18.0, 4.0, 0.9, (0.92, 0.82, 0.62), 10.5)
-    box(18.0, 14.0, 12.0, 16.0, 9.0, (0.10, 0.17, 0.24), rough=0.08)
+    model("museum_wing", 18.0, 14.0, 12.0, 16.0, None, HONEY_STONE)
 
 
 def stadium():
@@ -608,10 +608,9 @@ def stadium():
     slab(0.0, 14.0, 32.0, 22.0, LAWN)
     slab(0.0, 24.9, 0.15, 22.0, (0.92, 0.92, 0.88), 0.03)
     for back in (7.0, 37.0):
-        box(0.0, back, 42.0, 6.0, 9.0, CONCRETE)
-        box(0.0, back - 1.0, 44.0, 8.0, 0.5, TEAM_BLUE, 11.0)
+        model("stand", 0.0, back, 42.0, 6.0, None, CONCRETE, TEAM_BLUE, turn=2 if back < 20 else 0)
     for along in (-20.0, 20.0):
-        box(along, 14.0, 4.0, 22.0, 6.0, CONCRETE)
+        model("stand", along, 14.0, 22.0, 4.0, 6.0, CONCRETE, TEAM_BLUE, turn=-1 if along < 0 else 1)
     for (a, b) in ((-22, 5), (22, 5), (-22, 44), (22, 44)):
         cylinder(a, b, 0.5, 30.0, CHARCOAL)
         box(a, b, 3.5, 0.6, 1.6, (1.0, 0.98, 0.9), 29.0)
@@ -619,7 +618,7 @@ def stadium():
 
 def marina():
     ground(sea=True)
-    model("shop1", -8.0, 5.0, 18.0, 11.0, 7.0, MODERN_WHITE, r=0.5)
+    model("clubhouse", -8.0, 5.0, 18.0, 11.0, None, MODERN_WHITE, TIMBER, r=0.5)
     slab(10.0, 3.0, 22.0, 14.0, CAR_PARK)
     slab(0.0, 49.0, 2.4, 30.0, (0.55, 0.50, 0.42), -0.3)
     for k in range(4):

@@ -27,6 +27,11 @@ const MODEL_DIMS := {
 	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
 	"fire_station": Vector4(34.0, 18.0, 11.5, 0.0), "fire_tower": Vector4(6.0, 6.0, 23.0, 0.0),
 	"school": Vector4(38.0, 13.0, 9.0, 4.5), "hospital": Vector4(34.0, 22.0, 20.8, 0.0),
+	# Whole sites (power stations) and the remaining landmarks, placed at their built size.
+	"coal_plant": Vector4(44.0, 44.0, 66.0, 0.0), "gas_plant": Vector4(44.0, 44.0, 46.0, 0.0),
+	"nuclear_plant": Vector4(46.0, 46.0, 47.5, 0.0), "clubhouse": Vector4(18.0, 11.0, 7.3, 0.0),
+	"museum_wing": Vector4(12.0, 16.0, 9.0, 0.0), "stand": Vector4(42.0, 6.0, 11.5, 0.0),
+	"water_tower": Vector4(16.0, 16.0, 35.8, 0.0),
 	# Modern blocks are stacked: a glazed ground floor, upper storeys, then the roof.
 	"modern_base": Vector4(21.0, 13.0, 4.6, 0.0), "modern_floor": Vector4(21.0, 13.0, 3.2, 0.0),
 	"glass_floor": Vector4(21.0, 13.0, 3.2, 0.0), "modern_top": Vector4(21.0, 13.0, 6.85, 0.0),
@@ -2329,6 +2334,29 @@ const TRAIN_RED := Color(0.62, 0.12, 0.18)
 const TEAM_BLUE := Color(0.12, 0.28, 0.62)
 const HULL_WHITE := Color(0.94, 0.94, 0.92)
 const SHIP_HULL := Color(0.20, 0.22, 0.26)
+const PLANT_BLUE := Color(0.34, 0.41, 0.48)    # coal station boiler house cladding and roofs
+const GAS_SILVER := Color(0.78, 0.80, 0.82)    # gas station cladding, stacks, gasholder
+const GAS_BLUE := Color(0.10, 0.36, 0.56)      # gas station roofs and band
+const NUCLEAR_CONCRETE := Color(0.80, 0.80, 0.78)
+const NUCLEAR_BLUE := Color(0.30, 0.42, 0.56)
+
+
+func _turned(spot: Dictionary, quarter_turns: int) -> Dictionary:
+	# The same spot turned about its centre (a model facing sideways or away from the street).
+	var copy := spot.duplicate()
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	match posmod(quarter_turns, 4):
+		1:
+			copy["x"] = z_axis
+			copy["z"] = -x_axis
+		2:
+			copy["x"] = -x_axis
+			copy["z"] = -z_axis
+		3:
+			copy["x"] = -z_axis
+			copy["z"] = x_axis
+	return copy
 
 
 func _box_item(list: Array, at: Vector3, x_axis: Vector3, z_axis: Vector3, size: Vector3,
@@ -2387,29 +2415,40 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 	match t:
 		Tile.GAS:
 			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
-			var hall := _place(i, front, -6.0, 6.0, 30.0, 18.0)
-			_add_block(hall, 30.0, 18.0, 14.0, Color(0.52, 0.60, 0.68), STYLE_INDUSTRY, 2.0,
-				SHED_METAL.darkened(0.2), wall_list, roof_list)
-			var boiler := _place(i, front, -6.0, 27.0, 20.0, 12.0)
-			_add_block(boiler, 20.0, 12.0, 24.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
-			for along: float in [10.0, 17.0]:
-				var stack := _place(i, front, along, 30.0, 3.0, 3.0)
-				_cylinder(chimney_list, stack["pos"], 1.6, 46.0, Color(0.78, 0.78, 0.76))
-			var tank := _place(i, front, 16.0, 10.0, 10.0, 10.0)
-			_cylinder(chimney_list, tank["pos"], 4.5, 8.0, Color(0.86, 0.86, 0.84))
+			if _models.has("gas_plant"):
+				# Clad turbine hall, two boilers with slim stacks, a gasholder, tanks and pipes.
+				var site := _place(i, front, 0.0, 3.0, 44.0, 44.0)
+				_add_model("gas_plant", site, 44.0, 44.0, _model_total("gas_plant"), GAS_SILVER, GAS_BLUE)
+			else:
+				var hall := _place(i, front, -6.0, 6.0, 30.0, 18.0)
+				_add_block(hall, 30.0, 18.0, 14.0, Color(0.52, 0.60, 0.68), STYLE_INDUSTRY, 2.0,
+					SHED_METAL.darkened(0.2), wall_list, roof_list)
+				var boiler := _place(i, front, -6.0, 27.0, 20.0, 12.0)
+				_add_block(boiler, 20.0, 12.0, 24.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+				for along: float in [10.0, 17.0]:
+					var stack := _place(i, front, along, 30.0, 3.0, 3.0)
+					_cylinder(chimney_list, stack["pos"], 1.6, 46.0, Color(0.78, 0.78, 0.76))
+				var tank := _place(i, front, 16.0, 10.0, 10.0, 10.0)
+				_cylinder(chimney_list, tank["pos"], 4.5, 8.0, Color(0.86, 0.86, 0.84))
 			_plan_fence(i, front, depth)
 		Tile.NUCLEAR:
 			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
-			for along: float in [-12.0, 12.0]:
-				var tower := _place(i, front, along, 32.0, 20.0, 20.0)
-				_cylinder(chimney_list, tower["pos"], 10.5, 44.0, Color(0.82, 0.82, 0.80))
-			var reactor := _place(i, front, -14.0, 5.0, 16.0, 14.0)
-			_add_block(reactor, 16.0, 14.0, 16.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
-			var dome_at: Vector3 = reactor["pos"]
-			_cylinder(chimney_list, dome_at + Vector3.UP * 16.0, 6.5, 5.0, Color(0.74, 0.74, 0.72))
-			var turbine := _place(i, front, 10.0, 5.0, 24.0, 12.0)
-			_add_block(turbine, 24.0, 12.0, 12.0, Color(0.55, 0.62, 0.70), STYLE_INDUSTRY, 0.0, SLATE,
-				wall_list, roof_list)
+			if _models.has("nuclear_plant"):
+				# Domed containment, turbine hall, vent stack and two cooling towers.
+				var site := _place(i, front, 0.0, 2.0, 46.0, 46.0)
+				_add_model("nuclear_plant", site, 46.0, 46.0, _model_total("nuclear_plant"), NUCLEAR_CONCRETE,
+					NUCLEAR_BLUE)
+			else:
+				for along: float in [-12.0, 12.0]:
+					var tower := _place(i, front, along, 32.0, 20.0, 20.0)
+					_cylinder(chimney_list, tower["pos"], 10.5, 44.0, Color(0.82, 0.82, 0.80))
+				var reactor := _place(i, front, -14.0, 5.0, 16.0, 14.0)
+				_add_block(reactor, 16.0, 14.0, 16.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+				var dome_at: Vector3 = reactor["pos"]
+				_cylinder(chimney_list, dome_at + Vector3.UP * 16.0, 6.5, 5.0, Color(0.74, 0.74, 0.72))
+				var turbine := _place(i, front, 10.0, 5.0, 24.0, 12.0)
+				_add_block(turbine, 24.0, 12.0, 12.0, Color(0.55, 0.62, 0.70), STYLE_INDUSTRY, 0.0, SLATE,
+					wall_list, roof_list)
 			_plan_fence(i, front, depth)
 		Tile.WIND:
 			# One turbine: a white tower, the nacelle facing the south-westerly wind,
@@ -2451,8 +2490,14 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_plan_fence(i, front, depth)
 		Tile.WATER_TOWER:
 			_slab(i, front, 0.0, 0.0, 30.0, 30.0, YARD)
-			_cylinder(chimney_list, centre, 2.4, 26.0, CONCRETE)
-			_cylinder(chimney_list, centre + Vector3.UP * 26.0, 7.5, 9.0, Color(0.80, 0.82, 0.84))
+			if _models.has("water_tower"):
+				# Concrete shaft and tank, standing in the middle of the plot, its door to the street.
+				var tower_spot := _place(i, front, 0.0, 0.0, 16.0, 16.0)
+				tower_spot["pos"] = centre
+				_add_model("water_tower", tower_spot, 16.0, 16.0, _model_total("water_tower"), CONCRETE, SLATE)
+			else:
+				_cylinder(chimney_list, centre, 2.4, 26.0, CONCRETE)
+				_cylinder(chimney_list, centre + Vector3.UP * 26.0, 7.5, 9.0, Color(0.80, 0.82, 0.84))
 			var hut := _place(i, front, 14.0, 4.0, 6.0, 5.0)
 			_add_block(hut, 6.0, 5.0, 3.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
 		Tile.LANDFILL:
@@ -2488,10 +2533,28 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.08, 2.4, 0.08)), flag_pos), WHITE_RENDER])
 			_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.9, 0.6, 0.05)),
 				flag_pos + Vector3(0.45, 1.8, 0.0)), Color(0.85, 0.12, 0.10)])
+			# The clubhouse: one at the start of each stretch of course along a road.
+			var side := Vector2i(front.y, -front.x)
+			var before := tile - side
+			var club_here: bool = _is_road(tile + front) and not (before.x >= 0 and before.y >= 0
+				and before.x < map_w and before.y < map_h and sim.tiles[before.y * map_w + before.x] == Tile.GOLF)
+			if club_here:
+				var club := _place(i, front, -14.0, 2.0, 18.0, 11.0)
+				if _models.has("clubhouse"):
+					_add_model("clubhouse", club, 18.0, 11.0, _model_total("clubhouse"), MODERN_WHITE, TIMBER)
+				else:
+					_add_block(club, 18.0, 11.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+				_slab(i, front, 2.0, 1.0, 12.0, 9.0, CAR_PARK)
+				for k in 2:
+					_parked_car(i, front, -1.0 + k * 5.0, 2.0, true, rng)
 			for k in 3:
-				_plant(i, front, rng.randf_range(-23.0, 23.0) * (1 if k % 2 == 0 else -1),
-					rng.randf_range(4.0, depth - 4.0), rng.randf_range(6.0, 12.0),
-					TreeKind.PINE if rng.randf() < 0.5 else TreeKind.BROADLEAF, rng)
+				var along := rng.randf_range(-23.0, 23.0) * (1 if k % 2 == 0 else -1)
+				var back := rng.randf_range(4.0, depth - 4.0)
+				var tree_h := rng.randf_range(6.0, 12.0)
+				var kind: int = TreeKind.PINE if rng.randf() < 0.5 else TreeKind.BROADLEAF
+				if club_here and along < 8.0 and back < 16.0:
+					continue     # not in the clubhouse or its car park
+				_plant(i, front, along, back, tree_h, kind, rng)
 		Tile.LIBRARY:
 			_slab(i, front, 0.0, 0.0, 49.0, 9.0, PAVEMENT)
 			var spot := _place(i, front, 0.0, 9.0, 26.0, 16.0)
@@ -2506,7 +2569,10 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_classical_block(spot, 34.0, 20.0, 3, HONEY_STONE, false, false, wall_list, roof_list)
 			_columns(spot, 20.0, 6, 16.0, 10.5, HONEY_STONE.lightened(0.12), wall_list, roof_list)
 			var wing := _place(i, front, 18.0, 14.0, 12.0, 16.0)
-			_add_block(wing, 12.0, 16.0, 9.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+			if _models.has("museum_wing"):
+				_add_model("museum_wing", wing, 12.0, 16.0, _model_total("museum_wing"), HONEY_STONE, SLATE)
+			else:
+				_add_block(wing, 12.0, 16.0, 9.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
 		Tile.STADIUM:
 			# A pitch with stands round it, roofs over the long sides and floodlights.
 			var mid := depth * 0.5
@@ -2514,15 +2580,25 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_slab(i, front, 0.0, mid - 0.08, 0.15, 22.0, BAY_LINE, 0.03)
 			_slab(i, front, -16.0, mid - 11.0, 0.15, 22.0, BAY_LINE, 0.03)
 			_slab(i, front, 16.0, mid - 11.0, 0.15, 22.0, BAY_LINE, 0.03)
+			var stands := _models.has("stand")
 			for back: float in [mid - 18.0, mid + 12.0]:
 				var stand := _place(i, front, 0.0, back, 42.0, 6.0)
+				if stands:
+					# Seats in the team colour, facing the pitch.
+					var facing := _turned(stand, 2) if back < mid else stand
+					_add_model("stand", facing, 42.0, 6.0, _model_total("stand"), CONCRETE, TEAM_BLUE)
+					continue
 				_add_block(stand, 42.0, 6.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
 				var roof_at: Vector3 = stand["pos"]
 				_box_item(wall_list, roof_at + Vector3.UP * 11.0, stand["x"], stand["z"],
 					Vector3(44.0, 0.5, 8.0), TEAM_BLUE, STYLE_PAINT)
 			for along: float in [-20.0, 20.0]:
 				var end := _place(i, front, along, mid - 11.0, 4.0, 22.0)
-				_add_block(end, 4.0, 22.0, 6.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+				if stands:
+					# Covered terraces behind the goals: the stand, turned and lower.
+					_add_model("stand", _turned(end, 1 if along < 0.0 else 3), 22.0, 4.0, 6.0, CONCRETE, TEAM_BLUE)
+				else:
+					_add_block(end, 4.0, 22.0, 6.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
 			for corner: Vector2 in [Vector2(-22.0, mid - 20.0), Vector2(22.0, mid - 20.0),
 					Vector2(-22.0, mid + 19.0), Vector2(22.0, mid + 19.0)]:
 				var post := _place(i, front, corner.x, corner.y, 1.0, 1.0)
@@ -2533,7 +2609,10 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 		Tile.MARINA:
 			# A clubhouse by the road; pontoons and yachts out on the water.
 			var club := _place(i, front, -8.0, 5.0, 18.0, 11.0)
-			_add_block(club, 18.0, 11.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			if _models.has("clubhouse"):
+				_add_model("clubhouse", club, 18.0, 11.0, _model_total("clubhouse"), MODERN_WHITE, TIMBER)
+			else:
+				_add_block(club, 18.0, 11.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
 			_slab(i, front, 10.0, 3.0, 22.0, 14.0, CAR_PARK)
 			_plan_on_water(i, rng, false)
 		Tile.TOWN_HALL:
@@ -2630,6 +2709,12 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 	var front := _frontage(i)
 	var depth := _depth(i, front)
 	_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
+	if _models.has("coal_plant"):
+		# Turbine hall, boiler house, precipitator, twin chimneys, coal stock and conveyor.
+		var site := _place(i, front, 0.0, 3.0, 44.0, 44.0)
+		_add_model("coal_plant", site, 44.0, 44.0, _model_total("coal_plant"), CONCRETE, PLANT_BLUE)
+		_plan_fence(i, front, depth)
+		return
 	var spot := _place(i, front, -6.0, 6.0, 30.0, 26.0)
 	_add_block(spot, 30.0, 26.0, 18.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, [])
 	for along: float in [12.0, 19.0]:
