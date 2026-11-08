@@ -951,6 +951,396 @@ def modern_top():
     return mb, (w, d, 6.85, 0.0)
 
 
+# ------------------------------------------------- power stations and the rest
+
+def revolve(mb, x, y, profile, sides=16, top=None):
+    """A round solid (chimney, tank, cooling tower, dome) from a profile going up:
+    [(radius, z, material), ...]; each band takes the material of the ring at its top,
+    the bottom cap the first ring's. top: the top cap's material (default: the last band's)."""
+    base = len(mb.verts)
+    for r, z, _m in profile:
+        mb.verts.extend((x + r * math.cos(2 * math.pi * k / sides), y + r * math.sin(2 * math.pi * k / sides), z)
+                        for k in range(sides))
+
+    def idx(i, k):
+        return base + i * sides + k % sides
+
+    mb.faces.append([idx(0, k) for k in range(sides)][::-1])
+    mb.mats.append(MAT_INDEX[profile[0][2]])
+    for i in range(1, len(profile)):
+        for k in range(sides):
+            mb.faces.append([idx(i - 1, k), idx(i - 1, k + 1), idx(i, k + 1), idx(i, k)])
+            mb.mats.append(MAT_INDEX[profile[i][2]])
+    mb.faces.append([idx(len(profile) - 1, k) for k in range(sides)])
+    mb.mats.append(MAT_INDEX[top or profile[-1][2]])
+
+
+def beam(mb, p0, p1, t, mat, t2=None):
+    """A square-section member from p0 to p1 (girders, braces, sloping galleries)."""
+    t2 = t if t2 is None else t2
+    d = [p1[k] - p0[k] for k in range(3)]
+    ln = math.sqrt(sum(c * c for c in d))
+    d = [c / ln for c in d]
+    up = (0.0, 0.0, 1.0) if abs(d[2]) < 0.9 else (1.0, 0.0, 0.0)
+    a = (d[1] * up[2] - d[2] * up[1], d[2] * up[0] - d[0] * up[2], d[0] * up[1] - d[1] * up[0])
+    al = math.sqrt(sum(c * c for c in a))
+    a = [c / al for c in a]
+    b = (a[1] * d[2] - a[2] * d[1], a[2] * d[0] - a[0] * d[2], a[0] * d[1] - a[1] * d[0])
+
+    def corner(p, sa, sb):
+        return tuple(p[k] + a[k] * sa * t / 2 + b[k] * sb * t2 / 2 for k in range(3))
+
+    ring = ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    mb.hexa([corner(p0, sa, sb) for sa, sb in ring] + [corner(p1, sa, sb) for sa, sb in ring], mat)
+
+
+def ribbon(mb, f, a0, a1, z0, z1, step=1.6, mat="glass"):
+    """A band of glazing on a face with mullions and a sill."""
+    f.slab(mb, a0, a1, z0, z1, -0.02, 0.03, mat)
+    mullions(mb, f, a0, a1, z0, z1, step, t=0.08, out=0.08)
+    f.slab(mb, a0 - 0.05, a1 + 0.05, z0 - 0.12, z0, 0.0, 0.12, "metal")
+
+
+def flat_roof(mb, x0, x1, y0, y1, z, up=0.9, mat="cladding", t=0.3):
+    """A flat roof with a coping round the edge (the walls' colour)."""
+    mb.box(x0 + t, x1 - t, y0 + t, y1 - t, z - 0.05, z + 0.05, "lead")
+    for bx0, bx1, by0, by1 in ((x0, x1, y1 - t, y1), (x0, x1, y0, y0 + t), (x0, x0 + t, y0 + t, y1 - t),
+                               (x1 - t, x1, y0 + t, y1 - t)):
+        mb.box(bx0, bx1, by0, by1, z, z + up, mat)
+
+
+def transformer(mb, x, y):
+    """A grid transformer: dark tank, radiator fins, bushings on top."""
+    mb.box(x - 1.6, x + 1.6, y - 1.2, y + 1.2, 0.0, 3.2, "metal")
+    for k in range(4):
+        fx = x - 1.3 + k * 0.85
+        mb.box(fx - 0.2, fx + 0.2, y + 1.2, y + 2.2, 0.4, 2.8, "lead")
+    for k in range(3):
+        mb.cylinder(x - 0.9 + k * 0.9, y, 0.14, 3.2, 4.6, "frame", 6)
+
+
+def portal(mb, x0, x1, y, h):
+    """A switchyard gantry: two lattice posts and a beam."""
+    for x in (x0, x1):
+        mb.box(x - 0.25, x + 0.25, y - 0.25, y + 0.25, 0.0, h, "frame")
+    mb.box(x0 - 0.3, x1 + 0.3, y - 0.3, y + 0.3, h - 0.8, h, "frame")
+    for k in range(3):
+        xx = x0 + (x1 - x0) * (k + 1) / 4
+        mb.cylinder(xx, y, 0.12, h - 2.2, h - 0.8, "frame", 6)
+
+
+def coal_plant():
+    # A big Scottish coal station (Cockenzie, Longannet): a long clad turbine hall
+    # facing the road, the tall boiler house behind in the darker cladding,
+    # the precipitator on stilts, twin concrete chimneys with dark tops, the coal
+    # stockpile at the back fed up a sloping conveyor, and a switchyard in front.
+    w, d = 44.0, 44.0
+    mb = Builder()
+    # Turbine hall.
+    mb.box(-21.1, 6.1, 8.9, 21.1, -0.3, 2.0, "stone")
+    mb.box(-21.0, 6.0, 9.0, 21.0, 2.0, 17.0, "cladding")
+    hall = Face((0.0, 21.0, 0), (1, 0, 0), (0, 1, 0))
+    ribbon(mb, hall, -20.0, 5.0, 12.4, 15.6, 2.5)
+    ribbon(mb, hall, -20.0, -4.0, 3.2, 5.0, 2.0)
+    hall.slab(mb, 0.0, 4.6, 0.0, 6.5, 0.0, 0.1, "sheet")                         # loading door
+    hall.slab(mb, -0.2, 4.8, 6.5, 6.8, 0.0, 0.25, "metal")
+    hall.slab(mb, -3.1, -1.9, 0.0, 2.3, 0.0, 0.06, "door")
+    end = Face((-21.0, 15.0, 0), (0, -1, 0), (-1, 0, 0))
+    ribbon(mb, end, -5.0, 5.0, 4.0, 15.5, 2.0)                                  # glazed gable end
+    sec = [(8.6, 16.9), (21.4, 16.9), (21.4, 17.15), (15.0, 18.7), (8.6, 17.15)]
+    mb.extrude_x(sec, -21.3, 6.3, "sheet")
+    # Boiler house, with a band of louvres near the top and a stair tower.
+    mb.box(-21.1, 3.1, -9.1, 8.9, -0.3, 2.0, "stone")
+    mb.box(-21.0, 3.0, -9.0, 9.0, 2.0, 36.0, "sheet")
+    for face, a0, a1 in ((Face((0.0, 9.0, 0), (1, 0, 0), (0, 1, 0)), -20.0, 2.0),
+                         (Face((0.0, -9.0, 0), (-1, 0, 0), (0, -1, 0)), -2.0, 20.0),
+                         (Face((-21.0, 0.0, 0), (0, -1, 0), (-1, 0, 0)), -8.0, 8.0),
+                         (Face((3.0, 0.0, 0), (0, 1, 0), (1, 0, 0)), -8.0, 2.0)):
+        ribbon(mb, face, a0, a1, 31.0, 34.0, 1.2)
+        face.slab(mb, a0 - 1.0, a1 + 1.0, 21.0, 21.4, 0.0, 0.1, "cladding")      # string of light cladding
+    flat_roof(mb, -21.0, 3.0, -9.0, 9.0, 36.0, 0.8)
+    for x in (-15.0, -9.0):
+        mb.box(x - 1.5, x + 1.5, -3.0, 3.0, 36.0, 38.5, "cladding")             # roof vents
+        mb.box(x - 1.7, x + 1.7, -3.2, 3.2, 38.5, 38.8, "metal")
+    mb.box(3.0, 6.5, 3.0, 8.5, 0.0, 39.0, "cladding")                           # stair tower
+    stair = Face((6.5, 5.75, 0), (0, -1, 0), (1, 0, 0))
+    for z in range(4, 37, 4):
+        stair.slab(mb, -0.4, 0.4, z, z + 2.0, -0.02, 0.03, "glass")
+    mb.box(2.9, 6.6, 2.9, 8.6, 39.0, 39.3, "metal")
+    # Precipitator on legs, ducts from the boiler and to the chimneys.
+    mb.box(5.0, 14.0, -9.0, 1.0, 6.0, 18.0, "cladding")
+    mb.box(4.8, 14.2, -9.2, 1.2, 18.0, 18.4, "metal")
+    for x in (7.25, 11.75):
+        for y in (-6.5, -1.5):
+            mb._add([(x - 2.2, y - 2.4, 6.0), (x + 2.2, y - 2.4, 6.0), (x + 2.2, y + 2.4, 6.0), (x - 2.2, y + 2.4, 6.0),
+                     (x, y, 3.2)], [[0, 1, 2, 3], [1, 0, 4], [2, 1, 4], [3, 2, 4], [0, 3, 4]], "sheet")
+    for x in (5.3, 9.5, 13.7):
+        for y in (-8.7, 0.7):
+            mb.box(x - 0.3, x + 0.3, y - 0.3, y + 0.3, 0.0, 6.0, "metal")
+    mb.box(3.0, 5.0, -7.0, -1.0, 21.0, 25.0, "cladding")
+    mb.box(14.0, 16.2, -5.0, -1.5, 9.0, 12.0, "cladding")
+    mb.box(14.0, 16.2, -9.0, -6.5, 9.0, 12.0, "cladding")
+    mb.box(16.2, 18.5, -12.0, -6.5, 9.0, 12.0, "cladding")
+    # Twin chimneys: tapering concrete with dark tops and a cap.
+    for y in (-3.2, -13.5):
+        revolve(mb, 18.5, y, [(2.6, -0.3, "render"), (1.95, 61.5, "render"), (1.95, 65.0, "lead"),
+                              (2.2, 65.0, "metal"), (2.2, 66.0, "metal")], 14)
+    # Coal stockpile, the sloping conveyor and its transfer tower.
+    mb.hexa([(-20.5, -21.6, -0.2), (12.5, -21.6, -0.2), (12.5, -12.6, -0.2), (-20.5, -12.6, -0.2),
+             (-16.0, -18.8, 5.0), (8.5, -18.8, 5.0), (8.5, -15.4, 5.0), (-16.0, -15.4, 5.0)], "metal")
+    mb.box(-21.0, -16.0, -13.5, -9.0, 0.0, 21.0, "cladding")
+    mb.box(-21.2, -15.8, -13.7, -8.8, 21.0, 21.3, "metal")
+    beam(mb, (4.0, -11.2, 1.6), (-16.0, -11.2, 15.0), 2.4, "cladding", 2.6)
+    for x, z in ((-1.0, 4.9), (-8.0, 9.6)):
+        for y in (-12.2, -10.2):
+            mb.box(x - 0.2, x + 0.2, y - 0.2, y + 0.2, 0.0, z, "metal")
+    mb.box(2.0, 6.0, -13.0, -9.4, 0.0, 2.8, "cladding")                         # reclaim hopper
+    # Switchyard in front.
+    for y in (11.5, 18.5):
+        portal(mb, 9.5, 20.5, y, 11.0)
+    for x in (11.5, 15.0, 18.5):
+        transformer(mb, x, 14.6)
+    return mb, (w, d, 66.0, 0.0)
+
+
+def gas_plant():
+    # A combined-cycle gas station: a modern clad turbine hall with a glazed
+    # office end, two heat-recovery boilers behind with slim steel stacks, a
+    # Victorian-style gasholder in its guide frame, a fuel tank, pipe racks and
+    # transformers.
+    w, d = 44.0, 44.0
+    mb = Builder()
+    # Turbine hall: light cladding, a coloured band, a curved roof.
+    mb.box(-21.0, 5.0, 7.0, 20.0, -0.3, 1.0, "lead")
+    mb.box(-21.0, 5.0, 7.0, 20.0, 1.0, 15.0, "cladding")
+    for face, length, c in ((Face((-8.0, 20.0, 0), (1, 0, 0), (0, 1, 0)), 26.0, 0.0),
+                            (Face((-8.0, 7.0, 0), (-1, 0, 0), (0, -1, 0)), 26.0, 0.0),
+                            (Face((5.0, 13.5, 0), (0, -1, 0), (1, 0, 0)), 13.0, 0.0)):
+        face.slab(mb, -length / 2 - 0.05, length / 2 + 0.05, 11.6, 12.8, 0.0, 0.06, "accent")
+        ribbon(mb, face, -length / 2 + 1.0, length / 2 - 1.0, 13.2, 14.4, 1.8)
+    hall = Face((0.0, 20.0, 0), (1, 0, 0), (0, 1, 0))
+    hall.slab(mb, -3.0, 2.0, 0.0, 7.0, 0.0, 0.1, "sheet")
+    hall.slab(mb, -3.2, 2.2, 7.0, 7.3, 0.0, 0.3, "metal")
+    arc = [(7.0 + 13.0 * k / 8, 15.0 + 2.6 * math.sin(math.pi * k / 8)) for k in range(9)]
+    sec = [(6.6, 14.85)] + [(y, z + 0.2) for y, z in arc[1:-1]] + [(20.4, 14.85), (20.4, 15.1)] + \
+        [(y, z + 0.45) for y, z in arc[-2:0:-1]] + [(6.6, 15.1)]
+    mb.extrude_x(sec, -21.3, 5.3, "sheet")
+    # The glazed office at the left end of the front.
+    mb.box(-21.0, -11.0, 20.0, 23.0, 0.0, 8.0, "glass")
+    of = Face((-16.0, 23.0, 0), (1, 0, 0), (0, 1, 0))
+    mullions(mb, of, -5.0, 5.0, 0.0, 8.0, 1.25, t=0.1, out=0.1)
+    of.slab(mb, -5.0, 5.0, 3.85, 4.15, 0.0, 0.12, "metal")
+    mb.box(-21.4, -10.6, 19.8, 23.6, 8.0, 8.5, "frame")
+    of.slab(mb, -1.0, 1.0, 0.0, 2.4, 0.0, 0.05, "door")
+    # Two heat-recovery boilers, ducts from the hall, and their stacks.
+    for cx in (-15.5, -2.5):
+        mb.box(cx - 4.5, cx + 4.5, -15.0, 5.0, 0.0, 24.0, "cladding")
+        mb.box(cx - 4.7, cx + 4.7, -15.2, 5.2, 24.0, 24.4, "metal")
+        for z in (8.0, 16.0):
+            mb.box(cx - 4.6, cx + 4.6, -15.1, 5.1, z, z + 0.5, "sheet")
+        mb.box(cx - 3.0, cx + 3.0, 5.0, 7.0, 4.0, 12.0, "cladding")
+        for y in (-12.0, -5.0, 2.0):
+            mb.box(cx + 4.5, cx + 5.3, y - 0.5, y + 0.5, 0.0, 24.0, "metal")        # stair columns
+        revolve(mb, cx, -17.5, [(1.7, 0.0, "render"), (1.5, 44.0, "render"), (1.5, 45.5, "metal"),
+                                (1.65, 46.0, "metal")], 12)
+        revolve(mb, cx, -17.5, [(2.3, 32.0, "metal"), (2.3, 32.3, "metal")], 12)   # platform
+        mb.box(cx - 1.0, cx + 1.0, -16.6, -15.0, 18.0, 21.0, "cladding")
+    # Gasholder: the bell inside a ring of columns with girders and bracing.
+    gx, gy, gr = 12.5, -9.5, 8.0
+    revolve(mb, gx, gy, [(gr, -0.2, "cladding"), (gr, 11.0, "cladding"), (gr - 1.2, 12.3, "lead"),
+                         (gr - 4.0, 12.9, "lead")], 24)
+    cols = 10
+    pts = [(gx + (gr + 0.8) * math.cos(2 * math.pi * k / cols), gy + (gr + 0.8) * math.sin(2 * math.pi * k / cols))
+           for k in range(cols)]
+    for px, py in pts:
+        mb.box(px - 0.3, px + 0.3, py - 0.3, py + 0.3, 0.0, 17.0, "metal")
+    for k in range(cols):
+        (ax, ay), (bx, by) = pts[k], pts[(k + 1) % cols]
+        for z in (9.0, 16.6):
+            beam(mb, (ax, ay, z), (bx, by, z), 0.35, "metal", 0.6)
+        beam(mb, (ax, ay, 9.0), (bx, by, 16.6), 0.2, "metal")
+    # Fuel oil tank, pipe rack and transformers.
+    revolve(mb, 14.5, 10.5, [(4.0, 0.0, "frame"), (4.0, 7.0, "frame"), (0.6, 8.2, "frame")], 16)
+    mb.box(9.8, 19.2, 5.8, 15.2, 0.0, 0.8, "render")                            # bund wall
+    mb.box(10.2, 18.8, 6.2, 14.8, 0.6, 0.7, "lead")
+    for x in (6.0, 9.0):
+        mb.box(x - 0.2, x + 0.2, 1.8, 2.2, 0.0, 4.5, "metal")
+    pipe = [(2.0 + 0.35 * math.cos(2 * math.pi * k / 6), 5.0 + 0.35 * math.sin(2 * math.pi * k / 6)) for k in range(6)]
+    mb.extrude_x(pipe, 5.0, 12.0, "frame")
+    pipe = [(2.0 + 0.25 * math.cos(2 * math.pi * k / 6), 4.6 + 0.25 * math.sin(2 * math.pi * k / 6)) for k in range(6)]
+    mb.extrude_x(pipe, 5.0, 12.0, "accent")
+    mb.box(5.0, 10.0, 1.5, 2.5, 4.35, 4.5, "metal")
+    for x in (8.5, 12.5):
+        transformer(mb, x, 18.0)
+    portal(mb, 15.5, 21.0, 18.0, 10.0)
+    return mb, (w, d, 46.0, 0.0)
+
+
+def nuclear_plant():
+    # A nuclear station: the domed concrete containment, an auxiliary block, a
+    # turbine hall in two-tone cladding, a slim vent stack, a gatehouse, and two
+    # hyperbolic cooling towers at the back.
+    w, d = 46.0, 46.0
+    mb = Builder()
+    for cx in (-12.0, 12.0):
+        prof = [(10.4, -0.3, "lead"), (10.4, 2.2, "lead"), (10.2, 2.2, "render")]
+        for k in range(1, 9):
+            z = 2.2 + 41.8 * k / 8
+            t = z / 44.0
+            r = 6.6 + 3.6 * ((0.78 - t) / 0.73) ** 1.6 if t < 0.78 else 6.6 + 1.1 * ((t - 0.78) / 0.22) ** 2
+            prof.append((r, z, "render"))
+        revolve(mb, cx, -11.8, prof, 22, top="lead")
+    # Containment: cylinder and dome.
+    rx, ry, rr = -12.0, 9.5, 8.0
+    prof = [(rr, -0.3, "render"), (rr, 18.0, "render")]
+    for k in range(1, 6):
+        a = math.pi / 2 * k / 6
+        prof.append((rr * math.cos(a), 18.0 + rr * 0.85 * math.sin(a), "render"))
+    revolve(mb, rx, ry, prof, 20)
+    revolve(mb, rx, ry, [(rr + 0.15, 0.0, "lead"), (rr + 0.15, 1.2, "lead")], 20)
+    mb.box(rx + 6.0, rx + 9.2, ry - 2.0, ry + 2.0, 0.0, 7.0, "cladding")          # equipment hatch
+    # Auxiliary block between the containment and the cooling towers.
+    mb.box(-22.0, -2.0, 0.0, 5.0, -0.3, 13.0, "render")
+    aux = Face((-12.0, 0.0, 0), (-1, 0, 0), (0, -1, 0))
+    for z in (4.0, 9.0):
+        ribbon(mb, aux, -9.0, 9.0, z, z + 1.4, 1.8)
+    flat_roof(mb, -22.0, -2.0, 0.0, 5.0, 13.0, 0.6, "render")
+    # Turbine hall.
+    mb.box(0.0, 22.0, 5.0, 21.0, -0.3, 7.0, "cladding")
+    mb.box(0.0, 22.0, 5.0, 21.0, 7.0, 16.0, "sheet")
+    th = Face((11.0, 21.0, 0), (1, 0, 0), (0, 1, 0))
+    ribbon(mb, th, -10.0, 10.0, 5.0, 6.6, 2.0)
+    th.slab(mb, -2.5, 2.5, 0.0, 4.6, 0.0, 0.1, "metal")
+    side = Face((22.0, 13.0, 0), (0, -1, 0), (1, 0, 0))
+    ribbon(mb, side, -7.0, 7.0, 10.0, 14.5, 1.75)
+    flat_roof(mb, 0.0, 22.0, 5.0, 21.0, 16.0, 0.7, "cladding")
+    for x in (5.0, 11.0, 17.0):
+        mb.box(x - 1.2, x + 1.2, 10.0, 16.0, 16.0, 17.6, "metal")
+    mb.box(-4.5, 0.0, 7.5, 12.5, 0.0, 10.0, "cladding")                          # link to the reactor
+    # Vent stack and the gatehouse.
+    revolve(mb, -1.0, 1.5, [(1.1, 0.0, "render"), (0.85, 46.0, "render"), (0.85, 47.5, "metal")], 10)
+    mb.box(-22.0, -15.0, 19.0, 22.5, 0.0, 3.8, "render")
+    gate = Face((-18.5, 22.5, 0), (1, 0, 0), (0, 1, 0))
+    ribbon(mb, gate, -3.0, 3.0, 1.0, 3.0, 1.5)
+    mb.box(-22.4, -14.6, 18.6, 23.4, 3.8, 4.2, "frame")
+    return mb, (w, d, 47.5, 0.0)
+
+
+def clubhouse():
+    # A modern clubhouse (golf club, sailing club): white render, long glazing,
+    # a set-back first-floor lounge in glass with timber-clad ends (accent), flat
+    # roofs with thin projecting edges, a terrace with a glass balustrade.
+    w, d = 18.0, 11.0
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.3, 3.6, "render")
+    f, b, l, r = front(w, d), back(w, d), left(w, d), right(w, d)
+    ribbon(mb, f, -8.0, -2.5, 0.8, 2.9, 1.4)
+    ribbon(mb, f, 3.0, 8.0, 0.8, 2.9, 1.25)
+    f.slab(mb, -1.4, 1.4, 0.0, 2.9, -0.02, 0.03, "glass")                         # entrance
+    f.slab(mb, -0.6, 0.6, 0.0, 2.4, 0.03, 0.06, "door")
+    f.slab(mb, -2.6, 2.6, 2.95, 3.15, 0.0, 2.0, "frame")                          # canopy
+    for a0, a1 in ((-2.5, -1.4), (1.4, 3.0)):
+        f.slab(mb, a0, a1, 0.0, 3.6, 0.0, 0.06, "accent")                         # timber panels
+    ribbon(mb, b, -8.4, 8.4, 0.3, 3.0, 1.4)                                       # to the course
+    for side in (l, r):
+        ribbon(mb, side, -3.5, 3.5, 0.8, 2.9, 1.4)
+    mb.box(-w / 2 - 0.4, w / 2 + 0.4, -d / 2 - 0.6, d / 2 + 0.4, 3.6, 3.9, "frame")
+    # The lounge upstairs, over the left part, with the terrace beside it.
+    lx0, lx1, ly0, ly1 = -8.5, 1.5, -5.5, 3.5
+    mb.box(lx0 + 0.6, lx1 - 0.6, ly0 + 0.3, ly1, 3.9, 7.0, "glass")
+    for x0, x1 in ((lx0, lx0 + 0.6), (lx1 - 0.6, lx1)):
+        mb.box(x0, x1, ly0, ly1, 3.9, 7.0, "accent")
+    for face in (Face((-3.5, ly1, 0), (1, 0, 0), (0, 1, 0)), Face((-3.5, ly0 + 0.3, 0), (-1, 0, 0), (0, -1, 0))):
+        mullions(mb, face, -4.4, 4.4, 3.9, 7.0, 1.5)
+    mb.box(lx0 - 0.8, lx1 + 1.2, ly0 - 1.2, ly1 + 0.6, 7.0, 7.3, "frame")
+    for x0, x1, y0, y1 in ((lx1, w / 2 - 0.1, -d / 2 + 0.1, -d / 2 + 0.16), (w / 2 - 0.16, w / 2 - 0.1, -d / 2 + 0.1, d / 2 - 0.1),
+                           (lx1, w / 2 - 0.1, d / 2 - 0.16, d / 2 - 0.1)):
+        mb.box(x0, x1, y0, y1, 3.9, 4.95, "glass")                               # balustrade
+        mb.box(x0 - 0.03, x1 + 0.03, y0 - 0.03, y1 + 0.03, 4.95, 5.02, "metal")
+    mb.box(5.0, 7.0, -1.0, 1.0, 3.9, 4.6, "metal")                                # plant
+    return mb, (w, d, 7.3, 0.0)
+
+
+def museum_wing():
+    # The museum's modern glass wing: a two-storey glass box on a stone plinth,
+    # a solid stone back, slim mullions, the floor showing through, and a thin
+    # white roof slab oversailing on slim columns.
+    w, d = 12.0, 16.0
+    mb = Builder()
+    mb.box(-w / 2 - 0.05, w / 2 + 0.05, -d / 2 - 0.05, d / 2 + 0.05, -0.3, 0.5, "stone")
+    mb.box(-w / 2, w / 2, -d / 2, -d / 2 + 3.0, 0.5, 8.6, "stone")                  # stone back
+    mb.box(-w / 2 + 0.25, w / 2 - 0.25, -d / 2 + 3.0, d / 2 - 0.25, 0.5, 8.6, "glass")
+    gl = [(Face((0.0, d / 2 - 0.25, 0), (1, 0, 0), (0, 1, 0)), -w / 2 + 0.25, w / 2 - 0.25),
+          (Face((-w / 2 + 0.25, 1.5, 0), (0, -1, 0), (-1, 0, 0)), -6.25, 6.25),
+          (Face((w / 2 - 0.25, 1.5, 0), (0, 1, 0), (1, 0, 0)), -6.25, 6.25)]
+    for face, a0, a1 in gl:
+        mullions(mb, face, a0, a1, 0.5, 8.6, 1.4, t=0.07, out=0.08)
+        face.slab(mb, a0, a1, 4.45, 4.75, -0.02, 0.06, "frame")                    # first floor
+    f = gl[0][0]
+    f.slab(mb, -1.2, 1.2, 0.5, 2.9, 0.08, 0.1, "door")
+    for x in (-w / 2 + 0.3, w / 2 - 0.3):
+        mb.box(x - 0.1, x + 0.1, d / 2 + 0.6, d / 2 + 0.8, 0.0, 8.6, "metal")       # columns
+    mb.box(-w / 2 - 0.9, w / 2 + 0.9, -d / 2 - 0.3, d / 2 + 1.3, 8.6, 9.0, "frame")
+    mb.box(-2.0, 2.0, -d / 2 + 0.5, -d / 2 + 2.5, 9.0, 9.4, "lead")                  # roof light
+    return mb, (w, d, 9.0, 0.0)
+
+
+def stand():
+    # A football stand: concrete terracing with seats in the team colour
+    # (accent), a clad back wall and ends, and a cantilevered roof (sheet).
+    # The front (+y) faces the pitch.
+    w, d = 42.0, 6.0
+    mb = Builder()
+    steps = 9
+    for k in range(steps):
+        y1 = d / 2 - k * d / steps
+        z = 1.0 + k * 0.85
+        mb.box(-w / 2 + 0.4, w / 2 - 0.4, -d / 2, y1, -0.3, z, "render")
+        mb.box(-w / 2 + 0.4, w / 2 - 0.4, y1 - 0.42, y1 - 0.1, z, z + 0.4, "accent")      # seats
+    for x in range(-18, 19, 9):
+        mb.box(x - 0.6, x + 0.6, d / 2 - 0.2, d / 2 + 0.02, -0.3, 0.95, "metal")          # vomitories
+    mb.box(-w / 2, w / 2, -d / 2 - 0.4, -d / 2, -0.3, 11.0, "cladding")               # back wall
+    for x in (-w / 2, w / 2 - 0.4):
+        mb._add([(x, -d / 2, -0.3), (x + 0.4, -d / 2, -0.3), (x + 0.4, d / 2, -0.3), (x, d / 2, -0.3),
+                 (x, -d / 2, 11.0), (x + 0.4, -d / 2, 11.0), (x + 0.4, d / 2 + 0.5, 11.0), (x, d / 2 + 0.5, 11.0)],
+                [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]], "cladding")
+    mb.box(-w / 2 - 0.6, w / 2 + 0.6, -d / 2 - 1.0, d / 2 + 2.5, 11.0, 11.5, "sheet")
+    mb.box(-w / 2 - 0.6, w / 2 + 0.6, d / 2 + 2.2, d / 2 + 2.5, 10.4, 11.0, "frame")    # fascia
+    for x in range(-18, 19, 12):
+        beam(mb, (x, -d / 2 - 0.5, 11.5), (x, d / 2 + 2.4, 11.5), 0.3, "metal", 0.6)
+        beam(mb, (x, -d / 2 - 0.5, 14.0), (x, d / 2 + 2.4, 11.6), 0.25, "metal")
+        mb.box(x - 0.2, x + 0.2, -d / 2 - 0.7, -d / 2 - 0.3, 11.0, 14.2, "metal")
+    return mb, (w, d, 11.5, 0.0)
+
+
+def water_tower():
+    # A concrete water tower: a tapering shaft with a door and slit windows,
+    # the tank on a conical base with a walkway round it, and a shallow roof.
+    w = d = 16.0
+    mb = Builder()
+    revolve(mb, 0.0, 0.0, [(2.9, -0.3, "render"), (2.4, 24.0, "render"), (7.6, 27.8, "render"),
+                           (7.6, 34.0, "frame"), (7.9, 34.0, "frame"), (7.9, 34.5, "frame"),
+                           (1.2, 35.8, "lead")], 20)
+    revolve(mb, 0.0, 0.0, [(8.5, 27.5, "metal"), (8.5, 27.8, "metal")], 20)        # walkway
+    for k in range(20):
+        a = 2 * math.pi * k / 20
+        mb.box(8.4 * math.cos(a) - 0.04, 8.4 * math.cos(a) + 0.04, 8.4 * math.sin(a) - 0.04,
+               8.4 * math.sin(a) + 0.04, 27.8, 28.9, "metal")
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        f = Face((2.75 * math.cos(a), 2.75 * math.sin(a), 0), (-math.sin(a), math.cos(a), 0), (math.cos(a), math.sin(a), 0))
+        for z in (6.0, 12.0, 18.0):
+            f.slab(mb, -0.2, 0.2, z, z + 2.2, -0.15, 0.05, "glass")
+    f = Face((0.0, 2.85, 0), (1, 0, 0), (0, 1, 0))
+    f.slab(mb, -0.6, 0.6, 0.0, 2.3, -0.1, 0.1, "door")
+    f.slab(mb, -0.9, 0.9, 2.3, 2.5, -0.1, 0.5, "frame")
+    for k in range(10):
+        a = 2 * math.pi * (k + 0.5) / 10
+        f = Face((7.6 * math.cos(a), 7.6 * math.sin(a), 0), (-math.sin(a), math.cos(a), 0), (math.cos(a), math.sin(a), 0))
+        f.slab(mb, -0.25, 0.25, 28.2, 33.8, -0.05, 0.18, "render")                # fluting
+    return mb, (w, d, 35.8, 0.0)
+
+
 MODELS = {
     "villa": villa, "villa_b": lambda: villa("b"), "villa_c": lambda: villa("c"),
     "bungalow": bungalow, "bungalow_b": lambda: bungalow("b"),
@@ -965,6 +1355,8 @@ MODELS = {
     "fire_station": fire_station, "fire_tower": fire_tower, "school": school, "hospital": hospital,
     "modern_base": modern_base, "modern_floor": modern_floor, "modern_floor_b": lambda: modern_floor("b"),
     "glass_floor": glass_floor, "modern_top": modern_top,
+    "coal_plant": coal_plant, "gas_plant": gas_plant, "nuclear_plant": nuclear_plant,
+    "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
 }
 for _n in range(2, 8):
     MODELS["classical%d" % _n] = (lambda n: lambda: classical(n, "plain"))(_n)
