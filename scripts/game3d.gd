@@ -10,6 +10,7 @@ const WorldView = preload("res://scripts/world3d.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Cars = preload("res://scripts/cars.gd")
+const Advisors = preload("res://scripts/advisors.gd")
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
@@ -1038,6 +1039,7 @@ func _refresh_hud() -> void:
 	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
 		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
 	hud.set_items(_menu_items())      # prices and locks change as the town grows
+	hud.set_advice(Advisors.tips(sim), sim.month)
 	_show_group()
 	_update_info()
 

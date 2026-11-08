@@ -6,6 +6,7 @@ extends CanvasLayer
 ##                  pictures, descriptions and prices) and the Build / Bulldoze buttons
 ##   Bottom centre: what's under the mouse, and messages
 ##   Bottom right:  map overlays (land value, power, roads, growth, pollution...) and their key
+##   Top centre:    advisors' tips when something needs attention (see advisors.gd)
 ## It only displays things and reports button presses; the game decides what they do.
 
 signal tool_chosen(tool_id: int)            # (the Bulldoze button)
@@ -23,12 +24,18 @@ const Settings = preload("res://scripts/settings.gd")
 const Icons = preload("res://scripts/icons.gd")
 const GLASS_SHADER = preload("res://shaders/glass.gdshader")
 const BULLDOZE_TOOL := 4                   # (game3d.gd's Tool.BULLDOZE)
+const ADVICE_URGENT := 3                   # (advisors.gd's URGENT; WARNING is 2, ADVICE 1)
+const ADVICE_SHOWN := 3                    # tips on the card; the rest behind "N more"
+const ADVICE_ROWS := 8                     # most tips the card can list
+const ADVICE_REFLASH_MONTHS := 12          # an urgent tip flashes at most once a year
 
 const ACCENT := Color(0.24, 0.56, 0.98)
 const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
+const WARN := Color(1.0, 0.82, 0.4)
+const HINT := Color(0.55, 0.75, 1.0)
 const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts", "Pollution"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
@@ -77,6 +84,16 @@ var legend_box: VBoxContainer
 var confirm_new: ConfirmationDialog
 var _message_time := 0.0
 var _sim                         # read for the demand bars
+var advice_panel: PanelContainer
+var _advice_title: Label
+var _advice_hide: Button
+var _advice_rows: Array[Button] = []
+var _advice_more: Button
+var _advice_tips: Array[Dictionary] = []
+var _advice_all := false                   # showing every tip, not just the top few
+var _advice_collapsed := false
+var _advice_flashed := {}                  # tip id -> month it last flashed
+var _overlay_kind := 0                     # the map view that's on
 var _demand_colours := {}
 
 
@@ -91,6 +108,7 @@ func build(categories: Array, demand_colours: Dictionary, sim) -> void:
 	add_child(root)
 	_build_top_left(root)
 	_build_top_right(root)
+	_build_advice(root)
 	_build_build_menu(root, categories)
 	_build_info(root)
 	_build_overlays(root)
@@ -507,6 +525,7 @@ func _build_overlays(root: Control) -> void:
 
 func set_overlay(kind: int, legend: Array) -> void:
 	# Highlight the chosen view and show its colour key.
+	_overlay_kind = kind
 	for k in overlay_buttons:
 		(overlay_buttons[k] as Button).set_pressed_no_signal(k == kind)
 	for child in legend_box.get_children():
@@ -560,6 +579,8 @@ func _build_help(root: Control) -> void:
 		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
 		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +
 		"Some buildings unlock as the town grows.\n" +
+		"Advisors (top centre) point out what needs attention, most urgent first. Click a tip\n" +
+		"to see the problem on the map (click again to go back to the normal view).\n" +
 		"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000\n" +
 		"people and a station or bus depot nearby), or a conservation area kept low-rise.\n\n" +
 		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
@@ -670,6 +691,152 @@ func _draw_demand() -> void:
 		demand_box.draw_rect(rect, _demand_colours[t][0])
 		demand_box.draw_string(font, Vector2(n * col_w, size.y - 4), _demand_colours[t][1],
 			HORIZONTAL_ALIGNMENT_CENTER, col_w, 13, TEXT_DIM)
+
+
+# ---------------------------------------------------------------- advisors
+
+func _build_advice(root: Control) -> void:
+	# A small card, top centre: the most urgent tips, each with a coloured dot.
+	# Hidden when there's nothing to say.
+	advice_panel = _panel(root)
+	advice_panel.anchor_left = 0.5
+	advice_panel.anchor_right = 0.5
+	advice_panel.offset_top = 20.0
+	advice_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	advice_panel.custom_minimum_size = Vector2(460, 0)
+	advice_panel.visible = false
+	var box := _vbox(advice_panel)
+	box.add_theme_constant_override("separation", 2)
+
+	var head := HBoxContainer.new()
+	box.add_child(head)
+	_advice_title = _label("", 13, TEXT_DIM)
+	_advice_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_advice_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_advice_title)
+	_advice_hide = _button("Hide", false)
+	_advice_hide.add_theme_font_size_override("font_size", 12)
+	_advice_hide.tooltip_text = "Fold the advisors away (the count stays)"
+	_advice_hide.pressed.connect(func():
+		_advice_collapsed = not _advice_collapsed
+		_show_advice()
+	)
+	head.add_child(_advice_hide)
+
+	for n: int in ADVICE_ROWS:
+		var b := _advice_row()
+		b.pressed.connect(func(): _advice_clicked(n))
+		box.add_child(b)
+		_advice_rows.append(b)
+	_advice_more = _advice_row()
+	_advice_more.add_theme_color_override("font_color", TEXT_DIM)
+	_advice_more.pressed.connect(func():
+		_advice_all = not _advice_all
+		_show_advice()
+	)
+	box.add_child(_advice_more)
+
+
+func _advice_row() -> Button:
+	# A flat, left-aligned row that lights up on hover. One line; the full
+	# explanation is in its tooltip.
+	var b := Button.new()
+	b.focus_mode = Control.FOCUS_NONE
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.clip_text = true
+	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	b.custom_minimum_size = Vector2(428, 0)
+	b.add_theme_font_size_override("font_size", 14)
+	b.add_theme_constant_override("h_separation", 10)
+	var flat := StyleBoxEmpty.new()
+	var lit := _soft_box(Color(1, 1, 1, 0.08), 10)
+	for style: StyleBox in [flat, lit]:
+		style.content_margin_left = 6
+		style.content_margin_right = 8
+		style.content_margin_top = 5
+		style.content_margin_bottom = 5
+	b.add_theme_stylebox_override("normal", flat)
+	b.add_theme_stylebox_override("pressed", lit)
+	b.add_theme_stylebox_override("hover", lit)
+	b.add_theme_stylebox_override("hover_pressed", lit)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	return b
+
+
+func set_advice(tips: Array[Dictionary], month: int) -> void:
+	# tips: from advisors.gd, most urgent first. The card always shows the current
+	# ones; an urgent tip also flashes once, then not again for a year, so it
+	# doesn't nag. (It waits if another message is showing.)
+	_advice_tips = tips
+	if _message_time <= 0.0:
+		for tip: Dictionary in tips:
+			var severity: int = tip["severity"]
+			if severity < ADVICE_URGENT:
+				break
+			var id: String = tip["id"]
+			var last: int = _advice_flashed.get(id, -ADVICE_REFLASH_MONTHS)
+			if month < last or month - last >= ADVICE_REFLASH_MONTHS:   # (a new city starts at 0)
+				_advice_flashed[id] = month
+				flash("Advisor: %s" % tip["text"])
+				break
+	_show_advice()
+
+
+func _show_advice() -> void:
+	var total := _advice_tips.size()
+	advice_panel.visible = total > 0
+	if total == 0:
+		_advice_all = false
+		return
+	var urgent := 0
+	for tip: Dictionary in _advice_tips:
+		var severity: int = tip["severity"]
+		if severity >= ADVICE_URGENT:
+			urgent += 1
+	_advice_title.text = "ADVISORS   ·   %d %s" % [total, "tip" if total == 1 else "tips"]
+	if urgent > 0:
+		_advice_title.text += ", %d urgent" % urgent
+	_advice_title.add_theme_color_override("font_color", BAD if urgent > 0 else TEXT_DIM)
+	_advice_hide.text = "Show" if _advice_collapsed else "Hide"
+	var shown := mini(total if _advice_all else ADVICE_SHOWN, ADVICE_ROWS)
+	for n: int in _advice_rows.size():
+		var b := _advice_rows[n]
+		b.visible = not _advice_collapsed and n < mini(shown, total)
+		if not b.visible:
+			continue
+		var tip := _advice_tips[n]
+		var severity: int = tip["severity"]
+		var overlay: int = tip["overlay"]
+		var colour := BAD if severity >= ADVICE_URGENT else (WARN if severity == ADVICE_URGENT - 1 else HINT)
+		b.text = tip["text"]
+		b.icon = _dot_icon(colour)
+		b.tooltip_text = String(tip["detail"])
+		if overlay >= 0:
+			var view: String = OVERLAY_NAMES[overlay]
+			b.tooltip_text += "\nClick to see it on the %s map view." % view.to_lower()
+		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if overlay >= 0 \
+			else Control.CURSOR_ARROW
+	var extra := mini(total, ADVICE_ROWS) - mini(ADVICE_SHOWN, total)
+	_advice_more.visible = not _advice_collapsed and extra > 0
+	_advice_more.text = "Show fewer" if _advice_all else "%d more" % extra
+
+
+func _advice_clicked(n: int) -> void:
+	# Switch on the map view that shows the problem (or back to normal if it's on).
+	if n >= _advice_tips.size():
+		return
+	var kind: int = _advice_tips[n]["overlay"]
+	if kind < 0:
+		return
+	overlay_chosen.emit(0 if kind == _overlay_kind else kind)
+
+
+func _dot_icon(colour: Color) -> Texture2D:
+	var key := "dot:" + colour.to_html(false)
+	if not _icon_cache.has(key):
+		_icon_cache[key] = _svg("<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'>"
+			+ "<circle cx='6' cy='6' r='4.5' fill='#%s'/></svg>" % colour.to_html(false), 1.0)
+	return _icon_cache[key]
 
 
 # ----------------------------------------------------------------- pieces
