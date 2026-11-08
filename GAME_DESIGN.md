@@ -48,6 +48,12 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - CBD: high-density homes and shops can rise two more stages, to skyscrapers: stage 7 (20-26 storeys; 350 residents or 160 jobs) and stage 8 (32-42 storey landmark with two setbacks and a spire; 500 residents or 260 jobs). +0.08 land value across the CBD, and tall buildings grow 1.5x faster there.
 - Skyscrapers also need land value 0.72 / 0.8, a town of 8,000 people, and a working railway station or bus depot within 600 m. Each stands on a three-storey podium (glass, or classical with shopfronts) with a planted plaza behind.
 
+## Building models
+- Low-rise Troon buildings are detailed 3D models made in Blender by `tools/make_buildings.py` (saved to `assets/models/*.glb`): villa, bungalow (dormers), terrace of three, tenements (3 and 4 storeys, canted bays, close door, cornice, chimney stacks), shop parades (one storey, or two with flats and a slate roof) and sandstone shops with flats (2-4 storeys, flat roof with lift housing and vents).
+- Details are real geometry: sash windows with frames and glazing bars, stone sills, lintels and surrounds, bay windows, doors with fanlights and steps, skews, gutters, chimney pots, shopfronts with fascias and awnings.
+- The game swaps in these models wherever a matching block is planned, stretched to fit; everything else still uses the simple blocks. Materials get the game's own shader (`shaders/model.gdshader`): stone and slate photo textures, varied door and shopfront colours, windows lit at night, map overlay colours.
+- Models are drawn in 400 m squares, so Godot can skip what's off screen and use simpler versions far away.
+
 ## Tall building design
 - Taller plots mix two families: classical sandstone (rusticated ground floor, sash windows in stone surrounds, bay windows, cornice, slate mansard with dormers; classical shopfronts for shops) and modern premium (glass ground floor, framed glazing with timber/bronze/stone bays, staggered glass balconies, set-back glass penthouse, roof canopy; all glass on the best land).
 - Courts between tall blocks are landscaped (lawn, path, trees) with parking underground.

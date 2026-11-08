@@ -44,7 +44,8 @@ The map covers 7 × 6.5 km around Troon (harbour, town centre, Barassie, Royal T
 | `scripts/world3d.gd` | Draws the 3D world: terrain, roads, buildings, trees, day and night |
 | `scripts/hud.gd`, `camera_rig.gd`, `cars.gd` | Interface (Build menu, panels), camera, traffic |
 | `scripts/icons.gd` | Build menu pictures, made by `tools/make_icons.py` |
-| `shaders/` | Terrain, sea, road, wall and roof looks |
+| `shaders/` | Terrain, sea, road, wall, roof, model, foliage and glass looks |
+| `assets/models/` | Building models, made by `tools/make_buildings.py` (Blender) |
 | `archive/2d/` | The old 2D version, kept for reference (Godot ignores it) |
 | `map/` | The map file and its preview picture |
 | `tools/make_troon_map.py` | Converts OS height data into the map file |

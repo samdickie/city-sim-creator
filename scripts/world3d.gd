@@ -9,6 +9,22 @@ const SEA_SHADER = preload("res://shaders/sea.gdshader")
 const BUILDING_SHADER = preload("res://shaders/building.gdshader")
 const ROOF_SHADER = preload("res://shaders/roof.gdshader")
 const FOLIAGE_SHADER = preload("res://shaders/foliage.gdshader")
+const MODEL_SHADER = preload("res://shaders/model.gdshader")
+
+# Detailed building models (made by tools/make_buildings.py). Where a block of the
+# right kind is planned, the model is used instead, stretched to the block's size.
+# Each entry: width, depth, wall height, roof rise (metres).
+const MODEL_DIR := "res://assets/models/"
+const MODEL_DIMS := {
+	"villa": Vector4(7.4, 8.0, 5.8, 3.4), "bungalow": Vector4(8.0, 8.0, 3.2, 3.6),
+	"terrace": Vector4(15.0, 8.5, 6.2, 3.2), "tenement3": Vector4(22.0, 13.0, 9.9, 4.8),
+	"tenement4": Vector4(22.0, 13.0, 12.9, 4.8), "shop1": Vector4(15.5, 13.0, 5.0, 0.0),
+	"shop2": Vector4(15.5, 13.0, 7.0, 3.0), "shopflats2": Vector4(23.0, 18.0, 8.0, 0.0),
+	"shopflats3": Vector4(23.0, 18.0, 11.1, 0.0), "shopflats4": Vector4(23.0, 18.0, 14.2, 0.0),
+}
+const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot", "fascia", "render",
+	"awning", "lead"]
+const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
@@ -119,6 +135,12 @@ var _paving_items: Array = []
 var _prop_items: Array = []
 var _parked_items: Array = []
 var _values := PackedFloat32Array()   # land value per tile, for building quality
+var _models := {}                     # model name -> Mesh (with our materials)
+var _model_materials: Array[ShaderMaterial] = []
+var _model_items: Array = []          # [name, transform, colour, custom, owner] planned this refresh
+var _model_nodes := {}                # "name|x|y" -> MultiMeshInstance3D
+var _model_groups := {}               # "name|x|y" -> {owners, base} for overlay recolouring
+var _current_owner := -1              # the plot being planned
 var _spire_items: Array = []          # skyscraper spires, drawn with the chimneys
 var _extra_trees: Array = []          # [position (Vector2), height, kind] planted on plots
 # Leftover open land inside the town gets put to use (looks only, not simulated):
@@ -378,6 +400,7 @@ func _build_city_nodes() -> void:
 	roofs.multimesh = _new_multimesh(_gable_mesh(), false)
 	roofs.material_override = roof_mat
 	add_child(roofs)
+	_load_models(stone, slate)
 
 	var chimney_mesh := CylinderMesh.new()
 	chimney_mesh.top_radius = 0.8
@@ -639,6 +662,7 @@ func refresh_buildings() -> void:
 	_parked_items.clear()
 	_extra_trees.clear()
 	_spire_items.clear()
+	_model_items.clear()
 	_values = sim.land_value_map()
 	_wall_owner.clear()
 	_roof_owner.clear()
@@ -647,6 +671,7 @@ func refresh_buildings() -> void:
 		var lv := levels[i]
 		var walls_before := wall_list.size()
 		var roofs_before := roof_list.size()
+		_current_owner = i
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
 		elif sim.is_building(t):
@@ -667,6 +692,7 @@ func refresh_buildings() -> void:
 	_fill(roofs.multimesh, roof_list, false)
 	_wall_base = _colours_of(wall_list)
 	_roof_base = _colours_of(roof_list)
+	_fill_models()
 	if overlay != Overlay.NONE:
 		_recolour_buildings()
 	chimney_list.append_array(_spire_items)
@@ -711,6 +737,8 @@ func set_overlay(kind: int) -> void:
 	terrain_material.set_shader_parameter("overlay_on", on)
 	wall_material.set_shader_parameter("overlay_on", on)
 	roof_material.set_shader_parameter("overlay_on", on)
+	for mat in _model_materials:
+		mat.set_shader_parameter("overlay_on", on)
 	# Trees, paving and parked cars would hide the colours on the ground.
 	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
 			trunks, crowns, cones, city_trunks, city_crowns, city_cones]:
@@ -850,6 +878,9 @@ func _recolour_buildings() -> void:
 	# In an overlay, each building takes its plot's colour; otherwise its own.
 	_recolour(walls.multimesh, _wall_owner, _wall_base)
 	_recolour(roofs.multimesh, _roof_owner, _roof_base)
+	for key: String in _model_groups:
+		var group: Dictionary = _model_groups[key]
+		_recolour((_model_nodes[key] as MultiMeshInstance3D).multimesh, group["owners"], group["base"])
 
 
 func _recolour(mm: MultiMesh, owners: PackedInt32Array, base: PackedColorArray) -> void:
@@ -1174,6 +1205,10 @@ func _depth(i: int, front: Vector2i) -> float:
 
 func _add_block(spot: Dictionary, w: float, d: float, h: float, colour: Color, style: int,
 		roof_h: float, roof_colour: Color, wall_list: Array, roof_list: Array) -> void:
+	var model := _model_for(style, w, h, roof_h)
+	if model != "":
+		_add_model(model, spot, w, d, h + roof_h, colour, roof_colour)
+		return
 	var x_axis: Vector3 = spot["x"]
 	var z_axis: Vector3 = spot["z"]
 	var pos: Vector3 = spot["pos"]
@@ -1183,6 +1218,141 @@ func _add_block(spot: Dictionary, w: float, d: float, h: float, colour: Color, s
 		# Pitched roof with a small overhang, ridge running along the street.
 		var roof_b3 := Basis(x_axis * (w + 0.8), Vector3.UP * roof_h, z_axis * (d + 1.0))
 		roof_list.append([Transform3D(roof_b3, pos + Vector3.UP * h), roof_colour])
+
+
+# --- Detailed building models ---
+
+func _load_models(stone: Texture2D, slate: Texture2D) -> void:
+	# Load each .glb and give its materials our shader (one material per part).
+	var materials := {}
+	for n in MODEL_PARTS.size():
+		var mat := ShaderMaterial.new()
+		mat.shader = MODEL_SHADER
+		mat.set_shader_parameter("part", n)
+		if stone:
+			mat.set_shader_parameter("use_wall_tex", true)
+			mat.set_shader_parameter("wall_tex", stone)
+			mat.set_shader_parameter("wall_average", _average_colour(stone))
+		if slate:
+			mat.set_shader_parameter("use_roof_tex", true)
+			mat.set_shader_parameter("roof_tex", slate)
+			mat.set_shader_parameter("roof_average", _average_colour(slate))
+		materials[MODEL_PARTS[n]] = mat
+		_model_materials.append(mat)
+	for model_name: String in MODEL_DIMS:
+		var path := MODEL_DIR + model_name + ".glb"
+		if not ResourceLoader.exists(path):
+			continue
+		var scene := load(path) as PackedScene
+		if scene == null:
+			continue
+		var root := scene.instantiate()
+		var mesh := _first_mesh(root)
+		root.free()
+		if mesh == null:
+			continue
+		for s in mesh.get_surface_count():
+			var old := mesh.surface_get_material(s)
+			var part := old.resource_name if old else ""
+			mesh.surface_set_material(s, materials.get(part, materials["stone"]))
+		_models[model_name] = mesh
+	if _models.is_empty():
+		push_warning("No building models found in %s: using simple blocks." % MODEL_DIR)
+
+
+func _first_mesh(node: Node) -> ArrayMesh:
+	if node is MeshInstance3D and (node as MeshInstance3D).mesh is ArrayMesh:
+		return (node as MeshInstance3D).mesh as ArrayMesh
+	for child in node.get_children():
+		var found := _first_mesh(child)
+		if found:
+			return found
+	return null
+
+
+func _model_for(style: int, w: float, h: float, roof_h: float) -> String:
+	# Which model (if any) fits a planned block.
+	var pick := ""
+	if style == STYLE_HOUSE:
+		if h <= 3.6:
+			pick = "bungalow"
+		elif w <= 9.5:
+			pick = "villa"
+		elif w <= 17.0:
+			pick = "terrace"
+	elif style == STYLE_FLATS and roof_h > 0.0:
+		var storeys := roundi((h - 0.5) / 3.0)
+		if storeys == 3:
+			pick = "tenement3"
+		elif storeys == 4:
+			pick = "tenement4"
+	elif style == STYLE_SHOP:
+		if roof_h > 0.0 and h <= 8.0:
+			pick = "shop2"
+		elif roof_h == 0.0 and h <= 5.0:
+			pick = "shop1"
+		elif roof_h == 0.0:
+			var floors := roundi((h - 0.6) / 3.2)
+			if floors >= 2 and floors <= 4:
+				pick = "shopflats%d" % floors
+	return pick if _models.has(pick) else ""
+
+
+func _add_model(model_name: String, spot: Dictionary, w: float, d: float, total_h: float, colour: Color,
+		roof_colour: Color) -> void:
+	# The model stretched to the block: front to the street, base on the ground.
+	var dims: Vector4 = MODEL_DIMS[model_name]
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var pos: Vector3 = spot["pos"]
+	var basis := Basis(x_axis * (w / dims.x), Vector3.UP * (total_h / (dims.z + dims.w)), z_axis * (d / dims.y))
+	var variety := fposmod(sin(pos.x * 12.9898 + pos.z * 78.233) * 43758.5453, 1.0)   # door colours etc.
+	_model_items.append([model_name, Transform3D(basis, pos), colour,
+		Color(roof_colour.r, roof_colour.g, roof_colour.b, variety), _current_owner])
+
+
+func _fill_models() -> void:
+	# Group the planned models by kind and 400 m square, one MultiMesh each.
+	var groups := {}
+	for item: Array in _model_items:
+		var xf: Transform3D = item[1]
+		var key := "%s|%d|%d" % [item[0], floori(xf.origin.x / MODEL_CHUNK), floori(xf.origin.z / MODEL_CHUNK)]
+		if not groups.has(key):
+			groups[key] = []
+		var list: Array = groups[key]
+		list.append(item)
+	for key: String in _model_nodes:
+		if not groups.has(key):
+			var idle: MultiMeshInstance3D = _model_nodes[key]
+			idle.multimesh.instance_count = 0
+	_model_groups.clear()
+	for key: String in groups:
+		var list: Array = groups[key]
+		var first: Array = list[0]
+		var model_name: String = first[0]
+		if not _model_nodes.has(key):
+			var node := MultiMeshInstance3D.new()
+			var mm := MultiMesh.new()
+			mm.transform_format = MultiMesh.TRANSFORM_3D
+			mm.use_colors = true
+			mm.use_custom_data = true
+			mm.mesh = _models[model_name]
+			node.multimesh = mm
+			node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			add_child(node)
+			_model_nodes[key] = node
+		var target: MultiMesh = (_model_nodes[key] as MultiMeshInstance3D).multimesh
+		target.instance_count = list.size()
+		var owners := PackedInt32Array()
+		var base := PackedColorArray()
+		for n in list.size():
+			var item: Array = list[n]
+			target.set_instance_transform(n, item[1])
+			target.set_instance_color(n, item[2])
+			target.set_instance_custom_data(n, item[3])
+			owners.append(item[4])
+			base.append(item[2])
+		_model_groups[key] = {"owners": owners, "base": base}
 
 
 # --- Lot details: flat paving, small props and parked cars ---
@@ -2659,6 +2829,8 @@ func set_time_of_day(t: float) -> void:
 
 	if wall_material:
 		wall_material.set_shader_parameter("night", night)
+	for mat in _model_materials:
+		mat.set_shader_parameter("night", night)
 	if road_material:
 		road_material.set_shader_parameter("night", night)
 
