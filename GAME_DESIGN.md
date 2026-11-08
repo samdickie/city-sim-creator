@@ -34,6 +34,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - People only leave when appeal drops below 0 (high taxes AND poor services), and the worst-served plots shrink first. A well-served town still grows at 20% tax. The HUD shows services (good, patchy, poor) and how taxes are going down. Roads cost £0.50 per tile per month.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
+## Happiness
+- One number, 0-100%, sums up how residents feel, and it is what draws people in: demand for homes = (100 + 4% of the population) x appeal, where appeal = 3 x happiness - 1, plus the pull of spare jobs. 67% is a normal town; below 50% people stop moving in; below 33% they leave.
+- Made of parts in appeal points, added to 1: taxes against services (as above), services against what people expect, leisure (up to +0.3), uncollected rubbish (up to -0.5), unemployment above 5% (x2, from 400 people), housing shortage (up to -0.15), share of homes without power (up to -0.8) or water (up to -0.6). Pollution can be added later as one more part.
+- Businesses weigh only the town-wide parts (taxes, services, leisure, rubbish), so jobs, housing, power and water problems don't stop shops and industry coming to fix them. The tax line uses the same.
+- HUD: "Happiness 72%: happy" under the population; below 60% it shows the main complaint, red below 50%. Zone hover text names the top complaint and its fix. Words: delighted (80+), happy (60+), content (50+), unhappy (33+), angry.
+- Worked out from the town each month (and when taxes change), so nothing extra is saved. Numbers in `Settings` under Happiness; complaint wording in `COMPLAINTS` in `simulation.gd`.
+
 ## Zoning density
 - Homes and shops are zoned low, medium or high density (Tab or the buttons above the toolbar). Industry has one density.
 - A plot's building stage = its level + the density's head start: 1 villas, 2 terraces, 3 tenements, 4 mansion flats, 5 modern flats, 6 towers (shops: corner shops up to an office tower).
@@ -124,7 +131,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*
-3. **Real game** — services (done), land value (done), overlay maps (done), taxes vs services (done), happiness, goals. *Done when a friend asks for more.*
+3. **Real game** — services (done), land value (done), overlay maps (done), taxes vs services (done), happiness (done), goals. *Done when a friend asks for more.*
 4. **Polish and share** — 3D art, sound, tutorial, publish on itch.io.
 
 ## Working rules
