@@ -9,7 +9,7 @@ shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
 uniform int part = 0;   // 0 stone, 1 roof, 2 glass, 3 frame, 4 door, 5 metal, 6 pot,
-						// 7 fascia, 8 render, 9 awning, 10 lead
+						// 7 fascia, 8 render, 9 awning, 10 lead, 11 cladding, 12 sheet
 uniform bool use_wall_tex = false;
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);
@@ -108,6 +108,18 @@ void fragment() {
 	} else if (part == 10) {
 		c = vec3(0.30, 0.32, 0.34);       // lead flashing and flat roofs
 		rough = 0.6;
+	} else if (part == 11 || part == 12) {
+		// Ribbed metal: walls in the building's colour, roofs in the roof colour.
+		vec3 base = part == 11 ? tint : extra.rgb;
+		float along = abs(world_normal.x) > 0.5 ? world_pos.z : world_pos.x;
+		if (part == 12) {
+			along = world_pos.x + world_pos.z;
+		}
+		float rib = smoothstep(0.35, 0.5, abs(fract(along * 3.0) - 0.5) * 2.0);
+		c = base * (0.86 + 0.16 * rib);
+		c *= mix(0.85, 1.0, smoothstep(0.0, 2.0, height_up));
+		rough = 0.5;
+		metal = 0.35;
 	}
 	if (overlay_on) {
 		// Map overlay: the plot's colour dominates.

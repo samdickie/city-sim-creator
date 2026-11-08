@@ -21,9 +21,19 @@ const MODEL_DIMS := {
 	"tenement4": Vector4(22.0, 13.0, 12.9, 4.8), "shop1": Vector4(15.5, 13.0, 5.0, 0.0),
 	"shop2": Vector4(15.5, 13.0, 7.0, 3.0), "shopflats2": Vector4(23.0, 18.0, 8.0, 0.0),
 	"shopflats3": Vector4(23.0, 18.0, 11.1, 0.0), "shopflats4": Vector4(23.0, 18.0, 14.2, 0.0),
+	"shed": Vector4(34.0, 28.0, 8.0, 2.2),
+	"classical2": Vector4(21.0, 13.0, 9.1, 4.0), "classical3": Vector4(21.0, 13.0, 12.5, 4.0),
+	"classical4": Vector4(21.0, 13.0, 15.9, 4.0), "classical5": Vector4(21.0, 13.0, 19.3, 4.0),
+	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
+}
+# Other designs with the same size as a model above; one is picked for each building.
+const MODEL_VARIANTS := {
+	"villa": ["villa", "villa_b", "villa_c"], "bungalow": ["bungalow", "bungalow_b"],
+	"terrace": ["terrace", "terrace_b"], "tenement3": ["tenement3", "tenement3_b"],
+	"tenement4": ["tenement4", "tenement4_b"], "shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
 }
 const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot", "fascia", "render",
-	"awning", "lead"]
+	"awning", "lead", "cladding", "sheet"]
 const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 
@@ -1239,7 +1249,7 @@ func _load_models(stone: Texture2D, slate: Texture2D) -> void:
 			mat.set_shader_parameter("roof_average", _average_colour(slate))
 		materials[MODEL_PARTS[n]] = mat
 		_model_materials.append(mat)
-	for model_name: String in MODEL_DIMS:
+	for model_name: String in _all_model_names():
 		var path := MODEL_DIR + model_name + ".glb"
 		if not ResourceLoader.exists(path):
 			continue
@@ -1258,6 +1268,29 @@ func _load_models(stone: Texture2D, slate: Texture2D) -> void:
 		_models[model_name] = mesh
 	if _models.is_empty():
 		push_warning("No building models found in %s: using simple blocks." % MODEL_DIR)
+
+
+func _all_model_names() -> Array[String]:
+	# Every model file to look for: each size, its variants, and the classical
+	# blocks' shopfront and bay-window versions.
+	var names: Array[String] = []
+	for base: String in MODEL_DIMS:
+		if MODEL_VARIANTS.has(base):
+			for v: String in MODEL_VARIANTS[base]:
+				names.append(v)
+		else:
+			names.append(base)
+		if base.begins_with("classical"):
+			names.append(base + "_shops")
+			names.append(base + "_bays")
+	return names
+
+
+func _model_dims(model_name: String) -> Vector4:
+	# A variant shares its size with the model it's a version of.
+	var base := model_name.trim_suffix("_shops").trim_suffix("_bays").trim_suffix("_b").trim_suffix("_c")
+	var dims: Vector4 = MODEL_DIMS.get(base, MODEL_DIMS.get(model_name, Vector4(1, 1, 1, 0)))
+	return dims
 
 
 func _first_mesh(node: Node) -> ArrayMesh:
@@ -1286,6 +1319,8 @@ func _model_for(style: int, w: float, h: float, roof_h: float) -> String:
 			pick = "tenement3"
 		elif storeys == 4:
 			pick = "tenement4"
+	elif style == STYLE_INDUSTRY and roof_h > 0.0:
+		pick = "shed"
 	elif style == STYLE_SHOP:
 		if roof_h > 0.0 and h <= 8.0:
 			pick = "shop2"
@@ -1295,18 +1330,31 @@ func _model_for(style: int, w: float, h: float, roof_h: float) -> String:
 			var floors := roundi((h - 0.6) / 3.2)
 			if floors >= 2 and floors <= 4:
 				pick = "shopflats%d" % floors
+	if MODEL_VARIANTS.has(pick):
+		for v: String in MODEL_VARIANTS[pick]:
+			if _models.has(v):
+				return pick
+		return ""
 	return pick if _models.has(pick) else ""
 
 
 func _add_model(model_name: String, spot: Dictionary, w: float, d: float, total_h: float, colour: Color,
 		roof_colour: Color) -> void:
 	# The model stretched to the block: front to the street, base on the ground.
-	var dims: Vector4 = MODEL_DIMS[model_name]
+	# Where there are several designs of this size, one is picked by position.
 	var x_axis: Vector3 = spot["x"]
 	var z_axis: Vector3 = spot["z"]
 	var pos: Vector3 = spot["pos"]
-	var basis := Basis(x_axis * (w / dims.x), Vector3.UP * (total_h / (dims.z + dims.w)), z_axis * (d / dims.y))
 	var variety := fposmod(sin(pos.x * 12.9898 + pos.z * 78.233) * 43758.5453, 1.0)   # door colours etc.
+	if MODEL_VARIANTS.has(model_name):
+		var choices: Array = []
+		for v: String in MODEL_VARIANTS[model_name]:
+			if _models.has(v):
+				choices.append(v)
+		if not choices.is_empty():
+			model_name = choices[int(fposmod(variety * 7.31, 1.0) * choices.size())]
+	var dims := _model_dims(model_name)
+	var basis := Basis(x_axis * (w / dims.x), Vector3.UP * (total_h / (dims.z + dims.w)), z_axis * (d / dims.y))
 	_model_items.append([model_name, Transform3D(basis, pos), colour,
 		Color(roof_colour.r, roof_colour.g, roof_colour.b, variety), _current_owner])
 
@@ -1956,10 +2004,17 @@ func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone:
 		shops: bool, bays: bool, wall_list: Array, roof_list: Array, mansard: bool = true) -> void:
 	# Sandstone: tall rusticated ground floor, sash windows in stone surrounds,
 	# full-height bay windows, a cornice and a slate mansard roof with dormers.
+	var h: float = 4.2 + (storeys - 1) * 3.4 + 0.6
+	if mansard:
+		# The detailed model, where there is one for this height and kind.
+		var kind := "_shops" if shops else ("_bays" if bays and storeys >= 5 else "")
+		var model_name := "classical%d%s" % [storeys, kind]
+		if _models.has(model_name):
+			_add_model(model_name, spot, w, d, h + 0.9 + 4.0, stone, SLATE)
+			return
 	var x_axis: Vector3 = spot["x"]
 	var z_axis: Vector3 = spot["z"]
 	var pos: Vector3 = spot["pos"]
-	var h: float = 4.2 + (storeys - 1) * 3.4 + 0.6
 	var style: int = STYLE_CLASSICAL_SHOPS if shops else STYLE_CLASSICAL
 	wall_list.append([Transform3D(Basis(x_axis * w, Vector3.UP * h, z_axis * d), pos), stone,
 		Color(w, h, d, style)])
@@ -2272,7 +2327,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 		Tile.WATER_PUMP:
 			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 			var house := _place(i, front, -12.0, 5.0, 12.0, 9.0)
-			_add_block(house, 12.0, 9.0, 5.5, RED_SANDSTONE, STYLE_HOUSE, 3.0, SLATE, wall_list, roof_list)
+			_add_block(house, 12.0, 9.0, 5.5, RED_SANDSTONE, STYLE_PLANT, 3.0, SLATE, wall_list, roof_list)
 			for along: float in [6.0, 18.0]:
 				var tank := _place(i, front, along, 16.0, 10.0, 10.0)
 				_cylinder(chimney_list, tank["pos"], 5.0, 7.0, TANK_GREY)

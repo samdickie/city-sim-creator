@@ -426,9 +426,13 @@ func toggle_build_menu() -> void:
 
 
 func _item_icon(id: String) -> Texture2D:
+	# A picture rendered from the game's own models (tools/make_menu_pictures.py),
+	# or the simple drawn icon if it's missing.
 	var key := "item:" + id
 	if not _icon_cache.has(key):
-		_icon_cache[key] = _svg(Icons.ITEMS.get(id, Icons.ITEMS["normal"]), 2.0)
+		var path := "res://assets/icons/%s.png" % id
+		var picture: Texture2D = load(path) if ResourceLoader.exists(path) else null
+		_icon_cache[key] = picture if picture else _svg(Icons.ITEMS.get(id, Icons.ITEMS["normal"]), 2.0)
 	return _icon_cache[key]
 
 
