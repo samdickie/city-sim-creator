@@ -114,6 +114,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
 
+## Advisors
+- A small glass card, top centre, shows the most important 1-3 tips when something needs attention, most urgent first (red dot urgent, amber warning, blue advice). "N more" lists the rest; Hide folds the card to its count. Hidden when all is well.
+- Every tip comes from real simulation state: why zone plots aren't growing (the same reasons as the hover text and Growth view), power and water used vs supplied, rubbish collected, buildings with no road or power, money trend, taxes vs services, missing fire station or school, skyscrapers waiting for transport.
+- Tips appear and disappear as the town changes. Only urgent ones also flash a message, once, and not again for a year.
+- Clicking a tip switches on the map view that shows the problem (Power, Water, Roads, Services, Growth, Land value); clicking again goes back to normal. Hover for a longer explanation.
+- The rules live in `scripts/advisors.gd` (`tips(sim)` returns `[{id, text, detail, severity, overlay}]`), separate from the HUD, so new tips are one `_add()` each.
+
 ## Look and feel
 - Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
 - Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
