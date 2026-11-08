@@ -1,7 +1,7 @@
 extends CanvasLayer
 ## The on-screen interface: a clean, modern look with rounded translucent panels.
 ##   Top left:      city name, date, game speed
-##   Top right:     money, budget, people, power, tax, demand
+##   Top right:     money, budget, people, happiness, power, tax, demand
 ##   Bottom left:   the Build menu (categories down the side, items with
 ##                  pictures, descriptions and prices) and the Build / Bulldoze buttons
 ##   Bottom centre: what's under the mouse, and messages
@@ -57,6 +57,7 @@ var clock_label: Label
 var money_label: Label
 var budget_label: Label
 var people_label: Label
+var happiness_label: Label
 var housing_label: Label
 var power_label: Label
 var growth_label: Label
@@ -168,6 +169,8 @@ func _build_top_right(root: Control) -> void:
 	box.add_child(_divider())
 	people_label = _label("", 16, TEXT)
 	box.add_child(people_label)
+	happiness_label = _label("", 15, TEXT)
+	box.add_child(happiness_label)
 	housing_label = _label("", 14, TEXT_DIM)
 	box.add_child(housing_label)
 	power_label = _label("", 14, TEXT_DIM)
@@ -550,6 +553,8 @@ func _build_help(root: Control) -> void:
 		"where there's no fire station. Funding (- / +) changes how far they reach.\n" +
 		"Taxes: people accept higher taxes when they get good services for them. High taxes\n" +
 		"with poor services stop growth, and eventually people leave (worst-served areas first).\n" +
+		"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power,\n" +
+		"water and leisure. Below 50% people stop moving in; below 33% they leave.\n" +
 		"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings:\n" +
 		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
 		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +
@@ -582,6 +587,16 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 	money_label.add_theme_color_override("font_color", BAD if sim.money * 10 < Settings.START_MONEY else GOOD)
 	budget_label.text = "%s last month   ·   taxes %s, upkeep %s" % [net_text, income_text, upkeep_text]
 	people_label.text = "%s people   ·   %s jobs" % [thousands(sim.population), thousands(sim.jobs())]
+	# Happiness sums everything up; when it slips, say what residents mind most.
+	var happy: float = sim.happiness
+	happiness_label.text = "Happiness %d%%: %s" % [roundi(happy * 100.0), sim.happiness_word()]
+	if happy < 0.6:
+		var complaints: Array = sim.unhappy_reasons(1)
+		if not complaints.is_empty():
+			var worst: String = complaints[0]
+			happiness_label.text += "\nMain complaint: %s" % worst
+	happiness_label.add_theme_color_override("font_color",
+		BAD if happy < 0.5 else (GOOD if happy >= 0.8 else TEXT))
 	var short: float = sim.housing_shortage()
 	var word := "none" if short <= 0.0 else ("some" if short < 0.4 else ("serious" if short < 0.8 else "severe"))
 	if sim.average_home_price > 0:
@@ -618,7 +633,7 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 	services_label.add_theme_color_override("font_color",
 		BAD if services_bad else (GOOD if service_word == "excellent" else TEXT_DIM))
 	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
-	tax_label.add_theme_color_override("font_color", BAD if sim.appeal() < 0.3 else TEXT)
+	tax_label.add_theme_color_override("font_color", BAD if sim.business_appeal() < 0.3 else TEXT)
 	demand_box.queue_redraw()
 
 

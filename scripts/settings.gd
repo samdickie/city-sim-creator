@@ -51,6 +51,20 @@ const SERVICES_EFFECT := 0.6      # how much better (or worse) than expected ser
 const TAX_BASE := 2.0             # £ per resident or job per month at a 100% rate
 const ROAD_UPKEEP := 0.5          # £ per road tile per month
 
+# --- Happiness ---
+# Happiness (0-100%) sums up how residents feel, and it is what draws people in.
+# It adds up taxes against services, services against what people expect, leisure
+# and rubbish (as above), plus the things below that only residents feel at home.
+# Each is in "appeal" points: a normal town has appeal 1 (67% happy); appeal 0.5
+# (50%) is where people stop wanting to move in, and below 0 (33%) they leave.
+const JOBS_START_POP := 400       # below this, people happily work in the towns nearby
+const JOBS_SLACK := 0.05          # this much unemployment is normal and nobody minds
+const UNEMPLOYMENT_EFFECT := 2.0  # appeal lost per share of workers out of work (above the slack)
+const HOUSING_EFFECT := 0.15      # appeal lost in a severe housing shortage (homes too dear)
+const NO_POWER_EFFECT := 0.8      # appeal lost if every home were without power...
+const NO_WATER_EFFECT := 0.6      # ...or without water (only homes big enough to need it)
+const COMPLAINT_SIZE := 0.05      # appeal a thing must cost before residents complain about it
+
 # --- Power ---
 const POWER_LINE_COST := 5
 # (Power plants, wind and solar are in BUILDINGS below.)

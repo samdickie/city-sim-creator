@@ -20,6 +20,20 @@ const BUILDING_KEYS := {
 	Tile.HARBOUR: "harbour",
 }
 const LAST_TILE := Tile.HARBOUR
+# What residents complain about, by happiness part: [the complaint, how to fix it].
+# Kept in one place so the HUD, zone hover text and advisors all say the same thing.
+const COMPLAINTS := {
+	"taxes": ["taxes too high for the services", "lower the tax rate, or build services near homes"],
+	"services": ["not enough police, fire, schools or hospitals", "build services near homes, or fund them more"],
+	"rubbish": ["rubbish piling up", "build a landfill or recycling centre"],
+	"jobs": ["not enough jobs", "zone more shops or industry"],
+	"housing": ["homes too dear (housing shortage)", "zone more homes, or zone them denser"],
+	"power": ["homes without power", "build another power plant, or link the homes to one"],
+	"water": ["homes without water", "build a water pump or tower"],
+}
+# The parts businesses weigh too. The rest (jobs, housing, power and water at
+# home) only residents feel, so they don't put shops and industry off.
+const BUSINESS_PARTS: Array[String] = ["taxes", "services", "leisure", "rubbish"]
 enum Service { POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as the service tiles
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # for the growth map
 
@@ -49,6 +63,14 @@ var water_used := 0
 var rubbish_made := 0                 # in residents' worth
 var rubbish_capacity := 0
 var leisure_appeal := 0.0             # extra appeal from leisure buildings and landmarks
+# How residents feel, 0 (furious) to 1 (delighted): the single summary of taxes,
+# services, leisure, rubbish, jobs, housing, power and water. It sets how many
+# people want to move in (see appeal()). Worked out again every month and
+# whenever taxes change, from the town itself, so it needs no saving.
+var happiness := 2.0 / 3.0
+# What happiness is made of, in appeal points: part name -> amount (below 0 = a
+# complaint). Names: taxes, services, leisure, rubbish, jobs, housing, power, water.
+var happiness_parts := {}
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
 # Negative means too many already.
@@ -242,10 +264,15 @@ func _zone_check(i: int) -> Array:
 		return [Growth.FULL, "fully built up"]
 	var next_stage: int = stage_at(i, lv + 1)
 	if demand_for(t) < step_size(i) * 0.5:
-		if appeal() < 0.5:
-			if rubbish_shortfall() > 0.3:
-				return [Growth.WAITING, "waiting, people won't move in: rubbish is piling up (build a landfill or recycling centre)"]
-			return [Growth.WAITING, "waiting, people won't move in: taxes are high for the services they get"]
+		# Too unhappy (or, for businesses, too put off) to come: say what's wrong.
+		var homes: bool = t == Tile.HOMES
+		if (appeal() if homes else business_appeal()) < 0.5:
+			var who := "people" if homes else "businesses"
+			var keys := complaint_keys(1, not homes)
+			if keys.is_empty():
+				return [Growth.WAITING, "waiting, %s won't move in" % who]
+			return [Growth.WAITING, "waiting, %s won't move in: %s (%s)" \
+				% [who, complaint_text(keys[0]), complaint_fix(keys[0])]]
 		match t:
 			Tile.HOMES:
 				return [Growth.WAITING, "waiting, the town needs more jobs first"]
@@ -1099,15 +1126,135 @@ func jobs() -> int:
 
 
 func appeal() -> float:
-	# How keen people and businesses are to come here (1 = normal). Low taxes and
-	# good services raise it. High taxes lower it, but much less when people can
-	# see them paying for good services. Only high taxes AND poor services drive
-	# people away (below 0).
+	# How keen people are to move here (1 = normal, below 0 = they leave). It is
+	# just happiness on another scale: 0% happy = -1, 33% = 0, 67% = 1, 100% = 2.
+	return happiness * 3.0 - 1.0
+
+
+func business_appeal() -> float:
+	# How keen shops and industry are to come here, on the same scale: the parts
+	# of happiness businesses care about too (taxes, services, leisure, rubbish).
+	return clampf(1.0 + _sum_parts(BUSINESS_PARTS), -1.0, 2.0)
+
+
+func _measure_happiness() -> void:
+	# Add up everything residents care about, each in appeal points (0 = no effect).
+	# (Needs services, rubbish and leisure measured first.)
+	_update_water()                   # (and power) so cut-off homes are up to date
+	var parts := {}
+	# Taxes: low taxes please people. High taxes upset them, but much less when
+	# they can see them paying for good services. Only high taxes AND poor
+	# services drive people away.
 	var pain := (tax_rate - Settings.DEFAULT_TAX_RATE) * Settings.TAX_DEMAND_EFFECT
 	if pain > 0.0:
 		pain *= lerpf(Settings.TAX_TOLERANCE_POOR, Settings.TAX_TOLERANCE_GOOD, service_score)
-	return clampf(1.0 - pain + services_feeling() + leisure_appeal
-		- rubbish_shortfall() * Settings.RUBBISH_EFFECT, -1.0, 2.0)
+	parts["taxes"] = -pain
+	parts["services"] = services_feeling()
+	parts["leisure"] = leisure_appeal
+	parts["rubbish"] = -rubbish_shortfall() * Settings.RUBBISH_EFFECT
+	# Jobs: a little unemployment is normal; more than that and people get fed up.
+	# (Spare jobs or jobless workers also pull people in or put them off directly,
+	# in _update_demand, so this mostly explains why.)
+	var out_of_work := 0.0
+	if population >= Settings.JOBS_START_POP:
+		out_of_work = maxf(unemployment() - Settings.JOBS_SLACK, 0.0)
+	parts["jobs"] = -out_of_work * Settings.UNEMPLOYMENT_EFFECT
+	# Housing: a shortage pushes prices up, and dear homes put people off coming.
+	parts["housing"] = -housing_shortage() * Settings.HOUSING_EFFECT
+	# Power and water: the share of residents whose homes are cut off.
+	var people := 0
+	var no_power := 0
+	var no_water := 0
+	for i in w * h:
+		if tiles[i] == Tile.HOMES and levels[i] > 0:
+			var n := units(i)
+			people += n
+			if powered[i] == 0:
+				no_power += n
+			elif stage(i) >= 2 and watered[i] == 0:   # villas manage without mains water
+				no_water += n
+	if people > 0:
+		parts["power"] = -float(no_power) / people * Settings.NO_POWER_EFFECT
+		parts["water"] = -float(no_water) / people * Settings.NO_WATER_EFFECT
+	else:
+		parts["power"] = 0.0
+		parts["water"] = 0.0
+	# Pollution can feed in here later as one more part, e.g.
+	#   parts["pollution"] = -(share of residents in polluted air) * Settings.POLLUTION_EFFECT
+	# plus a "pollution" entry in COMPLAINTS (and in BUSINESS_PARTS if firms mind it too).
+	happiness_parts = parts
+	happiness = (clampf(1.0 + _sum_parts(parts.keys()), -1.0, 2.0) + 1.0) / 3.0
+
+
+func _sum_parts(names: Array) -> float:
+	var total := 0.0
+	for key: String in names:
+		var v: float = happiness_parts.get(key, 0.0)
+		total += v
+	return total
+
+
+func unemployment() -> float:
+	# Share of workers without a job, 0 to 1.
+	var workers := population * Settings.WORKER_SHARE
+	if workers <= 0.0:
+		return 0.0
+	return clampf((workers - jobs()) / workers, 0.0, 1.0)
+
+
+func happiness_word() -> String:
+	# 50% is where people stop moving in; below 33% they start to leave.
+	if happiness >= 0.8:
+		return "delighted"
+	if happiness >= 0.6:
+		return "happy"
+	if happiness >= 0.5:
+		return "content"
+	if happiness >= 1.0 / 3.0:
+		return "unhappy, few want to move in"
+	return "angry, people are leaving"
+
+
+func complaint_keys(count: int = 2, business_only: bool = false) -> Array[String]:
+	# The biggest things dragging happiness down, worst first (part names, see
+	# COMPLAINTS). Only things that cost at least Settings.COMPLAINT_SIZE count.
+	var found: Array[String] = []
+	for key: String in happiness_parts:
+		if business_only and not BUSINESS_PARTS.has(key):
+			continue
+		var v: float = happiness_parts[key]
+		if v <= -Settings.COMPLAINT_SIZE and COMPLAINTS.has(key):
+			found.append(key)
+	found.sort_custom(func(a: String, b: String) -> bool:
+		return float(happiness_parts[a]) < float(happiness_parts[b]))
+	var top: Array[String] = []
+	for key: String in found:
+		if top.size() >= count:
+			break
+		top.append(key)
+	return top
+
+
+func unhappy_reasons(count: int = 2) -> Array[String]:
+	# The top complaints in plain words, worst first, e.g. ["not enough jobs"].
+	# Empty when nothing much is wrong.
+	var words: Array[String] = []
+	for key: String in complaint_keys(count):
+		words.append(complaint_text(key))
+	return words
+
+
+func complaint_text(key: String) -> String:
+	var entry: Array = COMPLAINTS.get(key, ["", ""])
+	var text: String = entry[0]
+	return text
+
+
+func complaint_fix(key: String) -> String:
+	# What the player can do about a complaint, in plain words.
+	var entry: Array = COMPLAINTS.get(key, ["", ""])
+	var text: String = entry[1]
+	return text
 
 
 func services_expected() -> float:
@@ -1143,11 +1290,12 @@ func _measure_services() -> void:
 
 func _update_demand() -> void:
 	_measure_services()
+	_measure_happiness()
 	var a := appeal()
 	var workers := population * Settings.WORKER_SHARE
 	var spare_jobs := jobs() - workers          # below 0 = people out of work
 	# Homes: people from the region who'd like to move here (more for a bigger,
-	# cheaper town), plus people coming for spare jobs (or put off by unemployment).
+	# happier town), plus people coming for spare jobs (or put off by unemployment).
 	var homes := (Settings.TOWN_PULL + population * Settings.REGION_GROWTH) * a \
 		+ spare_jobs * Settings.JOB_PULL
 	# Shops and offices follow residents; industry employs the workers they don't.
@@ -1159,8 +1307,9 @@ func _update_demand() -> void:
 	shop_target += population * visitors * stations
 	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
-	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, a)
-	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs + trade, industry_jobs, a)
+	var b := business_appeal()
+	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, b)
+	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs + trade, industry_jobs, b)
 
 
 func _business_demand(gap: float, jobs_now: int, a: float) -> float:
@@ -1173,8 +1322,10 @@ func _business_demand(gap: float, jobs_now: int, a: float) -> float:
 
 
 func tax_word() -> String:
-	# How the tax rate is going down, for the HUD.
-	var a := appeal()
+	# How the tax rate is going down, for the HUD. Only the town-wide things
+	# (taxes, services, leisure, rubbish), so jobs or power cuts don't show up as
+	# a tax problem; the happiness line covers those.
+	var a := business_appeal()
 	var high := tax_rate > Settings.DEFAULT_TAX_RATE + 0.005
 	if a >= 1.3:
 		return "attracting people"
