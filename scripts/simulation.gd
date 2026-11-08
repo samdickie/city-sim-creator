@@ -1187,10 +1187,29 @@ func tax_word() -> String:
 	return "people are leaving" if not high else "people are leaving (high taxes, poor services)"
 
 
+func services_built() -> int:
+	# How many police, fire, school and hospital buildings the town has.
+	var total := 0
+	for n in services:
+		total += int(n)
+	return total
+
+
+func services_needed() -> bool:
+	# The town is big enough for missing services to matter (fires, or police).
+	return population >= mini(Settings.FIRE_START_POP, Settings.POLICE_NEEDED_POP)
+
+
 func services_word() -> String:
-	var gap := service_score - services_expected()
-	if population < 300:
+	# Honest words first for the cases the cover % can't explain; otherwise how
+	# cover compares with what residents expect (the same gap services_feeling uses).
+	if services_built() == 0:
+		return "none yet" if services_needed() else "not needed yet"
+	if population == 0:
 		return "not needed yet"
+	if service_score < 0.005:
+		return "not reaching homes"
+	var gap := service_score - services_expected()
 	if gap >= 0.15:
 		return "excellent"
 	if gap >= 0.0:

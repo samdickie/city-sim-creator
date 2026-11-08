@@ -608,9 +608,15 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		rubbish_label.text += " (build a landfill or recycling)"
 	rubbish_label.add_theme_color_override("font_color", BAD if sim.rubbish_shortfall() > 0.3 else TEXT_DIM)
 	var service_word: String = sim.services_word()
-	services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
+	if service_word == "none yet":
+		services_label.text = "Services: none yet (build a police or fire station)"
+	elif service_word == "not needed yet":
+		services_label.text = "Services: not needed yet"
+	else:
+		services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
+	var services_bad: bool = service_word in ["poor", "none yet", "not reaching homes"]
 	services_label.add_theme_color_override("font_color",
-		BAD if service_word == "poor" else (GOOD if service_word == "excellent" else TEXT_DIM))
+		BAD if services_bad else (GOOD if service_word == "excellent" else TEXT_DIM))
 	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
 	tax_label.add_theme_color_override("font_color", BAD if sim.appeal() < 0.3 else TEXT)
 	demand_box.queue_redraw()
