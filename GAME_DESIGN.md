@@ -118,8 +118,17 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
 - Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
 - Every straight street gets trees on both sides (one kind per street, like an avenue), except beside industry and power plants. Gardens, tenement courts, landscaped courts and shop car parks get trees too.
-- Cars drive on the left along the roads, more as the population grows (purely visual).
+- Cars, buses and people fill the streets (see People and traffic).
 - A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. A "Day & night" button turns it off.
+
+## People and traffic
+- Cars, buses and people walking bring the streets to life. Looks only: they don't affect the simulation. T turns them off and on (`TRAFFIC_ON` in settings to start with them off).
+- Cars keep left and follow the road's own straight runs and bends, slowing for corners, junctions and dead ends (where they turn round), and queue behind the car in front. At a junction they pick a way at random, slightly preferring straight on. They tilt with the hills; after dark they have head and tail lights and a pool of light on the road ahead.
+- Red buses run on the roads within reach of a working bus depot (about one vehicle in twelve).
+- People walk along both pavements, a little apart, bobbing as they go.
+- How busy a street is depends on the plots beside it: one car per 200 residents and jobs, one walker per 40 (shops count three times, homes a quarter), capped per street. CBD streets have 1.5x the walkers. Night has 30% of the cars and 12% of the walkers. None until the town has people or jobs.
+- Only the streets round the camera are filled (cars up to 1.8 km away as you zoom out, people within 700 m); anyone who drives out of range reappears in view. At most 300 vehicles and 400 people; no people drawn beyond 1.1 km zoom and no cars beyond 3.5 km.
+- Drawn with six MultiMeshes (car bodies, cabins, lamps, light pools, people, heads) filled from one buffer each frame; with a crowd, each person moves every other frame. Code in `scripts/traffic.gd`; numbers in `scripts/settings.gd`.
 
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*

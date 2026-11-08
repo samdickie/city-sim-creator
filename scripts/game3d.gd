@@ -9,7 +9,7 @@ const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world3d.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
-const Cars = preload("res://scripts/cars.gd")
+const Traffic = preload("res://scripts/traffic.gd")
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
@@ -109,7 +109,7 @@ var sim := Simulation.new()
 var world := WorldView.new()
 var rig := CameraRig.new()
 var hud := Hud.new()
-var cars := Cars.new()
+var traffic := Traffic.new()
 var speed := 1
 var clock := 0.0
 var time_of_day := Settings.START_TIME_OF_DAY
@@ -136,7 +136,6 @@ func _ready() -> void:
 	# Tile numbers are shared by several scripts; make sure they all agree.
 	assert(Tile.keys() == Simulation.Tile.keys(), "game3d.gd Tile list differs from simulation.gd")
 	assert(Tile.keys() == WorldView.Tile.keys(), "world3d.gd Tile list differs from simulation.gd")
-	assert(Tile.keys() == Cars.Tile.keys(), "cars.gd Tile list differs from simulation.gd")
 	assert(Simulation.Growth.keys() == WorldView.Growth.keys(), "world3d.gd Growth list differs from simulation.gd")
 	_load_map()
 	_compute_slopes()
@@ -151,8 +150,9 @@ func _ready() -> void:
 	rig.target = Vector3(map_w * cell_size_m * 0.45, 0.0, map_h * cell_size_m * 0.5)
 	add_child(rig)
 
-	add_child(cars)
-	cars.setup(world, sim)
+	add_child(traffic)
+	traffic.setup(world, sim)
+	traffic.message.connect(hud.flash)
 
 	add_child(hud)
 	hud.build(BUILD_CATEGORIES, {
@@ -365,8 +365,7 @@ func _process(delta: float) -> void:
 		time_of_day = fmod(time_of_day + delta * speed * rate / Settings.DAY_SECONDS, 1.0)
 	world.set_time_of_day(time_of_day)
 	hud.set_clock(_clock_text())
-	cars.lights_on = world.night > 0.3
-	cars.update(delta * speed)
+	traffic.update(delta * speed, rig.target, rig.distance)
 	world.blink(fmod(Time.get_ticks_msec() / 1000.0, 1.0) < 0.7)
 
 	# The game clock: one simulation step per game month.
@@ -386,15 +385,12 @@ func _process(delta: float) -> void:
 					n, "building" if n == 1 else "buildings"])
 
 	# Redraw at most once a frame, however many tiles changed. Roads, power lines
-	# and traffic routes only change when the layout does.
+	# and woods only change when the layout does. (Traffic watches for itself.)
 	if _ground_dirty:
 		_ground_dirty = false
 		var layout_changed := sim.layout_version != _layout_seen
 		_layout_seen = sim.layout_version
 		world.refresh_ground(layout_changed)
-		if layout_changed:
-			cars.roads_changed()
-		_update_traffic()
 	if _buildings_dirty and not painting:
 		_buildings_dirty = false
 		world.refresh_buildings()
@@ -958,14 +954,6 @@ func _set_day_cycle(on: bool) -> void:
 		time_of_day = Settings.START_TIME_OF_DAY + 0.06   # late morning
 
 
-func _update_traffic() -> void:
-	# More people, more cars (but always a few once there are roads).
-	var wanted := sim.population / Settings.PEOPLE_PER_CAR
-	if sim.road_tiles > 0:
-		wanted = maxi(wanted, mini(10, sim.road_tiles))
-	cars.set_count(mini(wanted, Settings.MAX_CARS))
-
-
 func _clock_text() -> String:
 	var minutes := int(time_of_day * 24.0 * 60.0)
 	return "%02d:%02d" % [minutes / 60, minutes % 60]
@@ -1013,8 +1001,6 @@ func _load_game() -> void:
 	clock = 0.0
 	world.refresh_all()
 	_layout_seen = sim.layout_version
-	cars.roads_changed()
-	_update_traffic()
 	_refresh_hud()
 	hud.flash("City loaded.")
 
@@ -1025,8 +1011,6 @@ func _new_city() -> void:
 	clock = 0.0
 	world.refresh_all()
 	_layout_seen = sim.layout_version
-	cars.roads_changed()
-	_update_traffic()
 	_refresh_hud()
 	hud.flash("New city: the map is blank again.")
 
