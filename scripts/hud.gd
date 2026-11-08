@@ -5,7 +5,7 @@ extends CanvasLayer
 ##   Bottom left:   the Build menu (categories down the side, items with
 ##                  pictures, descriptions and prices) and the Build / Bulldoze buttons
 ##   Bottom centre: what's under the mouse, and messages
-##   Bottom right:  map overlays (land value, power, roads, growth) and their key
+##   Bottom right:  map overlays (land value, power, roads, growth, pollution...) and their key
 ## It only displays things and reports button presses; the game decides what they do.
 
 signal tool_chosen(tool_id: int)            # (the Bulldoze button)
@@ -29,7 +29,7 @@ const TEXT := Color(0.93, 0.95, 0.98)
 const TEXT_DIM := Color(0.66, 0.70, 0.76)
 const GOOD := Color(0.45, 0.88, 0.58)
 const BAD := Color(1.0, 0.45, 0.42)
-const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts"]
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts", "Pollution"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
 	"Which plots have electricity, and what carries it",
@@ -37,7 +37,8 @@ const OVERLAY_TIPS := ["The normal view",
 	"Why each zone is or isn't growing",
 	"How many of police, fire, schools and hospitals cover each area",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
-	"CBD (skyscrapers allowed) and conservation areas (low-rise only)"]
+	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
+	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks help"]
 
 var speed_buttons := {}
 var build_panel: PanelContainer
@@ -547,7 +548,7 @@ func _build_help(root: Control) -> void:
 		"Rotate and tilt: right-drag, or Q / E\n" +
 		"Zoom: pinch or scroll wheel\n" +
 		"Tools: keys 1-0, - and =     Pause: Space     Fast: F     Help: H\n" +
-		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services, water)\n" +
+		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services, water, pollution)\n" +
 		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
 		"They need a road and power. Bigger towns grow slowly without them; fires break out\n" +
 		"where there's no fire station. Funding (- / +) changes how far they reach.\n" +

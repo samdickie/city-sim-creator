@@ -1063,6 +1063,9 @@ func _tile_text(i: int) -> String:
 	var t := sim.tiles[i]
 	if sim.is_building(t):
 		var about: String = sim.info(t).get("about", "")
+		var reach := sim.pollution_reach_m(t, cell_size_m)
+		if reach > 0:
+			about += " (pollutes the air up to %d m away)" % reach
 		return "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
@@ -1073,6 +1076,8 @@ func _tile_text(i: int) -> String:
 	if not sim.is_zone(t):
 		if t == Tile.EMPTY and water[i] == 0:
 			var where := "" if sim.district[i] == 0 else ", %s" % sim.district_name(i).to_lower()
+			if sim.pollution_band(i) >= 2:
+				where += ", %s" % sim.pollution_word(i)
 			return "Open land (land value %s%s)" % [sim.land_value_word(i), where]
 		return TILE_NAMES[t]
 	var kind: String = TILE_NAMES[t]
@@ -1083,6 +1088,8 @@ func _tile_text(i: int) -> String:
 	text += "\nLand value %s   ·   %s" % [sim.land_value_word(i), _services_text(i)]
 	if sim.district[i] != 0:
 		text += "   ·   %s" % sim.district_name(i)
+	if t != Tile.INDUSTRY and sim.pollution_band(i) >= 2:
+		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text

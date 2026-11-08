@@ -73,7 +73,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Density, land value and prices
 - Plots grow freely up to stage 3 (tenements) whenever there's demand. Industry stops at 3.
 - When demand is more than those plots can still take, the town is "short of space": medium-density plots may rise to mansion flats, and high-density plots build upwards (stage 4/5/6 need land value 0.35/0.5/0.65).
-- Land value (0-1): base 0.3, up to +0.3 by the sea, plus parks and shops nearby; minus industry and power plants nearby.
+- Land value (0-1): base 0.3, up to +0.3 by the sea, plus parks and shops nearby; minus industry, power plants and pollution nearby.
 - Better land gets better buildings (glass on the best land) and pays more tax (0.6x to 1.4x).
 - Home prices = £160k x (0.5 + land value) x (1 + 0.8 x housing shortage).
 
@@ -117,9 +117,17 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A Services map view shows how many of the four cover each area.
 
 ## Map views (overlays)
-- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water. Each has a colour key.
+- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution. Each has a colour key.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
+
+## Pollution
+- A pollution map (0 clean to 1 heavy) is worked out every month and whenever the town changes; it isn't saved (loading works it out again).
+- Sources add up where they overlap, fading out with distance: industry 0.06 per stage (200 m), coal plant 1.2 (450 m), gas plant 0.5 (300 m), harbour 0.35 (250 m), landfill 0.12 per tile (200 m), recycling 0.08 (100 m). Nuclear, wind and solar are clean. Parks soak some up (golf half as much). The total is eased into 0-1, so a coal plant is "heavy" for about 200 m.
+- Effects: land value -0.2 in full pollution; homes grow up to 60% slower in polluted air (the hover text says so); the share of residents in polluted air (0.3 or more) costs up to -0.15 appeal. The old land value penalties of industry, power plants, landfill and the harbour were halved or so, as the smoke is now counted here.
+- Pollution map view: clean, a little, some, polluted, heavy (green to red). Hover text mentions pollution from "some" upwards, and polluting buildings say how far their pollution reaches.
+- Coal plant chimneys smoke (a few particle streams; looks only).
+- For a happiness score or advisors: `pollution_at(i)`, `pollution_band(i)`, `polluted_homes_share()`, `pollution_feeling()` (already in appeal), `air_word()` in `scripts/simulation.gd`. Numbers in the Pollution section of `scripts/settings.gd`.
 
 ## Look and feel
 - Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.

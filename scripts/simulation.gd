@@ -1,6 +1,6 @@
 extends RefCounted
-## The city's rules: road access, growth, demand, land value, density, prices,
-## taxes and upkeep.
+## The city's rules: road access, growth, demand, land value, pollution, density,
+## prices, taxes and upkeep.
 ## Knows nothing about drawing, so the visuals can change (2D to 3D)
 ## without touching any of this.
 
@@ -30,6 +30,7 @@ const COMPLAINTS := {
 	"housing": ["homes too dear (housing shortage)", "zone more homes, or zone them denser"],
 	"power": ["homes without power", "build another power plant, or link the homes to one"],
 	"water": ["homes without water", "build a water pump or tower"],
+	"pollution": ["polluted air near homes", "keep homes away from industry and coal, or plant parks between"],
 }
 # The parts businesses weigh too. The rest (jobs, housing, power and water at
 # home) only residents feel, so they don't put shops and industry off.
@@ -85,6 +86,8 @@ var land_value := PackedFloat32Array() # 0 (worst) to 1 (best) for every tile
 var shortage := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var average_home_price := 0
 var _sea_near := PackedFloat32Array() # 1 by the sea, fading to 0 inland
+var pollution := PackedFloat32Array() # 0 (clean air) to 1 (heavy) for every tile; worked out with land value
+var polluted_share := 0.0             # 0-1: share of residents living in polluted air
 var _value_dirty := true
 var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 = 100%
 var services := [0, 0, 0, 0]          # how many of each service the town has
@@ -124,6 +127,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	_wnet_id.resize(w * h)
 	_bus_cover.resize(w * h)
 	land_value.resize(w * h)
+	pollution.resize(w * h)
 	coverage.resize(w * h * 4)
 	_measure_sea()
 	reset()
@@ -290,12 +294,16 @@ func _zone_check(i: int) -> Array:
 		_update_land_value()
 		var needed: float = Settings.TALL_VALUE_NEEDED[next_stage]
 		if land_value[i] < needed:
-			return [Growth.WAITING, "land value too low to build taller (the sea, parks and shops nearby raise it; industry lowers it)"]
+			return [Growth.WAITING, "land value too low to build taller (the sea, parks and shops nearby raise it; industry and pollution lower it)"]
 		if density[i] < 2 and shortage_for(t) <= 0.0:
 			return [Growth.WAITING, "will build taller when the town runs short of space"]
 	var missing := _missing_services(i)
+	var smoky := t == Tile.HOMES and pollution_at(i) >= Settings.POLLUTED
 	if missing != "":
-		return [Growth.GROWING, "growing slowly, no %s nearby" % missing]
+		return [Growth.GROWING, "growing slowly, no %s nearby%s" % [missing,
+			", and the air is polluted" if smoky else ""]]
+	if smoky:
+		return [Growth.GROWING, "growing slowly, the air here is polluted"]
 	return [Growth.GROWING, "growing"]
 
 
@@ -383,6 +391,7 @@ func tick() -> void:
 	month += 1
 	_update_road_distance()
 	_power_dirty = true
+	_value_dirty = true               # land value and pollution are worked out afresh each month
 	recount()
 	_update_land_value()
 	_grow()
@@ -541,6 +550,7 @@ func recount() -> void:
 	_update_water()
 	_measure_rubbish()
 	_measure_leisure()
+	_measure_polluted_homes()
 	_update_demand()
 	_update_land_value()
 	var price_total := 0.0
@@ -917,9 +927,11 @@ func _update_coverage() -> void:
 
 func _service_factor(i: int) -> float:
 	# Bigger towns grow slowly where there's no police (homes and shops) or
-	# no hospital (homes).
+	# no hospital (homes). Homes also grow slowly in polluted air.
 	var f := 1.0
 	var t: int = tiles[i]
+	if t == Tile.HOMES:
+		f *= _pollution_factor(i)
 	if (t == Tile.HOMES or t == Tile.SHOPS) and population >= Settings.POLICE_NEEDED_POP \
 			and not covered(Service.POLICE, i):
 		f *= 0.5
@@ -1018,8 +1030,10 @@ func _update_land_value() -> void:
 	if not _value_dirty:
 		return
 	_value_dirty = false
+	_measure_pollution()
 	for i in w * h:
-		land_value[i] = Settings.BASE_LAND_VALUE + Settings.SEA_BONUS * _sea_near[i]
+		land_value[i] = Settings.BASE_LAND_VALUE + Settings.SEA_BONUS * _sea_near[i] \
+			- Settings.POLLUTION_VALUE_EFFECT * pollution[i]   # nobody wants to breathe smoke
 	for i in w * h:
 		var t := tiles[i]
 		match t:
@@ -1062,6 +1076,144 @@ func _spread(i: int, radius: int, amount: float) -> void:
 			var d := Vector2(x - cx, y - cy).length()
 			if d <= radius + 0.5:
 				land_value[y * w + x] += amount * (1.0 - d / (radius + 1.0))
+
+
+# ------------------------------------------------------------- pollution
+# Hooks for other features (a happiness score, advisors):
+#   pollution_at(i)          0 (clean air) to 1 (heavy) on map tile i (y * w + x)
+#   pollution_band(i)        0 clean, 1 a little, 2 some, 3 polluted, 4 heavy
+#   pollution_word(i)        that band in words, for hover text
+#   polluted_homes_share()   0-1: share of residents living in polluted air
+#   pollution_feeling()      appeal lost to pollution (already taken off in appeal(),
+#                            so a happiness score shouldn't take it off again)
+#   air_word()               the town's air overall, in words
+#   pollution_reach_m(t, m)  how far a building type's pollution reaches (0 = clean)
+# The map is worked out along with land value (whenever the town changes, and
+# every month), so it is never saved: loading a city works it out again.
+
+func pollution_at(i: int) -> float:
+	_update_land_value()
+	return pollution[i]
+
+
+func pollution_map() -> PackedFloat32Array:
+	_update_land_value()
+	return pollution
+
+
+func pollution_band(i: int) -> int:
+	var p := pollution_at(i)
+	var band := 0
+	for limit: float in Settings.POLLUTION_BANDS:
+		if p >= limit:
+			band += 1
+	return band
+
+
+func pollution_word(i: int) -> String:
+	const WORDS := ["clean air", "a little pollution", "some pollution", "polluted air", "heavy pollution"]
+	var word: String = WORDS[pollution_band(i)]
+	return word
+
+
+func polluted_homes_share() -> float:
+	return polluted_share
+
+
+func pollution_feeling() -> float:
+	# How much appeal the town loses because people live in polluted air.
+	return polluted_share * Settings.POLLUTION_APPEAL_EFFECT
+
+
+func air_word() -> String:
+	if polluted_share <= 0.0:
+		return "clean"
+	if polluted_share < 0.1:
+		return "mostly clean"
+	if polluted_share < 0.3:
+		return "smoky in places"
+	return "polluted"
+
+
+func pollution_reach_m(t: int, cell_m: float) -> int:
+	# How far a kind of building's pollution reaches, in metres (0 = it's clean).
+	if t == Tile.INDUSTRY:
+		return roundi(Settings.INDUSTRY_POLLUTION_SPREAD * cell_m)
+	if not BUILDING_KEYS.has(t):
+		return 0
+	var key: String = BUILDING_KEYS[t]
+	if not Settings.POLLUTION_SOURCES.has(key):
+		return 0
+	var src: Array = Settings.POLLUTION_SOURCES[key]
+	var spread: int = src[1]
+	return roundi(spread * cell_m)
+
+
+func _pollution_source(i: int) -> Vector2:
+	# x = how much this tile pollutes, y = how far it spreads in tiles (0, 0 = clean).
+	var t: int = tiles[i]
+	if t == Tile.INDUSTRY:
+		if levels[i] == 0:
+			return Vector2.ZERO
+		return Vector2(Settings.INDUSTRY_POLLUTION * stage(i), Settings.INDUSTRY_POLLUTION_SPREAD)
+	if not BUILDING_KEYS.has(t):
+		return Vector2.ZERO
+	var key: String = BUILDING_KEYS[t]
+	if not Settings.POLLUTION_SOURCES.has(key) or not building_working(i):
+		return Vector2.ZERO
+	var src: Array = Settings.POLLUTION_SOURCES[key]
+	var strength: float = src[0]
+	var spread: int = src[1]
+	return Vector2(strength, spread)
+
+
+func _measure_pollution() -> void:
+	# Each source adds its strength on its own tile, fading out at the edge of its
+	# spread; parks (and golf courses, half as much) soak a little up. Overlapping
+	# sources add up, then the total is eased into 0-1 (1 - e^-total), so a few
+	# sources together get close to 1 but never past it.
+	pollution.fill(0.0)
+	for i: int in w * h:
+		var t: int = tiles[i]
+		if t == Tile.PARK:
+			_spread_pollution(i, Settings.PARK_CLEANING_SPREAD, -Settings.PARK_CLEANING)
+		elif t == Tile.GOLF:
+			_spread_pollution(i, Settings.PARK_CLEANING_SPREAD, -Settings.PARK_CLEANING * 0.5)
+		else:
+			var src := _pollution_source(i)
+			if src.x > 0.0:
+				_spread_pollution(i, int(src.y), src.x)
+	for i: int in w * h:
+		pollution[i] = 1.0 - exp(-maxf(pollution[i], 0.0))
+
+
+func _spread_pollution(i: int, radius: int, amount: float) -> void:
+	var cx := i % w
+	var cy := i / w
+	for y: int in range(maxi(cy - radius, 0), mini(cy + radius, h - 1) + 1):
+		for x: int in range(maxi(cx - radius, 0), mini(cx + radius, w - 1) + 1):
+			var d := Vector2(x - cx, y - cy).length()
+			if d <= radius + 0.5:
+				pollution[y * w + x] += amount * (1.0 - d / (radius + 1.0))
+
+
+func _measure_polluted_homes() -> void:
+	# Share of residents who live where the air counts as polluted.
+	_update_land_value()
+	var people := 0
+	var polluted := 0
+	for i: int in w * h:
+		if tiles[i] == Tile.HOMES and levels[i] > 0:
+			var n := units(i)
+			people += n
+			if pollution[i] >= Settings.POLLUTED:
+				polluted += n
+	polluted_share = float(polluted) / people if people > 0 else 0.0
+
+
+func _pollution_factor(i: int) -> float:
+	# Homes grow more slowly in polluted air (1 = clean, full speed).
+	return 1.0 - Settings.POLLUTION_GROWTH_EFFECT * pollution_at(i)
 
 
 func power_map() -> PackedByteArray:
@@ -1179,9 +1331,8 @@ func _measure_happiness() -> void:
 	else:
 		parts["power"] = 0.0
 		parts["water"] = 0.0
-	# Pollution can feed in here later as one more part, e.g.
-	#   parts["pollution"] = -(share of residents in polluted air) * Settings.POLLUTION_EFFECT
-	# plus a "pollution" entry in COMPLAINTS (and in BUSINESS_PARTS if firms mind it too).
+	# Pollution: the share of residents breathing polluted air (see pollution_feeling).
+	parts["pollution"] = -pollution_feeling()
 	happiness_parts = parts
 	happiness = (clampf(1.0 + _sum_parts(parts.keys()), -1.0, 2.0) + 1.0) / 3.0
 
