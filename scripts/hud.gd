@@ -68,7 +68,8 @@ var help_panel: PanelContainer
 var demand_box: Control
 var overlay_buttons := {}
 var funding_row: HBoxContainer
-var utility_label: Label
+var utility_label: Label      # water
+var rubbish_label: Label
 var funding_label: Label
 var legend_box: VBoxContainer
 var confirm_new: ConfirmationDialog
@@ -175,6 +176,8 @@ func _build_top_right(root: Control) -> void:
 	box.add_child(services_label)
 	utility_label = _label("", 14, TEXT_DIM)
 	box.add_child(utility_label)
+	rubbish_label = _label("", 14, TEXT_DIM)
+	box.add_child(rubbish_label)
 	growth_label = _label("", 14, TEXT_DIM)
 	box.add_child(growth_label)
 	box.add_child(_divider())
@@ -404,12 +407,15 @@ func _show_category(cat: String) -> void:
 
 
 func set_selected(id: String) -> void:
-	# Highlight the item being built, opening its category if it's hidden.
+	# Highlight the item being built. Only when the choice changes (a key, or the
+	# Bulldoze button) does the menu jump to its category: the game refreshes this
+	# every month, and that mustn't pull you away from a category you're browsing.
+	var changed := id != _selected_id
 	_selected_id = id
 	for k in _rows:
 		(_rows[k]["button"] as Button).set_pressed_no_signal(k == id)
 	bulldoze_button.set_pressed_no_signal(id == "bulldoze")
-	if _rows.has(id):
+	if changed and _rows.has(id):
 		var r: Dictionary = _rows[id]
 		if _category != "all" and r["cat"] != _category:
 			_show_category(r["cat"])
@@ -593,8 +599,14 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
 	var water_text := "no water supply yet" if sim.water_supply == 0 \
 		else "%d of %d used" % [sim.water_used, sim.water_supply]
-	utility_label.text = "Water %s   ·   rubbish %s" % [water_text, sim.rubbish_word()]
-	utility_label.add_theme_color_override("font_color", BAD if sim.rubbish_shortfall() > 0.3 else TEXT_DIM)
+	# Water and rubbish on their own lines, so each is only red when it's the problem.
+	utility_label.text = "Water %s" % water_text
+	var dry: bool = (sim.water_supply == 0 and sim.population > 0) or sim.water_used > sim.water_supply * 0.9
+	utility_label.add_theme_color_override("font_color", BAD if dry else TEXT_DIM)
+	rubbish_label.text = "Rubbish: %s" % sim.rubbish_word()
+	if sim.rubbish_shortfall() > 0.3:
+		rubbish_label.text += " (build a landfill or recycling)"
+	rubbish_label.add_theme_color_override("font_color", BAD if sim.rubbish_shortfall() > 0.3 else TEXT_DIM)
 	var service_word: String = sim.services_word()
 	services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
 	services_label.add_theme_color_override("font_color",
