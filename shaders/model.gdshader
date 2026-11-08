@@ -2,7 +2,8 @@
 // gets this shader with its own "part": stone walls, slate roof, glass, painted
 // frames, doors and shopfronts, metal, chimney pots and so on.
 // Per building (from the MultiMesh):
-//   COLOR            wall colour (or, with a map overlay on, the plot's overlay colour)
+//   COLOR            rgb = wall colour (or, with a map overlay on, the plot's overlay colour);
+//                    a below 0.75 = abandoned (grimy walls, boarded windows, no lights)
 //   INSTANCE_CUSTOM  rgb = roof colour (or, on flat-roofed buildings, an accent colour:
 //                    fire station doors, the hospital cross), a = a random number (door and shopfront colours,
 //                    which windows are lit at night)
@@ -25,6 +26,7 @@ varying vec3 world_normal;
 varying vec3 tint;
 varying vec4 extra;
 varying float height_up;
+varying float derelict;        // 1 = an abandoned building
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -49,6 +51,7 @@ void vertex() {
 	tint = COLOR.rgb;
 	extra = INSTANCE_CUSTOM;
 	height_up = VERTEX.y;
+	derelict = COLOR.a < 0.75 ? 1.0 : 0.0;
 }
 
 void fragment() {
@@ -124,6 +127,28 @@ void fragment() {
 	} else if (part == 13) {
 		c = extra.rgb;                    // painted in the building's second colour
 		rough = 0.4;
+	}
+	if (derelict > 0.5 && !overlay_on) {
+		// Abandoned: faded and grimy, streaks running down the walls, moss on the
+		// roof, windows and doors boarded up, and no lights at night.
+		float grey = dot(c, vec3(0.3, 0.59, 0.11));
+		float along = abs(world_normal.x) > 0.5 ? world_pos.z : world_pos.x;
+		float streak = hash(vec2(floor(along * 1.7), r * 31.0));
+		c = mix(c, vec3(grey) * vec3(0.95, 0.92, 0.85), 0.6) * mix(0.6, 0.88, streak);
+		if (part == 1 || part == 12) {
+			float moss = hash(floor(world_pos.xz / 1.3));
+			c = mix(c, vec3(0.06, 0.09, 0.04), step(0.7, moss) * 0.6);
+		}
+		if (part == 2 || part == 4 || part == 7) {
+			// Weathered plywood over windows, doors and shopfronts; the odd pane just broken.
+			vec3 pane = floor(world_pos / vec3(1.6, 2.9, 1.6));
+			float board = hash(pane.xz + vec2(pane.y * 3.3, r * 17.0));
+			bool broken = part == 2 && board >= 0.8;
+			c = broken ? vec3(0.02, 0.02, 0.025) : vec3(0.24, 0.18, 0.11) * (0.8 + 0.3 * hash(pane.zx + 1.7));
+		}
+		glow = vec3(0.0);
+		metal *= 0.3;
+		rough = max(rough, 0.7);
 	}
 	if (overlay_on) {
 		// Map overlay: the plot's colour dominates.

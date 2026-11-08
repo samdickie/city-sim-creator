@@ -21,7 +21,7 @@ const BUILDING_KEYS := {
 }
 const LAST_TILE := Tile.HARBOUR
 enum Service { POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as the service tiles
-enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL }   # for the growth map
+enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL, ABANDONED }   # for the growth map
 
 # --- The city ---
 var w := 0
@@ -31,6 +31,8 @@ var tiles := PackedByteArray()        # Tile enum per map tile
 var levels := PackedByteArray()       # zones: 0 = empty plot, then 1 up to the density's maximum
 var density := PackedByteArray()      # zones: 0 = low, 1 = medium, 2 = high
 var district := PackedByteArray()     # any tile: 0 = normal, 1 = conservation area, 2 = CBD
+var decline := PackedByteArray()      # zones: months in decline (see Settings.ABANDON_MONTHS)
+var abandoned := PackedByteArray()    # zones: 1 = the building stands empty (no people, jobs or tax)
 var money := 0
 var month := 0                        # months since the city was founded
 var tax_rate := Settings.DEFAULT_TAX_RATE
@@ -56,7 +58,10 @@ var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var last_income := 0
 var last_upkeep := 0
 var grew := PackedInt32Array()        # plots that grew last month
-var shrank := PackedInt32Array()      # plots that shrank last month
+var shrank := PackedInt32Array()      # plots that shrank last month (and any abandoned)
+var abandoned_now := PackedInt32Array() # plots abandoned last month (also in shrank)
+var abandoned_count := 0              # abandoned buildings in town
+var run_down_count := 0               # built plots in decline long enough to be at risk
 var land_value := PackedFloat32Array() # 0 (worst) to 1 (best) for every tile
 # How short of space each zone type is: 0 = plenty of low-rise room left,
 # 1 = demand well beyond what low-rise plots can take (so plots build upwards).
@@ -95,6 +100,8 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	levels.resize(w * h)
 	density.resize(w * h)
 	district.resize(w * h)
+	decline.resize(w * h)
+	abandoned.resize(w * h)
 	_transit.resize(w * h)
 	powered.resize(w * h)
 	_net_id.resize(w * h)
@@ -112,6 +119,8 @@ func reset() -> void:
 	levels.fill(0)
 	density.fill(1)
 	district.fill(0)
+	decline.fill(0)
+	abandoned.fill(0)
 	money = Settings.START_MONEY
 	month = 0
 	tax_rate = Settings.DEFAULT_TAX_RATE
@@ -119,6 +128,7 @@ func reset() -> void:
 	last_upkeep = 0
 	grew.clear()
 	shrank.clear()
+	abandoned_now.clear()
 	burned.clear()
 	funding = [1.0, 1.0, 1.0, 1.0]
 	_roads_dirty = true
@@ -145,6 +155,8 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 		return
 	tiles[i] = t
 	levels[i] = 0                     # a new zone starts as an empty plot
+	decline[i] = 0
+	abandoned[i] = 0
 	density[i] = new_density if is_zone(t) else 1
 	_roads_dirty = true
 	_power_dirty = true
@@ -201,12 +213,39 @@ func zone_status(i: int) -> String:
 	# A plain-English reason for what a zone plot is doing.
 	var check := _zone_check(i)
 	var text: String = check[1]
+	if abandoned[i] == 0 and levels[i] > 0 and decline[i] >= Settings.ABANDON_WARN_MONTHS:
+		var why := _decline_reason(i, demand_for(tiles[i]))
+		if why != "":
+			text += "   ·   run down (%s), may be abandoned soon" % why
 	return text
+
+
+func is_abandoned(i: int) -> bool:
+	return abandoned[i] == 1
+
+
+func abandoned_reason(i: int) -> String:
+	# Why an abandoned building is still empty, in plain English.
+	_update_road_distance()
+	_update_coverage()
+	var t: int = tiles[i]
+	var why := _decline_reason(i, demand_for(t))
+	if why != "":
+		return why
+	if demand_for(t) < units_at_stage(t, stage(i)) * 0.5:
+		match t:
+			Tile.HOMES:
+				return "waiting for more people to want to move in"
+			Tile.SHOPS:
+				return "waiting for more customers (the town needs more residents)"
+			Tile.INDUSTRY:
+				return "waiting for more workers (the town needs more residents)"
+	return "it should be done up soon"
 
 
 func growth_state(i: int) -> int:
 	# For the growth map: GROWING, WAITING (demand, space or land value),
-	# BLOCKED (needs a road or power), FULL, or NONE for anything but zones.
+	# BLOCKED (needs a road or power), FULL, ABANDONED, or NONE for anything but zones.
 	if not is_zone(tiles[i]):
 		return Growth.NONE
 	var check := _zone_check(i)
@@ -217,6 +256,8 @@ func growth_state(i: int) -> int:
 func _zone_check(i: int) -> Array:
 	# [Growth state, reason in plain English] for a zone plot.
 	var t: int = tiles[i]
+	if abandoned[i] == 1:
+		return [Growth.ABANDONED, "abandoned, " + abandoned_reason(i)]
 	if not has_road_access(i):
 		return [Growth.BLOCKED, "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH]
 	_update_power()
@@ -334,6 +375,9 @@ func units_at_stage(t: int, s: int) -> int:
 
 
 func units(i: int) -> int:
+	# (An abandoned building houses nobody and has no jobs.)
+	if abandoned[i] == 1:
+		return 0
 	return units_at_stage(tiles[i], stage(i))
 
 
@@ -379,15 +423,25 @@ func _grow() -> void:
 
 	grew.clear()
 	shrank.clear()
+	abandoned_now.clear()
 	_update_road_distance()
 	_update_coverage()
 	_update_water()
 	var wanted: Dictionary = demand.duplicate()
 
+	# Count the months each built plot has been in decline (good months count it back down).
+	for i in zones:
+		if levels[i] == 0 or abandoned[i] == 1:
+			decline[i] = 0
+		elif _decline_reason(i, demand_for(tiles[i])) != "":
+			decline[i] = mini(decline[i] + 1, 255)
+		else:
+			decline[i] = maxi(decline[i] - Settings.DECLINE_RECOVERY, 0)
+
 	# How much more the plots that can grow freely (road + power) could still take.
 	var room: Dictionary = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	for i in zones:
-		if not _connected(i) or powered[i] == 0:
+		if not _connected(i) or powered[i] == 0 or abandoned[i] == 1:
 			continue
 		var t: int = tiles[i]
 		var free_top: int = mini(stage_at(i, max_level(i)), Settings.FREE_STAGE)
@@ -407,7 +461,7 @@ func _grow() -> void:
 	var tall_candidates: Array[int] = []
 	for i in zones:
 		if levels[i] < max_level(i) and stage_at(i, levels[i] + 1) > Settings.FREE_STAGE \
-				and _connected(i) and powered[i] == 1:
+				and _connected(i) and powered[i] == 1 and abandoned[i] == 0:
 			tall_candidates.append(i)
 	tall_candidates.sort_custom(func(a: int, b: int) -> bool: return land_value[a] > land_value[b])
 	var grown := {}
@@ -437,6 +491,26 @@ func _grow() -> void:
 			continue
 		var t: int = tiles[i]
 		var lv: int = levels[i]
+		if abandoned[i] == 1:
+			# Done up again once nothing's wrong and the town wants what it holds.
+			var need: int = units_at_stage(t, stage(i))
+			var wanting: float = wanted[t]
+			if _decline_reason(i, wanting) == "" and wanting >= need * 0.5 \
+					and _rng.randf() < Settings.REFURBISH_CHANCE:
+				abandoned[i] = 0
+				wanted[t] = wanting - need
+				_net_spare[_net_id[i]] -= stage(i)
+				grew.append(i)
+			continue
+		if lv > 0 and decline[i] >= Settings.ABANDON_MONTHS and _rng.randf() < Settings.ABANDON_CHANCE \
+				and _decline_reason(i, float(wanted[t])) != "":
+			# Too long in decline: everyone leaves and the building is boarded up.
+			wanted[t] = float(wanted[t]) + units(i)
+			abandoned[i] = 1
+			decline[i] = 0
+			shrank.append(i)
+			abandoned_now.append(i)
+			continue
 		var connected: bool = _connected(i)
 		var has_power: bool = powered[i] == 1
 		var spare: int = _net_spare[_net_id[i]] if _net_id[i] >= 0 else 0
@@ -452,11 +526,47 @@ func _grow() -> void:
 			wanted[t] = want - step
 			_net_spare[_net_id[i]] -= 1
 			grew.append(i)
-		elif lv > 0 and (not connected or not has_power or want < -down_step * 2.0) \
+		elif lv > 1 and (not connected or not has_power or want < -down_step * 2.0) \
 				and _rng.randf() < Settings.DECLINE_CHANCE * (1.6 - local_service(i)):
+			# (Decline stops at the last building: that one is abandoned instead.)
 			levels[i] = lv - 1
 			wanted[t] = want + down_step
 			shrank.append(i)
+
+
+func _decline_reason(i: int, want: float) -> String:
+	# Why a built plot is going downhill, in plain English ("" = it isn't).
+	# want = how much more of this zone the town wants. An abandoned building uses
+	# no power or water, so for one of those, check there's enough to reopen it.
+	# (Road distances and bus cover must be up to date.)
+	var t: int = tiles[i]
+	if not _connected(i):
+		return "no road nearby"
+	_update_water()
+	var s: int = stage(i)
+	if abandoned[i] == 1:
+		if _net_id[i] < 0 or _net_spare[_net_id[i]] < s:
+			return "no power"
+		if s >= 2 and (_wnet_id[i] < 0 or _wnet_spare[_wnet_id[i]] < s):
+			return "no water"
+	else:
+		if powered[i] == 0:
+			return "no power"
+		if s >= 2 and watered[i] == 0:
+			return "no water"
+	if appeal() < Settings.ABANDON_APPEAL:
+		if rubbish_shortfall() > 0.3:
+			return "the town is unpopular, rubbish is piling up"
+		return "the town is unpopular, taxes are high for the services"
+	if want < -_capacity_per_level(t) * Settings.ABANDON_OVERSUPPLY:
+		match t:
+			Tile.HOMES:
+				return "more homes than people want (the town needs more jobs)"
+			Tile.SHOPS:
+				return "too few customers for all the shops"
+			Tile.INDUSTRY:
+				return "too few workers for all the industry"
+	return ""
 
 
 func _collect_taxes() -> void:
@@ -486,9 +596,15 @@ func recount() -> void:
 	water_supply = 0
 	services = [0, 0, 0, 0]
 	counts = {}
+	abandoned_count = 0
+	run_down_count = 0
 	for i in w * h:
 		var t: int = tiles[i]
 		counts[t] = int(counts.get(t, 0)) + 1
+		if abandoned[i] == 1:
+			abandoned_count += 1
+		elif decline[i] >= Settings.ABANDON_WARN_MONTHS:
+			run_down_count += 1
 		power_used += power_use(i)
 		if is_service(t):
 			services[t - Tile.POLICE] += 1
@@ -537,7 +653,7 @@ func power_use(i: int) -> int:
 	# Zones use one unit per stage; services and other buildings a fixed amount.
 	var t: int = tiles[i]
 	if is_zone(t):
-		return stage(i)
+		return 0 if abandoned[i] == 1 else stage(i)
 	if is_service(t):
 		return Settings.SERVICE_POWER
 	if is_building(t):
@@ -744,7 +860,7 @@ func _update_water() -> void:
 				left += supplied
 		for i in members:
 			if is_zone(tiles[i]):
-				var use: int = stage(i)
+				var use: int = 0 if abandoned[i] == 1 else stage(i)
 				if use <= left:
 					left -= use
 					water_used += use
@@ -946,6 +1062,8 @@ func _fires() -> void:
 			risk *= 2.0
 		if _rng.randf() < risk:
 			levels[i] = 0
+			abandoned[i] = 0
+			decline[i] = 0
 			burned.append(i)
 			shrank.append(i)
 
@@ -995,6 +1113,11 @@ func _update_land_value() -> void:
 		land_value[i] = Settings.BASE_LAND_VALUE + Settings.SEA_BONUS * _sea_near[i]
 	for i in w * h:
 		var t := tiles[i]
+		if abandoned[i] == 1:
+			# Boarded-up buildings drag the area down a little (and no longer
+			# bring in shoppers or smoke).
+			_spread(i, Settings.ABANDONED_RADIUS, -Settings.ABANDONED_VALUE_PENALTY)
+			continue
 		match t:
 			Tile.PARK:
 				_spread(i, 3, Settings.PARK_BONUS)
@@ -1272,6 +1395,8 @@ func to_save() -> Dictionary:
 		"levels": Array(levels),
 		"density": Array(density),
 		"district": Array(district),
+		"decline": Array(decline),
+		"abandoned": Array(abandoned),
 		"funding": funding.duplicate(),
 	}
 
@@ -1307,6 +1432,18 @@ func from_save(data: Dictionary) -> void:
 					density[i] = 2                    # modern flats, towers: high
 				var start: int = Settings.DENSITY_START[density[i]]
 				levels[i] = maxi(old - start, 1) if old > 0 else 0
+	# Abandoned buildings and decline (saves from before them have none).
+	var saved_decline: Array = data.get("decline", [])
+	var saved_abandoned: Array = data.get("abandoned", [])
+	decline.fill(0)
+	abandoned.fill(0)
+	for i in mini(saved_decline.size(), decline.size()):
+		if is_zone(tiles[i]) and levels[i] > 0:
+			decline[i] = clampi(int(saved_decline[i]), 0, 255)
+	for i in mini(saved_abandoned.size(), abandoned.size()):
+		if is_zone(tiles[i]) and levels[i] > 0 and int(saved_abandoned[i]) == 1:
+			abandoned[i] = 1
+			decline[i] = 0
 	money = int(data.get("money", Settings.START_MONEY))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
@@ -1316,6 +1453,7 @@ func from_save(data: Dictionary) -> void:
 			if s < saved_funding.size() else 1.0
 	grew.clear()
 	shrank.clear()
+	abandoned_now.clear()
 	burned.clear()
 	_roads_dirty = true
 	_power_dirty = true

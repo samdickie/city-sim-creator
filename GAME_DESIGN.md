@@ -34,6 +34,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - People only leave when appeal drops below 0 (high taxes AND poor services), and the worst-served plots shrink first. A well-served town still grows at 20% tax. The HUD shows services (good, patchy, poor) and how taxes are going down. Roads cost £0.50 per tile per month.
 - Rules live in `scripts/simulation.gd`, with no drawing code.
 
+## Abandoned buildings
+- A built plot is "in decline" in any month it has no road nearby, no power, no water (anything past the first stage), far more of its kind than the town wants (homes with no jobs, shops with no customers, industry with no workers) or the town is very unpopular (appeal below 0.2: high taxes with poor services, or rubbish piling up).
+- Decline still trims plots back a level at a time, but never removes the last building. After 36 months in decline (each good month counts 3 back off) there's a 10% chance a month the building is abandoned: it houses nobody, has no jobs, pays no tax, uses no power or water and takes a little land value off the plots round about (0.04 on its own plot, fading out over 2 tiles).
+- Abandoned buildings look run down: faded, grimy walls, mossy roofs, boarded-up windows and doors, no lights at night and no cars outside. The hover text says "Abandoned — why"; plots in decline for 18 months or more warn that they're run down.
+- Once nothing's wrong and the town wants what it held again, it's done up (10% a month) and fills up again. Or bulldoze it.
+- The HUD shows how many are abandoned and run down, a message pops up when buildings are abandoned, and the Growth map shows them in brown. Rules and numbers are in `scripts/settings.gd`; it should be rare in a healthy town.
+
 ## Zoning density
 - Homes and shops are zoned low, medium or high density (Tab or the buttons above the toolbar). Industry has one density.
 - A plot's building stage = its level + the density's head start: 1 villas, 2 terraces, 3 tenements, 4 mansion flats, 5 modern flats, 6 towers (shops: corner shops up to an office tower).
@@ -112,7 +119,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Map views (overlays)
 - O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water. Each has a colour key.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
-- Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built.
+- Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built, brown abandoned.
 
 ## Look and feel
 - Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
