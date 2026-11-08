@@ -2713,6 +2713,13 @@ func _plan_plant(i: int, wall_list: Array, chimney_list: Array) -> void:
 		# Turbine hall, boiler house, precipitator, twin chimneys, coal stock and conveyor.
 		var site := _place(i, front, 0.0, 3.0, 44.0, 44.0)
 		_add_model("coal_plant", site, 44.0, 44.0, _model_total("coal_plant"), CONCRETE, PLANT_BLUE)
+		# Smoke from the model's two chimney tops (18.5 m to the side, 3.2 m and 13.5 m
+		# behind its centre, 66 m up; see coal_plant() in tools/make_buildings.py).
+		var site_pos: Vector3 = site["pos"]
+		var site_x: Vector3 = site["x"]
+		var site_z: Vector3 = site["z"]
+		for behind: float in [3.2, 13.5]:
+			_smoke_points.append(site_pos + site_x * 18.5 + site_z * behind + Vector3.UP * 66.0)
 		_plan_fence(i, front, depth)
 		return
 	var spot := _place(i, front, -6.0, 6.0, 30.0, 26.0)
