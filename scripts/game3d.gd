@@ -154,17 +154,15 @@ func _ready() -> void:
 	add_child(cars)
 	cars.setup(world, sim)
 
-	var tools := []
-	for id in TOOL_NAMES:
-		tools.append([id, TOOL_NAMES[id], TOOL_KEYS[id], _price_text(id), TOOL_COLOURS[id]])
 	add_child(hud)
-	hud.build(tools, {
+	hud.build(BUILD_CATEGORIES, {
 		Tile.HOMES: [TOOL_COLOURS[Tool.HOMES], "Homes"],
 		Tile.SHOPS: [TOOL_COLOURS[Tool.SHOPS], "Shops"],
 		Tile.INDUSTRY: [TOOL_COLOURS[Tool.INDUSTRY], "Industry"],
 	}, sim)
 	hud.tool_chosen.connect(_select_tool)
-	hud.density_chosen.connect(_set_density)
+	hud.build_item_chosen.connect(_choose_item)
+	hud.set_items(_menu_items())
 	hud.speed_chosen.connect(_set_speed)
 	hud.tax_changed.connect(_change_tax)
 	hud.new_city_pressed.connect(_new_city)
@@ -172,11 +170,9 @@ func _ready() -> void:
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 	hud.overlay_chosen.connect(_set_overlay)
-	hud.item_chosen.connect(_set_item)
 	hud.funding_changed.connect(_change_funding)
 
 	_select_tool(Tool.ROAD)
-	hud.set_density(current_density)
 	_set_overlay(WorldView.Overlay.NONE)
 	_set_speed(1)
 	_refresh_hud()
@@ -314,6 +310,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					_set_item((_item_index() + 1) % _picker_size())
 				else:
 					_set_density((current_density + 1) % 3)
+			KEY_M:
+				hud.toggle_build_menu()
 			KEY_ESCAPE:
 				_cancel_drag()
 			KEY_SPACE:
@@ -674,19 +672,6 @@ func _tool_cost(p: Vector2i) -> int:
 	return roundi(base * hill)
 
 
-func _price_text(tool_id: int) -> String:
-	if tool_id == Tool.DISTRICT:
-		return "free"
-	if GROUPS.has(tool_id):
-		var cheapest := 1 << 30
-		for t: int in GROUPS[tool_id]:
-			cheapest = mini(cheapest, _cost_of(t))
-		return "from " + Hud.money_text(cheapest)
-	if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
-		return "from " + Hud.money_text(Settings.HOMES_COSTS[0] if tool_id == Tool.HOMES else Settings.SHOPS_COSTS[0])
-	return Hud.money_text(_base_cost(tool_id))
-
-
 func _target_tile() -> int:
 	# The tile the current tool builds.
 	if GROUPS.has(current_tool):
@@ -750,38 +735,167 @@ func _set_item(index: int, announce: bool = true) -> void:
 		_update_info()
 
 
-func _show_group() -> void:
-	# The picker above the toolbar: each building with its price, or what it's waiting for.
-	if current_tool == Tool.DISTRICT:
-		var choices: Array = []
-		for n in DISTRICT_ORDER.size():
-			var d: int = DISTRICT_ORDER[n]
-			var label: String = "CBD" if d == 2 else ("Conservation" if d == 1 else "Normal")
-			choices.append([label, "free", DISTRICT_ABOUT[n], ""])
-		hud.show_group(choices, _item_index(), "")
-		return
-	if not GROUPS.has(current_tool):
-		hud.show_group([], 0, "")
-		return
+# ------------------------------------------------------------- build menu
+
+# Categories down the side of the Build menu: [id, name].
+const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"], ["power", "Power"],
+	["utilities", "Utilities"], ["services", "Services"], ["leisure", "Leisure"],
+	["transport", "Transport"], ["districts", "Districts"]]
+# One-line descriptions for the menu (the hover tooltip has the full story).
+const SHORT := {
+	"homes_0": "Villas and terraces", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
+	"shops_0": "Corner shops", "shops_1": "Parades, shops with flats", "shops_2": "Offices and shopping",
+	"industry": "Works and factories", "road": "Joined-up streets", "grid": "Streets in 100 m blocks",
+	"bulldoze": "Clear anything", "park": "Trees and open space",
+	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
+	"wind": "Clean power: drag a wind farm", "solar": "Quiet, clean power", "power_line": "Carries power",
+	"water_pump": "Water for 400 zone levels", "water_tower": "A small water supply",
+	"landfill": "Takes the town's rubbish", "recycling": "Takes rubbish, cleanly",
+	"police": "Safer streets", "fire": "Stops fires spreading", "school": "Families need one",
+	"hospital": "Care for a growing town", "golf": "Fairways, greens and bunkers",
+	"library": "Books, and better land", "museum": "A big draw for visitors", "stadium": "A football ground",
+	"marina": "Yachts by the shore", "town_hall": "The heart of the town",
+	"bus_depot": "Plots can sit further from roads", "station": "Visitors arrive by train",
+	"harbour": "Ships bring trade", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
+	"normal": "The usual height rules",
+}
+
+
+func _menu_entries() -> Array:
+	# Everything in the Build menu: [id, category, tool, density (-1 = none), choice (-1 = none), tile].
+	var out: Array = []
+	for d in 3:
+		out.append(["homes_%d" % d, "zones", Tool.HOMES, d, -1, Tile.HOMES])
+	for d in 3:
+		out.append(["shops_%d" % d, "zones", Tool.SHOPS, d, -1, Tile.SHOPS])
+	out.append(["industry", "zones", Tool.INDUSTRY, -1, -1, Tile.INDUSTRY])
+	out.append(["road", "roads", Tool.ROAD, -1, -1, Tile.ROAD])
+	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
+	out.append(["bulldoze", "roads", Tool.BULLDOZE, -1, -1, Tile.EMPTY])
+	var group_cats := {Tool.POWER: "power", Tool.UTILITY: "utilities", Tool.SERVICE: "services",
+		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport"}
+	for tool_id: int in group_cats:
+		if tool_id == Tool.LEISURE:
+			out.append(["park", "leisure", Tool.PARK, -1, -1, Tile.PARK])
+		var tiles_in_group: Array = GROUPS[tool_id]
+		for k in tiles_in_group.size():
+			var t: int = tiles_in_group[k]
+			out.append([_item_id(t), group_cats[tool_id], tool_id, -1, k, t])
+	for k in DISTRICT_ORDER.size():
+		out.append([["cbd", "conservation", "normal"][k], "districts", Tool.DISTRICT, -1, k, Tile.EMPTY])
+	return out
+
+
+func _item_id(t: int) -> String:
+	if sim.is_building(t):
+		var key: String = Simulation.BUILDING_KEYS[t]
+		return key
+	if sim.is_service(t):
+		var word: String = Settings.SERVICE_WORDS[t - Tile.POLICE]
+		return word
+	return "power_line" if t == Tile.POWER_LINE else ""
+
+
+func _menu_items() -> Array:
+	# What the Build menu shows: name, one-liner, price, and whether it's locked yet.
 	var items: Array = []
-	for t: int in GROUPS[current_tool]:
+	for e: Array in _menu_entries():
+		var id: String = e[0]
+		var tool_id: int = e[2]
+		var density: int = e[3]
+		var t: int = e[5]
+		var item_name := ""
 		var about := ""
-		var locked := ""
-		if sim.is_building(t):
-			about = sim.info(t).get("about", "")
-			var unlock: int = sim.info(t).get("unlock", 0)
-			if sim.population < unlock:
-				locked = "needs %s people" % Hud.thousands(unlock)
-		elif sim.is_service(t):
-			about = ["Police: in a bigger town, homes and shops without police grow at half speed",
-				"Fire: stops buildings nearby burning down",
-				"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
-				"Hospitals: in a bigger town, homes without one grow at half speed"][t - Tile.POLICE]
-		elif t == Tile.POWER_LINE:
-			about = "Carries power across open land (roads and buildings carry it too)"
-		items.append([_name_of(t), Hud.money_text(_cost_of(t)), about, locked])
-	var funding := _funding_text() if current_tool == Tool.SERVICE else ""
-	hud.show_group(items, _item_index(), funding)
+		var price := ""
+		var locked := false
+		if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
+			var level_word: String = ["Low-density", "Medium-density", "High-density"][density]
+			item_name = "%s %s" % [level_word, "homes" if tool_id == Tool.HOMES else "shops"]
+			about = ["Villas and corner shops; never more than 2 storeys",
+				"Terraces and tenements; mansion flats when space runs short",
+				"Flats, towers and offices, as high as land value allows (skyscrapers in a CBD)"][density]
+			var costs: Array = Settings.HOMES_COSTS if tool_id == Tool.HOMES else Settings.SHOPS_COSTS
+			price = Hud.money_text(costs[density])
+		elif tool_id == Tool.DISTRICT:
+			item_name = ["CBD", "Conservation area", "Normal district"][e[4]]
+			about = DISTRICT_ABOUT[e[4]]
+			price = "Free"
+		elif sim.is_building(t) or sim.is_service(t) or t == Tile.POWER_LINE:
+			item_name = _name_of(t)
+			price = Hud.money_text(_cost_of(t))
+			if sim.is_building(t):
+				about = sim.info(t).get("about", "")
+				var unlock: int = sim.info(t).get("unlock", 0)
+				if sim.population < unlock:
+					locked = true
+				if bool(sim.info(t).get("area", false)):
+					price += " / tile"
+			elif sim.is_service(t):
+				about = ["Police: in a bigger town, homes and shops without police grow at half speed",
+					"Fire: stops buildings nearby burning down",
+					"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
+					"Hospitals: in a bigger town, homes without one grow at half speed"][t - Tile.POLICE]
+			else:
+				about = "Carries power across open land (roads and buildings carry it too)"
+				price += " / tile"
+		else:
+			item_name = TOOL_NAMES[tool_id]
+			about = {Tool.INDUSTRY: "Jobs, but it lowers land value nearby",
+				Tool.ROAD: "Roads run straight and can turn one corner",
+				Tool.GRID: "Drag a box to lay streets every third tile",
+				Tool.BULLDOZE: "Clears anything you drag over",
+				Tool.PARK: "Keeps its trees and gains more; raises land value"}[tool_id]
+			price = Hud.money_text(_base_cost(tool_id))
+			if tool_id != Tool.INDUSTRY:
+				price += " / tile"
+		var desc: String = SHORT.get(id, "")
+		if locked:
+			desc = "Needs %s people" % Hud.thousands(int(sim.info(t).get("unlock", 0)))
+		items.append({"id": id, "cat": e[1], "name": item_name, "desc": desc, "about": about,
+			"price": price, "locked": locked})
+	return items
+
+
+func _current_item_id() -> String:
+	for e: Array in _menu_entries():
+		if e[2] != current_tool:
+			continue
+		if e[3] >= 0 and e[3] != current_density:
+			continue
+		if e[4] >= 0 and e[4] != _item_index():
+			continue
+		var id: String = e[0]
+		return id
+	return ""
+
+
+func _choose_item(id: String) -> void:
+	# Something picked in the Build menu: switch to its tool, density or building.
+	for e: Array in _menu_entries():
+		if e[0] != id:
+			continue
+		var tool_id: int = e[2]
+		if e[3] >= 0:
+			current_density = e[3]
+		if e[4] >= 0:
+			_choice[tool_id] = e[4]
+		_select_tool(tool_id)
+		hud.flash("%s: %s" % ["Painting" if tool_id == Tool.DISTRICT else "Building", _menu_name(id)])
+		return
+
+
+func _menu_name(id: String) -> String:
+	for item: Dictionary in _menu_items():
+		if item["id"] == id:
+			var n: String = item["name"]
+			return n.to_lower()
+	return id
+
+
+func _show_group() -> void:
+	# Keep the Build menu in step: the chosen item lit, and funding for a service.
+	hud.set_selected(_current_item_id())
+	hud.set_funding(_funding_text() if current_tool == Tool.SERVICE else "")
 
 
 func _change_funding(step: float) -> void:
@@ -809,7 +923,7 @@ func _has_density() -> bool:
 
 func _set_density(d: int) -> void:
 	current_density = d
-	hud.set_density(d)
+	_show_group()
 	var density_word: String = Settings.DENSITY_NAMES[d]
 	hud.flash("Zoning %s density" % density_word)
 	if painting:
@@ -818,8 +932,6 @@ func _set_density(d: int) -> void:
 
 func _select_tool(tool_id: int) -> void:
 	current_tool = tool_id
-	hud.set_tool(tool_id)
-	hud.show_density(_has_density())
 	_show_group()
 	# Painting districts is easier with the Districts view on.
 	if tool_id == Tool.DISTRICT and world.overlay == WorldView.Overlay.NONE:
@@ -925,8 +1037,8 @@ func _refresh_hud() -> void:
 	var net := sim.last_income - sim.last_upkeep
 	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
 		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
-	if _has_picker():
-		_show_group()                 # buildings unlock as the town grows
+	hud.set_items(_menu_items())      # prices and locks change as the town grows
+	_show_group()
 	_update_info()
 
 
