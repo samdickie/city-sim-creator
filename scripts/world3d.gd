@@ -203,19 +203,22 @@ var night := 0.0                       # 0 = full day, 1 = full night
 var _sky_energy := 1.0
 
 # Trees: natural woods on open land (hidden where you build), plus park and garden trees.
-var trunks := MultiMeshInstance3D.new()
-var crowns := MultiMeshInstance3D.new()        # broadleaf canopies
-var cones := MultiMeshInstance3D.new()         # conifers
+var woods := Node3D.new()                      # natural trees, in squares (TREE_CHUNK_TILES)
+var _wood_meshes: Array[Mesh] = []             # trunk, canopy blob, cone
+var _wood_mms: Array[MultiMesh] = []           # per square: trunks, canopies, cones
+var _wood_nodes: Array[MultiMeshInstance3D] = []
+var _tree_range := 0.0                         # how far away the woods are drawn
 var city_trunks := MultiMeshInstance3D.new()
 var city_crowns := MultiMeshInstance3D.new()
 var city_cones := MultiMeshInstance3D.new()
 # Natural trees are built once; building on a tile hides its trees. Each tree is
 # a trunk plus a few canopy pieces ("parts"), remembered so they can be hidden.
 var _part_xf: Array[Transform3D] = []
-var _part_mesh := PackedByteArray()            # 0 = trunk, 1 = canopy blob, 2 = cone
+var _part_mesh := PackedInt32Array()           # which MultiMesh in _wood_mms
 var _part_index := PackedInt32Array()          # instance number in that MultiMesh
 var _parts_in_tile := {}                       # tile index -> Array of part numbers
-enum TreeKind { BROADLEAF, BIRCH, COLUMNAR, PINE, SPRUCE, ORNAMENTAL, COPPER, GARDEN }
+enum TreeKind { BROADLEAF, BIRCH, COLUMNAR, PINE, SPRUCE, ORNAMENTAL, COPPER, GARDEN, GORSE }
+const GORSE_ALPHA := 0.5                       # canopy colour alpha that tells the foliage shader "gorse"
 const BARK := Color(0.30, 0.22, 0.15)
 const BIRCH_BARK := Color(0.80, 0.78, 0.72)
 const PINE_BARK := Color(0.45, 0.28, 0.17)
@@ -264,7 +267,7 @@ func setup(simulation, width: int, height: int, cell_metres: float,
 			heights[i] = minf(heights[i], SEA_FLOOR)
 
 	_build_environment()
-	_build_terrain()
+	_build_terrain(ground)
 	_build_sea()
 	_infill.resize(map_w * map_h)
 	_build_city_nodes()
@@ -386,38 +389,43 @@ func _build_environment() -> void:
 	env.fog_depth_end = _view_distance * HAZE_END
 
 
-func _build_terrain() -> void:
+# --- The ground. Heights are drawn from a smooth field four times finer than the
+# tiles, so the coast is a natural curve instead of 50 m steps. Gameplay is still
+# tile by tile: the middle of every land tile stays dry and the middle of every
+# sea tile stays wet, and height_at() reads the very same field the terrain is
+# drawn from, so buildings, roads and trees sit exactly on it. ---
+const TERRAIN_SUB := 4                  # height samples per tile each way (12.5 m apart)
+const TERRAIN_CHUNK := 64               # samples along one side of a terrain piece (800 m)
+const SHORE_LEVEL := 0.36               # where the smoothed land mask (0 = sea, 1 = land) meets the water
+const LAND_MARGIN := 0.14               # land tile middles stay at least this far above the shore level...
+const SEA_MARGIN := 0.08                # ...and sea tile middles this far below it
+const BEACH_RISE := 0.32                # mask units from the waterline up to the full land height
+const SEABED_FALL := 0.3                # mask units from the waterline down to the full sea depth
+const SEA_SHELF := 1.0                  # metres of water just off the beach
+const SEA_SLOPE := 1.5                  # the seabed gets this much deeper per tile out to sea
+const SEA_DEEP := 18.0                  # the deepest seabed drawn
+const LAND_MIN := 0.6                   # the lowest land, in metres above the sea
+const COAST_WIDE_TILES := 3             # "near the sea" (dunes, salt-bitten grass) reaches about this far inland
+var _fine := PackedFloat32Array()       # ground height at every sample
+var _fine_coast := PackedFloat32Array() # smoothed land mask at every sample
+var _fine_w := 0
+var _fine_h := 0
+var _fine_origin := Vector2.ZERO        # world position (x, z) of sample (0, 0)
+var _fine_step := 12.5
+var _land_info := PackedFloat32Array()  # per padded tile, 4 values: damp, woods, near the sea, spare
+var height_map_texture: ImageTexture    # R = height, G = land mask (the terrain shader's vertices)
+var land_map_image: Image               # per padded tile: R = damp hollows, G = woods, B = near the sea
+var land_map_texture: ImageTexture
+var built_image: Image                  # per map tile: R = built on (so fields and wild ground give way)
+var built_texture: ImageTexture
+var terrain_root := Node3D.new()
+var sea_material: ShaderMaterial
+
+
+func _build_terrain(ground: PackedFloat32Array) -> void:
+	_build_height_field(ground)
 	var gw := map_w + PADDING * 2
 	var gh := map_h + PADDING * 2
-	var verts := PackedVector3Array()
-	var normals := PackedVector3Array()
-	var indices := PackedInt32Array()
-	verts.resize(gw * gh)
-	normals.resize(gw * gh)
-	for gz in gh:
-		for gx in gw:
-			var tx := gx - PADDING
-			var tz := gz - PADDING
-			var h := _tile_height(tx, tz)
-			verts[gz * gw + gx] = Vector3((tx + 0.5) * cell, h, (tz + 0.5) * cell)
-			var dx := _tile_height(tx - 1, tz) - _tile_height(tx + 1, tz)
-			var dz := _tile_height(tx, tz - 1) - _tile_height(tx, tz + 1)
-			normals[gz * gw + gx] = Vector3(dx, 2.0 * cell, dz).normalized()
-	for gz in gh - 1:
-		for gx in gw - 1:
-			var a := gz * gw + gx
-			var b := a + 1
-			var c := a + gw
-			var d := c + 1
-			indices.append_array([a, b, c, b, d, c])
-
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_NORMAL] = normals
-	arrays[Mesh.ARRAY_INDEX] = indices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 
 	zone_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
 	zone_texture = ImageTexture.create_from_image(zone_image)
@@ -441,11 +449,520 @@ func _build_terrain() -> void:
 		terrain_material.set_shader_parameter("grass_tex", grass)
 		terrain_material.set_shader_parameter("sand_tex", sand)
 		terrain_material.set_shader_parameter("rock_tex", rock)
+		terrain_material.set_shader_parameter("sand_average", _average_colour(sand))
+		terrain_material.set_shader_parameter("rock_average", _average_colour(rock))
+	terrain_material.set_shader_parameter("height_map", height_map_texture)
+	terrain_material.set_shader_parameter("grid_origin", _fine_origin)
+	terrain_material.set_shader_parameter("grid_step", _fine_step)
+	terrain_material.set_shader_parameter("grid_size", Vector2i(_fine_w, _fine_h))
+	terrain_material.set_shader_parameter("shore_level", SHORE_LEVEL)
+	terrain_material.set_shader_parameter("land_map", land_map_texture)
+	terrain_material.set_shader_parameter("land_origin", Vector2(-PADDING, -PADDING) * cell)
+	terrain_material.set_shader_parameter("land_size", Vector2(gw, gh) * cell)
+	built_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_R8)
+	built_texture = ImageTexture.create_from_image(built_image)
+	terrain_material.set_shader_parameter("built_map", built_texture)
+	terrain_material.set_shader_parameter("noise_tex", _noise_texture())
+	_set_field_uniforms(terrain_material)
 
-	var terrain := MeshInstance3D.new()
-	terrain.mesh = mesh
-	terrain.material_override = terrain_material
-	add_child(terrain)
+	# The ground is drawn as square pieces sharing one flat grid mesh; the shader
+	# lifts each corner to its height, so building it is quick and pieces off
+	# screen are skipped.
+	add_child(terrain_root)
+	var grid := _grid_mesh(TERRAIN_CHUNK, _fine_step)
+	var span := TERRAIN_CHUNK * _fine_step
+	var across := ceili(float(_fine_w - 1) / TERRAIN_CHUNK)
+	var down := ceili(float(_fine_h - 1) / TERRAIN_CHUNK)
+	for cz in down:
+		for cx in across:
+			var lo := INF
+			var hi := -INF
+			for k in range(cz * TERRAIN_CHUNK, mini((cz + 1) * TERRAIN_CHUNK + 1, _fine_h)):
+				for j in range(cx * TERRAIN_CHUNK, mini((cx + 1) * TERRAIN_CHUNK + 1, _fine_w)):
+					var h: float = _fine[k * _fine_w + j]
+					lo = minf(lo, h)
+					hi = maxf(hi, h)
+			var piece := MeshInstance3D.new()
+			piece.mesh = grid
+			piece.material_override = terrain_material
+			piece.position = Vector3(_fine_origin.x + cx * span, 0.0, _fine_origin.y + cz * span)
+			piece.custom_aabb = AABB(Vector3(0.0, lo - 2.0, 0.0), Vector3(span, hi - lo + 4.0, span))
+			terrain_root.add_child(piece)
+	_build_far_land()
+
+
+func _build_height_field(ground: PackedFloat32Array) -> void:
+	# Works on the tiles plus the scenery beyond the map edge (the padding), then
+	# smooths up to the fine samples. Beyond the edge the coastline carries
+	# straight on and the hills are mirrored, so the land looks like it goes on.
+	var gw := map_w + PADDING * 2
+	var gh := map_h + PADDING * 2
+	var n := gw * gh
+	var land := PackedFloat32Array()       # 1 = land, 0 = sea
+	var lift := PackedFloat32Array()       # land height (carried a little out over the sea)
+	land.resize(n)
+	lift.resize(n)
+	for gz in gh:
+		for gx in gw:
+			var tx := clampi(gx - PADDING, 0, map_w - 1)
+			var tz := clampi(gz - PADDING, 0, map_h - 1)
+			var g := gz * gw + gx
+			land[g] = 0.0 if water[tz * map_w + tx] == 1 else 1.0
+			var mx := _mirror(gx - PADDING, map_w)
+			var mz := _mirror(gz - PADDING, map_h)
+			lift[g] = maxf(ground[mz * map_w + mx], LAND_MIN)
+	# Over the sea, the land height of the nearest shore (so beaches aren't dragged down).
+	var known := land.duplicate()
+	for _pass in 3:
+		var next := known.duplicate()
+		for gz in gh:
+			for gx in gw:
+				var g := gz * gw + gx
+				if known[g] > 0.5:
+					continue
+				var total := 0.0
+				var count := 0
+				for dz in range(-1, 2):
+					for dx in range(-1, 2):
+						var x := gx + dx
+						var z := gz + dz
+						if x < 0 or z < 0 or x >= gw or z >= gh or known[z * gw + x] < 0.5:
+							continue
+						total += lift[z * gw + x]
+						count += 1
+				if count > 0:
+					lift[g] = total / count
+					next[g] = 1.0
+		known = next
+	for g in n:
+		if known[g] < 0.5:
+			lift[g] = LAND_MIN
+	# Sea depth: shallow by the shore, deeper further out.
+	var reach := _distance_to(land, gw, gh, 1.0)
+	var deep := PackedFloat32Array()
+	deep.resize(n)
+	for g in n:
+		deep[g] = minf(SEA_SHELF + maxf(reach[g] - 1.0, 0.0) * SEA_SLOPE, SEA_DEEP)
+
+	var mask := _upsample(_blur3(land, gw, gh), gw, gh)
+	var heights_up := _upsample(lift, gw, gh)
+	var depth_up := _upsample(_blur3(deep, gw, gh), gw, gh)
+	_fine_w = gw * TERRAIN_SUB
+	_fine_h = gh * TERRAIN_SUB
+	_fine_step = cell / TERRAIN_SUB
+	# Image.resize puts sample j at tile (j + 0.5) / SUB - 0.5 (counting padded tiles).
+	var first := (0.5 / TERRAIN_SUB - 0.5 - PADDING + 0.5) * cell
+	_fine_origin = Vector2(first, first)
+
+	# Keep each tile's middle on the right side of the waterline: where smoothing
+	# has drowned a land tile's middle (or dried a sea tile's), push the mask
+	# back with a round bump, so the fix looks like a little headland or pool.
+	var half := TERRAIN_SUB / 2
+	for gz in gh:
+		for gx in gw:
+			var is_land := land[gz * gw + gx] > 0.5
+			var target := SHORE_LEVEL + LAND_MARGIN if is_land else SHORE_LEVEL - SEA_MARGIN
+			var j0 := gx * TERRAIN_SUB + half - 1
+			var k0 := gz * TERRAIN_SUB + half - 1
+			var worst := 0.0
+			for k: int in [k0, k0 + 1]:
+				for j: int in [j0, j0 + 1]:
+					var m: float = mask[k * _fine_w + j]
+					worst = maxf(worst, target - m) if is_land else minf(worst, target - m)
+			if worst == 0.0:
+				continue
+			for k in range(maxi(k0 - 2, 0), mini(k0 + 4, _fine_h)):
+				for j in range(maxi(j0 - 2, 0), mini(j0 + 4, _fine_w)):
+					var r := Vector2(j - j0 - 0.5, k - k0 - 0.5).length() / TERRAIN_SUB   # tiles from the middle
+					var s := k * _fine_w + j
+					var bumped: float = mask[s] + worst * (1.0 - smoothstep(0.2, 0.62, r))
+					mask[s] = maxf(mask[s], bumped) if is_land else minf(mask[s], bumped)
+
+	var count_fine := _fine_w * _fine_h
+	_fine.resize(count_fine)
+	_fine_coast.resize(count_fine)
+	var packed := PackedFloat32Array()
+	packed.resize(count_fine * 2)
+	for s in count_fine:
+		var m := clampf(mask[s], 0.0, 1.0)
+		var h := 0.0
+		if m >= SHORE_LEVEL:
+			var t := minf((m - SHORE_LEVEL) / BEACH_RISE, 1.0)
+			h = maxf(heights_up[s], LAND_MIN) * (1.0 - (1.0 - t) * (1.0 - t))
+		else:
+			var t := minf((SHORE_LEVEL - m) / SEABED_FALL, 1.0)
+			h = -maxf(depth_up[s], SEA_SHELF) * (1.0 - (1.0 - t) * (1.0 - t))
+		_fine[s] = h
+		_fine_coast[s] = m
+		packed[s * 2] = h
+		packed[s * 2 + 1] = m
+	var img := Image.create_from_data(_fine_w, _fine_h, false, Image.FORMAT_RGF, packed.to_byte_array())
+	height_map_texture = ImageTexture.create_from_image(img)
+
+	# Ground character per padded tile, for the shader and the woods.
+	var smooth := _blur3(_blur3(lift, gw, gh), gw, gh)
+	var wide := land
+	for _pass in COAST_WIDE_TILES:
+		wide = _blur3(wide, gw, gh)
+	_land_info.resize(n * 4)
+	land_map_image = Image.create_empty(gw, gh, false, Image.FORMAT_RGBA8)
+	for gz in gh:
+		for gx in gw:
+			var g := gz * gw + gx
+			var damp := clampf((smooth[g] - lift[g]) * 0.6, 0.0, 1.0) * land[g]
+			var seaward := clampf((1.0 - wide[g]) * 2.2, 0.0, 1.0) * land[g] if reach[g] < 0.5 else 1.0
+			_land_info[g * 4] = damp
+			_land_info[g * 4 + 2] = seaward
+	_plan_woods(gw, gh, lift, land)
+	for gz in gh:
+		for gx in gw:
+			var g := gz * gw + gx
+			land_map_image.set_pixel(gx, gz, Color(_land_info[g * 4], _land_info[g * 4 + 1],
+				_land_info[g * 4 + 2], _land_info[g * 4 + 3]))
+	land_map_texture = ImageTexture.create_from_image(land_map_image)
+
+
+func _noise_texture() -> ImageTexture:
+	# Four smooth, tiling noises in one texture (R, G, B, A) for the ground's
+	# natural variation. The shader samples it at several scales.
+	const SIZE := 256
+	var layers: Array[PackedByteArray] = []
+	for k in 4:
+		var noise := FastNoiseLite.new()
+		noise.seed = 4100 + k * 37
+		noise.frequency = 0.012 + k * 0.004
+		noise.fractal_octaves = 4
+		var layer := noise.get_seamless_image(SIZE, SIZE)
+		layer.convert(Image.FORMAT_L8)
+		layers.append(layer.get_data())
+	var data := PackedByteArray()
+	data.resize(SIZE * SIZE * 4)
+	for i in SIZE * SIZE:
+		for k in 4:
+			data[i * 4 + k] = layers[k][i]
+	var img := Image.create_from_data(SIZE, SIZE, false, Image.FORMAT_RGBA8, data)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+
+# --- Open country: a patchwork of fields with hedges, a few conifer plantations
+# on the hills, and natural woods. The shader draws the fields; the same sums
+# here plant the hedgerow trees and plantations, so they line up. ---
+const FIELD_ANGLE := 0.38               # radians the field pattern is turned
+const FIELD_ROW := 165.0                # metres between the long field boundaries
+const FIELD_COL := 225.0                # average field length
+const FIELD_JITTER := 0.55              # how unevenly the fields are cut (share of a length)
+const FIELD_WOBBLE := 9.0               # metres the boundaries meander
+const FIELD_SPLIT := 0.35               # chance a field is cut in two
+const FIELD_HEDGE := 0.72               # chance a boundary is a hedge (otherwise a fence)
+const PLANT_CHANCE := 0.06              # chance a field on high ground is a conifer plantation
+const PLANT_MIN_HEIGHT := 35.0          # metres
+const FARM_MAX_HEIGHT := 105.0          # rough grazing above this
+const HEDGE_TREE_GAP := 34.0            # average metres between trees in a hedge
+const WOOD_TREES := 9                   # trees per tile in the thickest woods
+const PLANT_TREES := 16                 # trees per tile in a plantation
+const TREE_CHUNK_TILES := 20            # woods are drawn in squares this many tiles across
+const TREE_RANGE := 3.0                 # woods drawn out to this many camera distances...
+const TREE_RANGE_MIN := 3200.0          # ...and at least this far (metres)
+
+
+func _set_field_uniforms(mat: ShaderMaterial) -> void:
+	mat.set_shader_parameter("field_angle", FIELD_ANGLE)
+	mat.set_shader_parameter("field_row", FIELD_ROW)
+	mat.set_shader_parameter("field_col", FIELD_COL)
+	mat.set_shader_parameter("field_jitter", FIELD_JITTER)
+	mat.set_shader_parameter("field_wobble", FIELD_WOBBLE)
+	mat.set_shader_parameter("field_split", FIELD_SPLIT)
+	mat.set_shader_parameter("field_hedge", FIELD_HEDGE)
+	mat.set_shader_parameter("plant_chance", PLANT_CHANCE)
+	mat.set_shader_parameter("plant_min_height", PLANT_MIN_HEIGHT)
+	mat.set_shader_parameter("farm_max_height", FARM_MAX_HEIGHT)
+
+
+func _field_rand(x: int, y: int, salt: int) -> float:
+	# The shader's integer hash (terrain.gdshader frand), in 32-bit sums.
+	var h := ((x * 73856093) ^ (y * 19349663) ^ (salt * 83492791)) & 0xFFFFFFFF
+	h ^= h >> 13
+	h = (h * 1274126177) & 0xFFFFFFFF
+	h ^= h >> 16
+	return float(h & 0xFFFF) / 65535.0
+
+
+func _row_line(r: int, u: float) -> float:
+	return r * FIELD_ROW + FIELD_WOBBLE * sin(u / 310.0 + TAU * _field_rand(r, 0, 1))
+
+
+func _col_line(c: int, r: int, v: float) -> float:
+	return (c + FIELD_JITTER * (_field_rand(c, r, 2) - 0.5) + _field_rand(r, 0, 3)) * FIELD_COL \
+		+ FIELD_WOBBLE * sin(v / 270.0 + TAU * _field_rand(c, r, 4))
+
+
+func _field_at(p: Vector2) -> Dictionary:
+	# Which field a point is in (as the shader's field_at): its id, the field's
+	# middle, and how far the point is from the nearest hedge.
+	var ca := cos(FIELD_ANGLE)
+	var sa := sin(FIELD_ANGLE)
+	var u := p.x * ca + p.y * sa
+	var v := -p.x * sa + p.y * ca
+	var r := floori(v / FIELD_ROW)
+	if v < _row_line(r, u):
+		r -= 1
+	elif v >= _row_line(r + 1, u):
+		r += 1
+	var v0 := _row_line(r, u)
+	var v1 := _row_line(r + 1, u)
+	var c := floori(u / FIELD_COL - _field_rand(r, 0, 3))
+	if u < _col_line(c, r, v):
+		c -= 1
+	elif u >= _col_line(c + 1, r, v):
+		c += 1
+	var u0 := _col_line(c, r, v)
+	var u1 := _col_line(c + 1, r, v)
+	var sub := 0
+	var vs := -1e6
+	var split := _field_rand(c, r, 5) < FIELD_SPLIT
+	if split:
+		vs = lerpf(v0, v1, 0.35 + 0.3 * _field_rand(c, r, 6))
+		sub = 1 if v > vs else 0
+	var lo := vs if sub == 1 else v0
+	var hi := vs if (split and sub == 0) else v1
+	var hedge := 1e5
+	var seg := floori(u / 90.0)
+	if _field_rand(seg, r, 7) < FIELD_HEDGE:
+		hedge = minf(hedge, v - v0)
+	if _field_rand(seg, r + 1, 7) < FIELD_HEDGE:
+		hedge = minf(hedge, v1 - v)
+	if _field_rand(c, r, 8) < FIELD_HEDGE:
+		hedge = minf(hedge, u - u0)
+	if _field_rand(c + 1, r, 8) < FIELD_HEDGE:
+		hedge = minf(hedge, u1 - u)
+	if split and _field_rand(c, r, 9) < FIELD_HEDGE:
+		hedge = minf(hedge, absf(v - vs))
+	var mq := Vector2((u0 + u1) * 0.5, (lo + hi) * 0.5)
+	return {"id": Vector2i(c, r * 2 + sub), "hedge": hedge,
+		"mid": Vector2(mq.x * ca - mq.y * sa, mq.x * sa + mq.y * ca)}
+
+
+func _is_plantation(field: Dictionary) -> bool:
+	var id: Vector2i = field["id"]
+	var mid: Vector2 = field["mid"]
+	return _field_rand(id.x, id.y, 12) < PLANT_CHANCE and _sample_height(mid) > PLANT_MIN_HEIGHT
+
+
+func _sample_height(p: Vector2) -> float:
+	# The nearest height sample (as the shader's height_fetch).
+	var j := clampi(roundi((p.x - _fine_origin.x) / _fine_step), 0, _fine_w - 1)
+	var k := clampi(roundi((p.y - _fine_origin.y) / _fine_step), 0, _fine_h - 1)
+	return _fine[k * _fine_w + j]
+
+
+func coast_at(wx: float, wz: float) -> float:
+	# The smoothed land mask at a point: 0 out at sea, SHORE_LEVEL at the waterline, 1 inland.
+	var j := clampi(roundi((wx - _fine_origin.x) / _fine_step), 0, _fine_w - 1)
+	var k := clampi(roundi((wz - _fine_origin.y) / _fine_step), 0, _fine_h - 1)
+	return _fine_coast[k * _fine_w + j]
+
+
+func _land_value(gx: int, gz: int, channel: int) -> float:
+	# One of the per-tile ground values (0 damp, 1 woods, 2 near the sea) on the padded grid.
+	var gw := map_w + PADDING * 2
+	var gh := map_h + PADDING * 2
+	return _land_info[(clampi(gz, 0, gh - 1) * gw + clampi(gx, 0, gw - 1)) * 4 + channel]
+
+
+func _plan_woods(gw: int, gh: int, lift: PackedFloat32Array, land: PackedFloat32Array) -> void:
+	# Natural woods: clumps from a noise, more likely on slopes and in gullies,
+	# never on the beach or right by the sea. Stored per padded tile (0-1).
+	var noise := FastNoiseLite.new()
+	noise.seed = 1977
+	noise.frequency = 0.045
+	noise.fractal_octaves = 3
+	for gz in gh:
+		for gx in gw:
+			var g := gz * gw + gx
+			if land[g] < 0.5:
+				continue
+			var steep := absf(lift[gz * gw + mini(gx + 1, gw - 1)] - lift[gz * gw + maxi(gx - 1, 0)]) \
+				+ absf(lift[mini(gz + 1, gh - 1) * gw + gx] - lift[maxi(gz - 1, 0) * gw + gx])
+			var raw := noise.get_noise_2d(gx - PADDING, gz - PADDING) + 0.012 * steep \
+				+ 0.25 * _land_info[g * 4] - 0.7 * _land_info[g * 4 + 2]
+			_land_info[g * 4 + 1] = smoothstep(0.24, 0.42, raw)
+
+
+const FAR_RINGS: Array[float] = [0.0, 30.0, 80.0, 160.0, 300.0, 550.0, 1000.0, 1800.0, 3200.0,
+	5500.0, 9000.0, 14000.0]      # metres beyond the detailed ground where the far land has a row
+const FAR_HILLS := 45.0           # how high the distant land rolls (metres)
+
+
+func _build_far_land() -> void:
+	# Plain distant land and sea beyond the detailed ground, out into the haze,
+	# so the world doesn't stop at a ruler line: the coast carries straight on,
+	# the land rolls gently inland. Made of four strips and four corners, with a
+	# row of points matching the edge of the detailed ground exactly.
+	var lo := _fine_origin
+	var hi := _fine_origin + Vector2(_fine_w - 1, _fine_h - 1) * _fine_step
+	var noise := FastNoiseLite.new()
+	noise.seed = 77
+	noise.frequency = 0.00035
+	noise.fractal_octaves = 3
+	var along_x := PackedFloat32Array()
+	for j in _fine_w:
+		along_x.append(lo.x + j * _fine_step)
+	var along_z := PackedFloat32Array()
+	for k in _fine_h:
+		along_z.append(lo.y + k * _fine_step)
+	var out_lo := PackedFloat32Array()     # outwards from the low edge (descending coordinates)
+	var out_hi := PackedFloat32Array()
+	for r in range(FAR_RINGS.size() - 1, -1, -1):
+		out_lo.append(lo.x - FAR_RINGS[r])
+	for r in FAR_RINGS.size():
+		out_hi.append(hi.x + FAR_RINGS[r])
+	var out_lo_z := PackedFloat32Array()
+	var out_hi_z := PackedFloat32Array()
+	for r in range(FAR_RINGS.size() - 1, -1, -1):
+		out_lo_z.append(lo.y - FAR_RINGS[r])
+	for r in FAR_RINGS.size():
+		out_hi_z.append(hi.y + FAR_RINGS[r])
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var base := 0
+	# (xs, zs) pairs: west, east, north, south strips and the four corners.
+	for patch: Array in [[out_lo, along_z], [out_hi, along_z], [along_x, out_lo_z], [along_x, out_hi_z],
+			[out_lo, out_lo_z], [out_hi, out_lo_z], [out_lo, out_hi_z], [out_hi, out_hi_z]]:
+		var xs: PackedFloat32Array = patch[0]
+		var zs: PackedFloat32Array = patch[1]
+		for z: float in zs:
+			for x: float in xs:
+				var at := Vector2(x, z)
+				var edge := at.clamp(lo, hi)
+				var d := at.distance_to(edge)
+				var h := height_at(edge.x, edge.y)
+				var c := coast_at(edge.x, edge.y)
+				if c >= SHORE_LEVEL:
+					var far_h := 8.0 + FAR_HILLS * (noise.get_noise_2d(x, z) * 0.5 + 0.5)
+					h = maxf(lerpf(h, far_h, smoothstep(0.0, 4000.0, d)), minf(h, 0.5))
+				else:
+					h = lerpf(h, -SEA_DEEP, smoothstep(0.0, 1500.0, d))
+				st.set_uv(Vector2(1.0, c if d < 1.0 else (1.0 if c >= SHORE_LEVEL else 0.0)))
+				st.add_vertex(Vector3(x, h, z))
+		var w := xs.size()
+		for zi in zs.size() - 1:
+			for xi in w - 1:
+				var a := base + zi * w + xi
+				st.add_index(a)
+				st.add_index(a + 1)
+				st.add_index(a + w)
+				st.add_index(a + 1)
+				st.add_index(a + w + 1)
+				st.add_index(a + w)
+		base += w * zs.size()
+	st.generate_normals()
+	var far := MeshInstance3D.new()
+	far.mesh = st.commit()
+	far.material_override = terrain_material
+	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	terrain_root.add_child(far)
+
+
+func _mirror(t: int, size: int) -> int:
+	# A tile index reflected back into the map at its edges.
+	if t < 0:
+		t = -t - 1
+	elif t >= size:
+		t = 2 * size - t - 1
+	return clampi(t, 0, size - 1)
+
+
+func _blur3(src: PackedFloat32Array, w: int, h: int) -> PackedFloat32Array:
+	# A soft [1 2 1] blur both ways (edges repeat).
+	var tmp := PackedFloat32Array()
+	tmp.resize(w * h)
+	for y in h:
+		var row := y * w
+		for x in w:
+			tmp[row + x] = (src[row + maxi(x - 1, 0)] + 2.0 * src[row + x] + src[row + mini(x + 1, w - 1)]) * 0.25
+	var out := PackedFloat32Array()
+	out.resize(w * h)
+	for y in h:
+		var up := maxi(y - 1, 0) * w
+		var down := mini(y + 1, h - 1) * w
+		var row := y * w
+		for x in w:
+			out[row + x] = (tmp[up + x] + 2.0 * tmp[row + x] + tmp[down + x]) * 0.25
+	return out
+
+
+func _upsample(src: PackedFloat32Array, w: int, h: int) -> PackedFloat32Array:
+	# Smooth (cubic) enlargement to the fine samples.
+	var img := Image.create_from_data(w, h, false, Image.FORMAT_RF, src.to_byte_array())
+	img.resize(w * TERRAIN_SUB, h * TERRAIN_SUB, Image.INTERPOLATE_CUBIC)
+	return img.get_data().to_float32_array()
+
+
+func _distance_to(cells: PackedFloat32Array, w: int, h: int, value: float) -> PackedFloat32Array:
+	# Steps (in tiles) from each cell to the nearest cell holding `value`.
+	var dist := PackedFloat32Array()
+	dist.resize(w * h)
+	dist.fill(1e9)
+	var queue := PackedInt32Array()
+	for g in w * h:
+		if cells[g] == value:
+			dist[g] = 0.0
+			queue.append(g)
+	var head := 0
+	while head < queue.size():
+		var g := queue[head]
+		head += 1
+		var x := g % w
+		var y := g / w
+		for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var nx := x + d.x
+			var ny := y + d.y
+			if nx < 0 or ny < 0 or nx >= w or ny >= h:
+				continue
+			var ng := ny * w + nx
+			if dist[ng] > dist[g] + 1.0:
+				dist[ng] = dist[g] + 1.0
+				queue.append(ng)
+	return dist
+
+
+func _grid_mesh(quads: int, step: float) -> ArrayMesh:
+	# A flat square grid (the terrain shader raises it). Each square is split
+	# along the same diagonal height_at() assumes.
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var indices := PackedInt32Array()
+	var side := quads + 1
+	verts.resize(side * side)
+	normals.resize(side * side)
+	for z in side:
+		for x in side:
+			verts[z * side + x] = Vector3(x * step, 0.0, z * step)
+			normals[z * side + x] = Vector3.UP
+	indices.resize(quads * quads * 6)
+	var at := 0
+	for z in quads:
+		for x in quads:
+			var a := z * side + x
+			var b := a + 1
+			var c := a + side
+			var d := c + 1
+			indices[at] = a
+			indices[at + 1] = b
+			indices[at + 2] = c
+			indices[at + 3] = b
+			indices[at + 4] = d
+			indices[at + 5] = c
+			at += 6
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	arrays[Mesh.ARRAY_INDEX] = indices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 
 func _build_sea() -> void:
@@ -455,6 +972,7 @@ func _build_sea() -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = SEA_SHADER
 	plane.material = mat
+	sea_material = mat
 	var sea := MeshInstance3D.new()
 	sea.mesh = plane
 	sea.position = Vector3(extent.x / 2.0, 0.0, extent.y / 2.0)
@@ -693,6 +1211,19 @@ func refresh_ground(layout_changed: bool = true) -> void:
 		_build_roads(tiles)
 		_build_power_lines(tiles)
 		_update_natural_trees(tiles)
+		_update_built_map(tiles)
+
+
+func _update_built_map(tiles: PackedByteArray) -> void:
+	# Fields, woods' dark ground and the wild look give way where anything is
+	# built (power lines just cross the fields).
+	for y in map_h:
+		for x in map_w:
+			var i := y * map_w + x
+			var t := tiles[i]
+			var built := (t != Tile.EMPTY and t != Tile.POWER_LINE) or _infill[i] != 0
+			built_image.set_pixel(x, y, Color(1.0 if built else 0.0, 0.0, 0.0))
+	built_texture.update(built_image)
 
 
 func _build_alerts() -> void:
@@ -732,6 +1263,7 @@ func set_view_distance(distance: float) -> void:
 	# Haze only well beyond what you're looking at.
 	env.fog_depth_begin = distance * HAZE_START
 	env.fog_depth_end = distance * HAZE_END
+	_set_tree_range(maxf(TREE_RANGE_MIN, distance * TREE_RANGE))
 	# Keep the warning icons a readable size however far the camera is.
 	var size := clampf(distance * 0.022, 12.0, 120.0)
 	if absf(size - _alert_size) > _alert_size * 0.05:
@@ -873,8 +1405,9 @@ func set_overlay(kind: int) -> void:
 		mat.set_shader_parameter("overlay_on", on)
 	# Trees, paving and parked cars would hide the colours on the ground.
 	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
-			trunks, crowns, cones, city_trunks, city_crowns, city_cones]:
+			city_trunks, city_crowns, city_cones]:
 		node.visible = not on
+	woods.visible = not on
 	smoke.visible = not on
 	if on:
 		_paint_overlay()
@@ -1085,25 +1618,20 @@ func ground_point(tile: Vector2i) -> Vector3:
 
 # ------------------------------------------------------------------- height
 
-func _tile_height(tx: int, tz: int) -> float:
-	# Height of a tile centre; outside the map, the nearest edge tile.
-	var x := clampi(tx, 0, map_w - 1)
-	var z := clampi(tz, 0, map_h - 1)
-	return heights[z * map_w + x]
-
-
 func height_at(wx: float, wz: float) -> float:
-	# Smooth ground height at any point, matching the terrain mesh.
-	var gx := wx / cell - 0.5
-	var gz := wz / cell - 0.5
-	var x0 := floori(gx)
-	var z0 := floori(gz)
+	# Ground height at any point, exactly as the terrain is drawn (the shader
+	# lifts the same grid of samples; beyond the last sample it stays level).
+	var gx := clampf((wx - _fine_origin.x) / _fine_step, 0.0, _fine_w - 1.0)
+	var gz := clampf((wz - _fine_origin.y) / _fine_step, 0.0, _fine_h - 1.0)
+	var x0 := mini(floori(gx), _fine_w - 2)
+	var z0 := mini(floori(gz), _fine_h - 2)
 	var fx := gx - x0
 	var fz := gz - z0
-	var h00 := _tile_height(x0, z0)
-	var h10 := _tile_height(x0 + 1, z0)
-	var h01 := _tile_height(x0, z0 + 1)
-	var h11 := _tile_height(x0 + 1, z0 + 1)
+	var at := z0 * _fine_w + x0
+	var h00 := _fine[at]
+	var h10 := _fine[at + 1]
+	var h01 := _fine[at + _fine_w]
+	var h11 := _fine[at + _fine_w + 1]
 	# Same diagonal split as the mesh triangles, so things sit exactly on it.
 	if fx + fz <= 1.0:
 		return h00 + (h10 - h00) * fx + (h01 - h00) * fz
@@ -2911,63 +3439,297 @@ func _build_trees() -> void:
 	cone_mesh.height = 1.0
 	cone_mesh.radial_segments = 9
 	cone_mesh.rings = 2
-	_tree_multimesh(trunks, trunk_mesh, false, false)
-	_tree_multimesh(crowns, crown_mesh, true, true)
-	_tree_multimesh(cones, cone_mesh, true, true)
 	_tree_multimesh(city_trunks, trunk_mesh, false, false)
 	_tree_multimesh(city_crowns, crown_mesh, true, true)
 	_tree_multimesh(city_cones, cone_mesh, true, true)
+	_wood_meshes = [trunk_mesh, crown_mesh, cone_mesh]
 
-	# Woods where the noise is high, open fields where it's low, the odd lone tree.
-	var noise := FastNoiseLite.new()
-	noise.seed = 1977
-	noise.frequency = 0.045
-	noise.fractal_octaves = 3
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 2026
-	var lists: Array = [[], [], []]          # trunk, canopy and cone items
+	# The countryside's trees, tile by tile over the map and the land beyond it:
+	# thick woods (bigger, closer trees inside, thinning at the edges), conifer
+	# plantations, hedgerow trees along the field boundaries, gorse on rough
+	# ground and the dunes, and the odd lone tree. Grouped in squares so the far
+	# ones can be left out.
+	add_child(woods)
+	var gw := map_w + PADDING * 2
+	var gh := map_h + PADDING * 2
+	var per_row := ceili(float(gw) / TREE_CHUNK_TILES)
+	var chunk_count := per_row * ceili(float(gh) / TREE_CHUNK_TILES)
+	var lists: Array = []
+	for n in chunk_count:
+		lists.append([[], [], []])                 # trunk, canopy and cone items
 	_tile_has_trees.resize(map_w * map_h)
 	_tile_has_trees.fill(1)
-	for y in map_h:
-		for x in map_w:
-			var i := y * map_w + x
-			if water[i] == 1 or heights[i] < 3.0:
-				continue   # no trees on the sea or the beach
-			var woods := clampf((noise.get_noise_2d(x, y) - 0.08) * 2.4, 0.0, 1.0)
-			var count := int(woods * 7.0 + rng.randf() * 0.6)
-			if count == 0 and rng.randf() < 0.06:
-				count = 1
-			for k in count:
-				var at := Vector2((x + rng.randf_range(0.06, 0.94)) * cell, (y + rng.randf_range(0.06, 0.94)) * cell)
-				var kind := _wood_kind(woods, rng)
-				var tree := _tree(at, rng.randf_range(8.0, 17.0), kind, rng, 1.0, true)
-				var parts: Array = []
-				for mesh_id: int in 3:
-					var items: Array = tree[mesh_id]
-					var target: Array = lists[mesh_id]
-					for item: Array in items:
-						parts.append(_part_xf.size())
-						_part_xf.append(item[0])
-						_part_mesh.append(mesh_id)
-						_part_index.append(target.size())
-						target.append(item)
-				if not _parts_in_tile.has(i):
-					_parts_in_tile[i] = []
-				var in_tile: Array = _parts_in_tile[i]
-				in_tile.append_array(parts)
-	_fill(trunks.multimesh, lists[0], false)
-	_fill(crowns.multimesh, lists[1], false)
-	_fill(cones.multimesh, lists[2], false)
+	var clumps := FastNoiseLite.new()               # glades and thickets inside woods
+	clumps.seed = 31
+	clumps.frequency = 0.011
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 2026
+	for gz in gh:
+		for gx in gw:
+			var g := gz * gw + gx
+			var wood := _land_info[g * 4 + 1]
+			var seaward := _land_info[g * 4 + 2]
+			var corner := Vector2((gx - PADDING) * cell, (gz - PADDING) * cell)
+			if wood > 0.15:
+				# Thinner beyond the map edge, where they're only ever seen from afar.
+				var outside := maxi(maxi(PADDING - gx, gx - (map_w + PADDING - 1)), maxi(PADDING - gz, gz - (map_h + PADDING - 1)))
+				var thick := smoothstep(0.15, 0.75, wood) * (1.0 - 0.5 * smoothstep(4.0, 14.0, outside))
+				for s in 9:
+					var at := corner + Vector2((s % 3 + rng.randf_range(0.1, 0.9)) / 3.0,
+						(s / 3 + rng.randf_range(0.1, 0.9)) / 3.0) * cell
+					var clump := clumps.get_noise_2d(at.x, at.y) * 0.5 + 0.5
+					if rng.randf() > thick * (0.45 + 0.8 * clump) or coast_at(at.x, at.y) < SHORE_LEVEL + 0.4:
+						continue
+					var inner := wood > 0.85 and clump > 0.45
+					var kind := _wood_kind(wood, clump, rng)
+					var tall := rng.randf_range(12.0, 20.0) if inner else rng.randf_range(8.0, 15.0)
+					_add_wood_tree(lists, per_row, at, tall, kind, rng, 1.6 if inner else 1.15, inner)
+				continue
+			# Open land: gorse on rough ground and behind the beach, the odd lone tree.
+			var centre := corner + Vector2(cell, cell) * 0.5
+			var c := coast_at(centre.x, centre.y)
+			if c < SHORE_LEVEL + 0.4:
+				continue
+			var h := _sample_height(centre)
+			var steep := absf(_sample_height(centre + Vector2(cell, 0)) - _sample_height(centre - Vector2(cell, 0))) \
+				+ absf(_sample_height(centre + Vector2(0, cell)) - _sample_height(centre - Vector2(0, cell)))
+			var rough := maxf(maxf(smoothstep(0.25, 0.6, seaward), smoothstep(18.0, 40.0, steep)),
+				smoothstep(FARM_MAX_HEIGHT - 20.0, FARM_MAX_HEIGHT + 10.0, h))
+			var patch := clumps.get_noise_2d(centre.x * 1.7, centre.y * 1.7) * 0.5 + 0.5
+			if rough > 0.2 and patch > 0.5:
+				for k in rng.randi_range(1, 2 + int(rough * 4.0)):
+					var at := corner + Vector2(rng.randf(), rng.randf()) * cell
+					if coast_at(at.x, at.y) < SHORE_LEVEL + 0.3:
+						continue
+					_add_wood_tree(lists, per_row, at, rng.randf_range(1.2, 2.4), TreeKind.GORSE, rng, 1.0, false)
+			if rng.randf() < 0.012 + 0.05 * rough:
+				var at := corner + Vector2(rng.randf_range(0.1, 0.9), rng.randf_range(0.1, 0.9)) * cell
+				var kind := TreeKind.PINE if seaward > 0.3 else _wood_kind(0.2, 0.5, rng)
+				_add_wood_tree(lists, per_row, at, rng.randf_range(8.0, 15.0), kind, rng, 1.0, false)
+	_plant_plantations(lists, per_row, rng)
+	_plant_hedgerows(lists, per_row, rng)
+
+	var bark := StandardMaterial3D.new()
+	bark.vertex_color_use_as_albedo = true
+	bark.vertex_color_is_srgb = true
+	bark.roughness = 0.95
+	var leaves := ShaderMaterial.new()
+	leaves.shader = FOLIAGE_SHADER
+	for n in chunk_count:
+		var chunk: Array = lists[n]
+		for mesh_id: int in 3:
+			var items: Array = chunk[mesh_id]
+			var mm := _new_multimesh(_wood_meshes[mesh_id], false)
+			_fill(mm, items, false)
+			_wood_mms.append(mm)                     # number n * 3 + mesh_id
+			if items.is_empty():
+				continue
+			var node := MultiMeshInstance3D.new()
+			node.multimesh = mm
+			node.material_override = bark if mesh_id == 0 else leaves
+			node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if mesh_id == 0 \
+				else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			woods.add_child(node)
+			_wood_nodes.append(node)
+	_set_tree_range(TREE_RANGE_MIN)
 
 
-func _wood_kind(woods: float, rng: RandomNumberGenerator) -> int:
-	# Dense woods have spruce plantations; elsewhere mostly broadleaf, some birch and pine.
+func _add_wood_tree(lists: Array, per_row: int, at: Vector2, tall: float, kind: int,
+		rng: RandomNumberGenerator, spread: float, no_trunk: bool) -> void:
+	# A natural tree, filed under its square, and under its map tile (if it's on
+	# the map) so building there can hide it.
+	var gx := clampi(floori(at.x / cell) + PADDING, 0, map_w + PADDING * 2 - 1)
+	var gz := clampi(floori(at.y / cell) + PADDING, 0, map_h + PADDING * 2 - 1)
+	var chunk_n := (gz / TREE_CHUNK_TILES) * per_row + gx / TREE_CHUNK_TILES
+	var chunk: Array = lists[chunk_n]
+	var tree := _tree(at, tall, kind, rng, spread, true)
+	var tx := gx - PADDING
+	var tz := gz - PADDING
+	var tile := tz * map_w + tx if tx >= 0 and tz >= 0 and tx < map_w and tz < map_h else -1
+	var parts: Array = []
+	for mesh_id: int in 3:
+		if mesh_id == 0 and no_trunk:
+			continue    # deep in a wood the trunks can't be seen
+		var items: Array = tree[mesh_id]
+		var target: Array = chunk[mesh_id]
+		for item: Array in items:
+			if tile >= 0:
+				parts.append(_part_xf.size())
+				_part_xf.append(item[0])
+				_part_mesh.append(chunk_n * 3 + mesh_id)
+				_part_index.append(target.size())
+			target.append(item)
+	if tile >= 0:
+		if not _parts_in_tile.has(tile):
+			_parts_in_tile[tile] = []
+		var in_tile: Array = _parts_in_tile[tile]
+		in_tile.append_array(parts)
+
+
+func _field_frame_bounds() -> Rect2:
+	# The land with trees (map plus padding) in the fields' turned frame (u, v).
+	var ca := cos(FIELD_ANGLE)
+	var sa := sin(FIELD_ANGLE)
+	var lo := Vector2(-PADDING, -PADDING) * cell
+	var hi := Vector2(map_w + PADDING, map_h + PADDING) * cell
+	var box := Rect2()
+	var first := true
+	for p: Vector2 in [lo, Vector2(hi.x, lo.y), Vector2(lo.x, hi.y), hi]:
+		var q := Vector2(p.x * ca + p.y * sa, -p.x * sa + p.y * ca)
+		if first:
+			box = Rect2(q, Vector2.ZERO)
+			first = false
+		else:
+			box = box.expand(q)
+	return box
+
+
+func _from_field_frame(u: float, v: float) -> Vector2:
+	var ca := cos(FIELD_ANGLE)
+	var sa := sin(FIELD_ANGLE)
+	return Vector2(u * ca - v * sa, u * sa + v * ca)
+
+
+func _on_padded_land(p: Vector2) -> bool:
+	return p.x > -PADDING * cell and p.y > -PADDING * cell \
+		and p.x < (map_w + PADDING) * cell and p.y < (map_h + PADDING) * cell
+
+
+func _plant_plantations(lists: Array, per_row: int, rng: RandomNumberGenerator) -> int:
+	# Spruce in close rows over the fields chosen as plantations (as the shader
+	# picks them, so the dark needle ground lies under them).
+	var box := _field_frame_bounds()
+	var planted := 0
+	const GAP := 13.0
+	for r in range(floori(box.position.y / FIELD_ROW) - 1, floori(box.end.y / FIELD_ROW) + 2):
+		var off := _field_rand(r, 0, 3)
+		for c in range(floori(box.position.x / FIELD_COL - off) - 1, floori(box.end.x / FIELD_COL - off) + 2):
+			var split := _field_rand(c, r, 5) < FIELD_SPLIT
+			for sub in (2 if split else 1):
+				var id := Vector2i(c, r * 2 + sub)
+				if _field_rand(id.x, id.y, 12) >= PLANT_CHANCE:
+					continue
+				var u_lo := (c - 0.35 + off) * FIELD_COL - FIELD_WOBBLE
+				var u_hi := (c + 1.35 + off) * FIELD_COL + FIELD_WOBBLE
+				var v_lo := r * FIELD_ROW - FIELD_WOBBLE
+				var v_hi := (r + 1) * FIELD_ROW + FIELD_WOBBLE
+				var guess := _from_field_frame((u_lo + u_hi) * 0.5, (v_lo + v_hi) * 0.5)
+				if not _on_padded_land(guess) or _sample_height(guess) < PLANT_MIN_HEIGHT - 8.0:
+					continue
+				var u := u_lo
+				while u < u_hi:
+					var v := v_lo
+					while v < v_hi:
+						var at := _from_field_frame(u + rng.randf_range(-1.5, 1.5), v + rng.randf_range(-1.5, 1.5))
+						v += GAP
+						if not _on_padded_land(at):
+							continue
+						var field := _field_at(at)
+						var fid: Vector2i = field["id"]
+						if fid != id or not _is_plantation(field) or coast_at(at.x, at.y) < SHORE_LEVEL + 0.4:
+							continue
+						var edge := minf(1.0, float(field["hedge"]) / 8.0)
+						_add_wood_tree(lists, per_row, at, rng.randf_range(12.0, 17.0) * (0.85 + 0.15 * edge),
+							TreeKind.SPRUCE, rng, 1.0, edge > 0.9)
+						planted += 1
+					u += GAP
+	return planted
+
+
+func _hedge_spot_ok(p: Vector2) -> bool:
+	# Farmland, where the shader draws fields and hedges.
+	if not _on_padded_land(p) or coast_at(p.x, p.y) < 0.98:
+		return false
+	var gx := floori(p.x / cell) + PADDING
+	var gz := floori(p.y / cell) + PADDING
+	if _land_value(gx, gz, 1) > 0.12 or _land_value(gx, gz, 2) > 0.08:
+		return false
+	var h := _sample_height(p)
+	if h > FARM_MAX_HEIGHT - 5.0:
+		return false
+	var dx := _sample_height(p + Vector2(25.0, 0.0)) - _sample_height(p - Vector2(25.0, 0.0))
+	var dz := _sample_height(p + Vector2(0.0, 25.0)) - _sample_height(p - Vector2(0.0, 25.0))
+	return Vector2(dx, dz).length() < 30.0
+
+
+func _hedge_tree(lists: Array, per_row: int, at: Vector2, rng: RandomNumberGenerator) -> void:
+	# Mostly oak and ash grown up out of the hedge; some hawthorn.
+	if rng.randf() < 0.25:
+		_add_wood_tree(lists, per_row, at, rng.randf_range(4.5, 7.0), TreeKind.ORNAMENTAL, rng, 1.0, false)
+	else:
+		_add_wood_tree(lists, per_row, at, rng.randf_range(9.0, 15.0), TreeKind.BROADLEAF, rng, 1.0, false)
+
+
+func _plant_hedgerows(lists: Array, per_row: int, rng: RandomNumberGenerator) -> int:
+	# Trees standing in the hedges along the field boundaries.
+	var box := _field_frame_bounds()
+	var planted := 0
+	for r in range(floori(box.position.y / FIELD_ROW) - 1, floori(box.end.y / FIELD_ROW) + 2):
+		# The long boundaries (between rows of fields).
+		var u := box.position.x
+		while u < box.end.x:
+			u += HEDGE_TREE_GAP * rng.randf_range(0.3, 1.7)
+			if _field_rand(floori(u / 90.0), r, 7) >= FIELD_HEDGE:
+				continue
+			var at := _from_field_frame(u, _row_line(r, u) + rng.randf_range(-1.2, 1.2))
+			if _hedge_spot_ok(at):
+				_hedge_tree(lists, per_row, at, rng)
+				planted += 1
+		# The short boundaries (between the fields in this row), and splits.
+		var off := _field_rand(r, 0, 3)
+		for c in range(floori(box.position.x / FIELD_COL - off) - 1, floori(box.end.x / FIELD_COL - off) + 2):
+			var v_mid := (r + 0.5) * FIELD_ROW
+			var probe := _from_field_frame(_col_line(c, r, v_mid), v_mid)
+			if not _on_padded_land(probe):
+				continue
+			if _field_rand(c, r, 8) < FIELD_HEDGE:
+				var v := r * FIELD_ROW
+				while v < (r + 1) * FIELD_ROW:
+					v += HEDGE_TREE_GAP * rng.randf_range(0.3, 1.7)
+					var at := _from_field_frame(_col_line(c, r, v) + rng.randf_range(-1.2, 1.2), v)
+					var field := _field_at(at)
+					var fid: Vector2i = field["id"]
+					if fid.y / 2 == r and _hedge_spot_ok(at):
+						_hedge_tree(lists, per_row, at, rng)
+						planted += 1
+			if _field_rand(c, r, 5) < FIELD_SPLIT and _field_rand(c, r, 9) < FIELD_HEDGE:
+				var share := 0.35 + 0.3 * _field_rand(c, r, 6)
+				var u_split := _col_line(c, r, v_mid)
+				var u_end := _col_line(c + 1, r, v_mid)
+				while u_split < u_end:
+					u_split += HEDGE_TREE_GAP * rng.randf_range(0.3, 1.7)
+					var v := lerpf(_row_line(r, u_split), _row_line(r + 1, u_split), share)
+					var at := _from_field_frame(u_split, v + rng.randf_range(-1.2, 1.2))
+					var field := _field_at(at)
+					var fid: Vector2i = field["id"]
+					if fid.x == c and _hedge_spot_ok(at):
+						_hedge_tree(lists, per_row, at, rng)
+						planted += 1
+	return planted
+
+
+func _set_tree_range(distance: float) -> void:
+	# Leave out the woods beyond this distance (the ground under them is dark,
+	# so they're still there from afar).
+	if absf(distance - _tree_range) < _tree_range * 0.08:
+		return
+	_tree_range = distance
+	if terrain_material:
+		terrain_material.set_shader_parameter("tree_range", distance)
+	for node in _wood_nodes:
+		node.visibility_range_end = distance
+		node.visibility_range_end_margin = distance * 0.1
+
+
+func _wood_kind(woods: float, clump: float, rng: RandomNumberGenerator) -> int:
+	# Mostly broadleaf (oak, ash, sycamore) with birch at the edges; stands of
+	# Scots pine and spruce where the clump noise says so.
 	var r := rng.randf()
-	if woods > 0.55 and r < 0.35:
-		return TreeKind.SPRUCE
-	if r < 0.12:
+	if woods > 0.6 and clump > 0.62 and r < 0.7:
+		return TreeKind.SPRUCE if r < 0.45 else TreeKind.PINE
+	if r < 0.07:
 		return TreeKind.PINE
-	if r < 0.30:
+	if r < 0.14 + 0.2 * (1.0 - woods):
 		return TreeKind.BIRCH
 	return TreeKind.BROADLEAF
 
@@ -3069,12 +3831,23 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 		TreeKind.SPRUCE:
 			# Three stacked tiers, widest at the bottom.
 			trunk_h = tall * 0.25
-			var green := Color(0.10, 0.22, 0.14)
+			var green := Color(0.11, 0.24, 0.15)
 			for k in 3:
 				var w := tall * (0.42 - k * 0.1)
 				var tier_h := tall * (0.5 - k * 0.08)
 				tiers.append(_blob(spin, base + Vector3.UP * (tall * (0.12 + k * 0.24) + tier_h * 0.5),
 					Vector3(w, tier_h, w), _leaf_colour(green, rng)))
+		TreeKind.GORSE:
+			# A low, dense gorse bush (whin): dark spiny green, flecked yellow by
+			# the foliage shader. No trunk to speak of.
+			var green := Color(0.16, 0.24, 0.10)
+			for k in rng.randi_range(2, 3):
+				var off := Vector3(rng.randf_range(-1.0, 1.0), 0.0, rng.randf_range(-1.0, 1.0)) * tall * 0.6
+				var w := tall * rng.randf_range(1.1, 1.6)
+				var c := _leaf_colour(green, rng)
+				blobs.append(_blob(spin, base + off + Vector3.UP * tall * 0.4, Vector3(w, tall, w * 0.9),
+					Color(c.r, c.g, c.b, GORSE_ALPHA)))
+			return [[], blobs, []]
 		_:
 			# Broadleaf (oak, sycamore, lime), small ornamentals and copper beech:
 			# a main canopy with a few smaller blobs round it.
@@ -3104,7 +3877,6 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 
 func _update_natural_trees(tiles: PackedByteArray) -> void:
 	# Trees stay on open land and in parks; building anything else clears them.
-	var meshes: Array[MultiMesh] = [trunks.multimesh, crowns.multimesh, cones.multimesh]
 	for i in tiles.size():
 		var show := 1 if ((tiles[i] == Tile.EMPTY and _infill[i] == 0) or tiles[i] == Tile.PARK) else 0
 		if show == _tile_has_trees[i]:
@@ -3113,7 +3885,7 @@ func _update_natural_trees(tiles: PackedByteArray) -> void:
 		if not _parts_in_tile.has(i):
 			continue
 		for part: int in _parts_in_tile[i]:
-			var mm: MultiMesh = meshes[_part_mesh[part]]
+			var mm: MultiMesh = _wood_mms[_part_mesh[part]]
 			mm.set_instance_transform(_part_index[part], _part_xf[part] if show == 1 else _hidden)
 
 
@@ -3221,6 +3993,14 @@ func set_time_of_day(t: float) -> void:
 		sun.rotation_degrees = Vector3(MOON_ANGLE.x, _view_yaw(MOON_ANGLE.y, MOON_VIEW_ANGLE), 0.0)
 		sun.light_color = MOON_COLOUR
 		sun.light_energy = MOON_ENERGY
+
+	if sea_material:
+		sea_material.set_shader_parameter("day", 1.0 - night)
+	if terrain_material:
+		# Which way shadows fall across the ground (the shader draws the hedges' own).
+		var fall := -sun.basis.z
+		if Vector2(fall.x, fall.z).length() > 0.01:
+			terrain_material.set_shader_parameter("shadow_dir", Vector2(fall.x, fall.z).normalized())
 
 	env.ambient_light_energy = lerpf(AMBIENT_NIGHT, AMBIENT_DAY, daylight)
 	env.background_energy_multiplier = lerpf(SKY_ENERGY_NIGHT, 1.0, daylight)

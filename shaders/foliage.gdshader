@@ -7,6 +7,7 @@ render_mode diffuse_lambert_wrap, specular_schlick_ggx;
 varying vec3 world_pos;
 varying vec3 leaf_colour;
 varying float local_y;
+varying float gorse;                // 1 = a gorse bush (canopy colour alpha below 0.75): yellow flowers
 
 float hash3(vec3 p) {
 	return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
@@ -34,6 +35,7 @@ void vertex() {
 	VERTEX += NORMAL * bump * 0.22;
 	world_pos = w;
 	leaf_colour = to_linear(COLOR.rgb);
+	gorse = COLOR.a < 0.75 ? 1.0 : 0.0;
 	local_y = VERTEX.y;              // -0.5 (bottom) to 0.5 (top) on the unit shapes
 }
 
@@ -44,6 +46,9 @@ void fragment() {
 	vec3 c = leaf_colour * (0.62 + 0.55 * clump) * (0.88 + 0.24 * fine);
 	// Darker underneath and in the middle of the tree.
 	c *= mix(0.55, 1.08, smoothstep(-0.5, 0.45, local_y));
+	// Gorse in flower: specks of bright yellow over the dark green.
+	float flowers = smoothstep(0.62, 0.72, noise3(world_pos * 2.7)) * gorse;
+	c = mix(c, vec3(0.75, 0.55, 0.04), flowers * 0.85);
 	ALBEDO = c;
 	ROUGHNESS = 0.92;
 	SPECULAR = 0.18;

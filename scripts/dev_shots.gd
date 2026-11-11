@@ -476,6 +476,10 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_help},
 		{"name": "18_hud_query", "at": Vector2(52, 50), "yaw": -35.0, "pitch": 32.0, "dist": 480.0,
 			"hud": true, "prep": _prep_query, "hover": true},
+		# The natural surroundings: a beach close up, the hills, and the edge of the map.
+		{"name": "19_beach", "at": Vector2(44, 108), "yaw": -70.0, "pitch": 34.0, "dist": 320.0},
+		{"name": "20_hills", "at": Vector2(112, 40), "yaw": -40.0, "pitch": 30.0, "dist": 1500.0},
+		{"name": "21_map_edge", "at": Vector2(132, 112), "yaw": -55.0, "pitch": 32.0, "dist": 2400.0},
 	]
 
 

@@ -154,8 +154,13 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - The rules live in `scripts/advisors.gd` (`tips(sim)` returns `[{id, text, detail, severity, overlay}]`), separate from the HUD, so new tips are one `_add()` each.
 
 ## Look and feel
-- Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals and copper beech, each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
-- Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
+- The land, aiming for SimCity 4: lush green low ground, paler dry slopes and hilltops, darker damp hollows, rough hill grazing with heather, rock on steep faces. Slopes are lit a little more strongly than they really are so the low hills read (looks only; the ground keeps its real shape).
+- The coast is a smooth natural curve (not tile steps): sand beaches with wet sand at the water's edge and dune grass behind. Gameplay stays tile by tile: every land tile's middle is dry land and every sea tile's middle is water.
+- The sea is clear pale turquoise over the sand in the shallows, deepening to blue offshore, with moving ripples, a sheen of sky and soft surf lines on the beach.
+- Open country is a patchwork of fields (pasture, cut silage, rough grazing, barley, the odd ploughed field) with hedges and hedgerow trees, a few dark conifer plantations on the hills, natural woods and gorse. Fields, woods and hedges give way where you build.
+- The land carries on beyond the map edge (fields, woods, the coast) and fades into the haze; a faint line close up shows where building stops.
+- Trees come in kinds: broadleaf (oak, sycamore, lime), birch, columnar (poplar, leylandii), Scots pine, spruce, small ornamentals, copper beech and gorse bushes (flecked yellow), each with its own shape, size and colour. Canopies are clusters of lumpy blobs with leaf-clump shading.
+- Natural woods (dense, bigger trees inside, thinning at the edges), hedgerow trees, plantations, gorse and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
 - Every straight street gets trees on both sides (one kind per street, like an avenue), except beside industry and power plants. Gardens, tenement courts, landscaped courts and shop car parks get trees too.
 - Cars, buses and people fill the streets (see People and traffic).
 - A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. "Day and night" in the game menu turns it off.
