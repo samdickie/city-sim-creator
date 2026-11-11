@@ -12,6 +12,7 @@ const Hud = preload("res://scripts/hud.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const Advisors = preload("res://scripts/advisors.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")   # dev tool: tools/screenshots.sh
+const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
@@ -132,6 +133,8 @@ var _ground_dirty := false
 var _buildings_dirty := false
 var _layout_seen := -1                 # sim.layout_version last drawn
 var _camera_seen := Transform3D()      # camera position last used to pick the hovered tile
+var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
+var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
 
 
 func _ready() -> void:
@@ -176,16 +179,47 @@ func _ready() -> void:
 	hud.overlay_chosen.connect(_set_overlay)
 	hud.funding_changed.connect(_change_funding)
 
+	get_viewport().size_changed.connect(_fit_to_screen)
+	_fit_to_screen()
 	_select_tool(Tool.ROAD)
 	_set_overlay(WorldView.Overlay.NONE)
 	_set_speed(1)
 	_refresh_hud()
 	if map_credits != "":
 		hud.flash(map_credits)
-	# Dev tool only: `-- --shots=<dir>` builds a demo town and saves screenshots.
+	# Dev tools only: `-- --shots=<dir>` builds a demo town and saves screenshots;
+	# `-- --playtest=<dir>` plays a new game with mouse and keyboard events.
 	var user_args := OS.get_cmdline_user_args()
 	if DevShots.wanted(user_args):
 		add_child(DevShots.new(self, user_args))
+	elif DevPlaytest.wanted(user_args):
+		add_child(DevPlaytest.new(self, user_args))
+
+
+func _fit_to_screen() -> void:
+	# On a Retina screen, lay the interface out in points, not pixels (otherwise
+	# its text is half the size it was designed at), and draw the 3D picture at
+	# about Settings.RENDER_PIXELS, scaled up to the window with Apple's upscaler
+	# on a Mac (AMD's elsewhere). See settings.gd.
+	if not fit_to_screen:
+		return
+	var win := get_window()
+	var px := Vector2(win.size)
+	var ui := Settings.INTERFACE_SCALE if Settings.INTERFACE_SCALE > 0.0 else DisplayServer.screen_get_scale(win.current_screen)
+	ui = clampf(minf(ui, minf(px.x / 1280.0, px.y / 720.0)), 1.0, 4.0)   # (room for the whole interface)
+	if not is_equal_approx(win.content_scale_factor, ui):
+		win.content_scale_factor = ui
+	var vp := get_viewport()
+	var factor := 1.0
+	if Settings.RENDER_PIXELS > 0 and px.x * px.y > Settings.RENDER_PIXELS * 1.1:
+		factor = clampf(sqrt(Settings.RENDER_PIXELS / (px.x * px.y)), 0.5, 1.0)
+	vp.scaling_3d_scale = factor
+	if factor >= 1.0:
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR   # (no scaling at all)
+	elif RenderingServer.get_current_rendering_driver_name() == "metal":
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_METALFX_SPATIAL
+	else:
+		vp.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR
 
 
 # --------------------------------------------------------------- map loading
@@ -232,7 +266,20 @@ func _compute_slopes() -> void:
 
 # --------------------------------------------------------------------- input
 
+func _input(event: InputEvent) -> void:
+	# Remember where the mouse is, even over the interface (see _process).
+	var mm := event as InputEventMouseMotion
+	if mm:
+		_mouse_at = mm.position
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	# The wheel and trackpad gestures over the interface scroll it (the Build list,
+	# the City panel, help); they must never also zoom or move the map.
+	var wheel := event is InputEventMouseButton and (event as InputEventMouseButton).button_index in [
+		MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_WHEEL_LEFT, MOUSE_BUTTON_WHEEL_RIGHT]
+	if (wheel or event is InputEventGesture) and get_viewport().gui_get_hovered_control() != null:
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		match mb.button_index:
@@ -360,11 +407,13 @@ func _process(delta: float) -> void:
 		orbiting = false
 	if dragging_map and not Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		dragging_map = false
-	# When the camera moves, a different tile is under the (still) mouse.
+	# When the camera moves, a different tile is under the (still) mouse; unless
+	# the mouse is on the interface, which hides the map under it.
 	var cam_xf := rig.camera.global_transform
 	if cam_xf != _camera_seen:
 		_camera_seen = cam_xf
-		_update_hover(get_viewport().get_mouse_position())
+		if _mouse_at.x >= 0.0 and get_viewport().gui_get_hovered_control() == null:
+			_update_hover(_mouse_at)
 
 	# Time of day (only moves while the game is running).
 	if day_cycle:

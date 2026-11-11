@@ -201,6 +201,13 @@ const POLLUTION_APPEAL_EFFECT := 0.15     # appeal lost if every resident lived 
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
+# The 3D picture is drawn at about this many pixels and scaled up to fill the
+# window (the interface is always drawn sharp, at full size). A maximized window
+# on a Retina Mac is about 4.6 million pixels: drawing all of them more than
+# halved the frame rate on a base M1. 1600 x 1000 is what the screenshots use.
+# 0 = always draw every pixel.
+const RENDER_PIXELS := 1600 * 1000
+const INTERFACE_SCALE := 0.0      # interface size: 0 = follow the screen (2 on Retina), or e.g. 1.5
 
 # --- People and traffic (looks only; T turns them off and on) ---
 const TRAFFIC_ON := true          # cars and people on the streets when the game starts
