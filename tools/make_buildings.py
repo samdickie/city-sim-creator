@@ -27,6 +27,11 @@ MATERIALS = {
     "awning": (0.55, 0.12, 0.12), "lead": (0.32, 0.34, 0.36),
     "cladding": (0.55, 0.60, 0.62), "sheet": (0.40, 0.42, 0.44),
     "accent": (0.72, 0.08, 0.06),
+    # glass in the wall colour (curtain walling), shop windows (lit all evening),
+    # red aviation lights, floodlit trim on tower crowns, office glazing
+    "curtain": (0.20, 0.32, 0.42), "display": (0.12, 0.10, 0.08), "beacon": (0.8, 0.05, 0.03),
+    "lamp": (0.85, 0.85, 0.80), "office": (0.05, 0.06, 0.08),
+    "green": (0.20, 0.30, 0.10),   # a roof terrace: sedum or gravel
 }
 MAT_INDEX = {name: n for n, name in enumerate(MATERIALS)}
 
@@ -443,7 +448,7 @@ def shopfront(mb, f, a0, a1, h_shop=3.6, awning=False):
     """A traditional shopfront: stall riser, big glass, painted pilasters, fascia and cornice."""
     w = a1 - a0
     f.slab(mb, a0 + 0.3, a1 - 0.3, 0.0, 0.6, 0.0, 0.12, "fascia")              # stall riser
-    f.slab(mb, a0 + 0.3, a1 - 0.3, 0.6, 2.85, -0.03, 0.03, "glass")
+    f.slab(mb, a0 + 0.3, a1 - 0.3, 0.6, 2.85, -0.03, 0.03, "display")
     f.slab(mb, a0 + w * 0.68, a0 + w * 0.68 + 1.0, 0.0, 2.85, -0.01, 0.04, "door")
     for a in (a0 + 0.3 + (w - 0.6) * k / 3 for k in (1, 2)):
         f.slab(mb, a - 0.04, a + 0.04, 0.6, 2.85, 0.0, 0.08, "fascia")          # mullions
@@ -536,10 +541,10 @@ def shed():
     w, d, h, rise = 34.0, 28.0, 8.0, 2.2
     mb = Builder()
     mb.box(-w / 2, w / 2, -d / 2, d / 2, 0, h, "cladding")
-    mb.box(-w / 2 - 0.05, w / 2 + 0.05, -d / 2 - 0.05, d / 2 + 0.05, -0.3, 1.4, "stone")     # brick base
+    mb.box(-w / 2 - 0.05, w / 2 + 0.05, -d / 2 - 0.05, d / 2 + 0.05, -0.3, 1.4, "pot")       # brick base
     f, b, l, r = front(w, d), back(w, d), left(w, d), right(w, d)
     for a in (-10.0, -2.0):
-        f.slab(mb, a - 2.4, a + 2.4, 0.0, 5.2, 0.0, 0.08, "sheet")                # roller doors
+        f.slab(mb, a - 2.4, a + 2.4, 0.0, 5.2, 0.0, 0.08, "door")                 # roller doors
         f.slab(mb, a - 2.6, a + 2.6, 5.2, 5.5, 0.0, 0.18, "metal")
     for a in range(-14, 16, 4):
         f.slab(mb, a - 1.2, a + 1.2, 6.2, 7.2, -0.02, 0.03, "glass")           # high windows
@@ -563,6 +568,78 @@ def shed():
     for k in range(4):
         r.slab(mb, -5.5 + k * 3.6, -5.3 + k * 3.6, 0.0, 3.0, 0.9, 1.1, "metal")
     return mb, (w, d, h, rise)
+
+
+def works():
+    # An old works: walls of brick or stone (the wall colour), a north-light
+    # sawtooth roof of metal sheet (the roof colour) with glazing on the steep
+    # faces, tall windows between piers, a big loading door, a brick office.
+    w, d, h, rise = 34.0, 28.0, 6.0, 3.2
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0, h, "stone")
+    mb.box(-w / 2 - 0.15, w / 2 + 0.15, -d / 2 - 0.15, d / 2 + 0.15, h - 0.35, h, "stone")      # eaves course
+    n = 5
+    tooth = d / n
+    for k in range(n):
+        y0 = -d / 2 + k * tooth
+        y1 = y0 + tooth
+        mb.extrude_x([(y0, h), (y1, h), (y0 + 0.5, h + rise)], -w / 2 - 0.2, w / 2 + 0.2, "sheet")
+        mb.extrude_x([(y0 - 0.06, h + 0.25), (y0 + 0.02, h + 0.25), (y0 + 0.5, h + rise - 0.25),
+                      (y0 + 0.42, h + rise - 0.25)], -w / 2 + 0.4, w / 2 - 0.4, "glass")
+    f, b, l, r = front(w, d), back(w, d), left(w, d), right(w, d)
+    for face, length in ((f, w), (b, w), (l, d), (r, d)):
+        k = 0
+        a = -length / 2 + 2.0
+        while a < length / 2 - 1.5:
+            if not (face is f and -9.0 < a < -3.0):
+                face.slab(mb, a - 0.6, a + 0.6, 1.2, 4.6, -0.03, 0.02, "glass")
+                face.slab(mb, a - 0.75, a + 0.75, 1.0, 1.2, 0.0, 0.12, "frame")
+            face.slab(mb, a + 1.15, a + 1.85, 0.0, h - 0.35, 0.0, 0.2, "stone")             # pier
+            a += 3.0
+            k += 1
+    f.slab(mb, -8.5, -3.5, 0.0, 4.6, 0.0, 0.1, "door")                                         # loading door
+    f.slab(mb, -8.8, -3.2, 4.6, 5.0, 0.0, 0.25, "frame")
+    office = Face((9.5, d / 2, 0), (1, 0, 0), (0, 1, 0))
+    office.slab(mb, -5.5, 5.5, 0.0, 6.8, 0.0, 3.0, "pot")
+    of = Face((9.5, d / 2 + 3.0, 0), (1, 0, 0), (0, 1, 0))
+    for a in (-3.6, -1.2, 1.2, 3.6):
+        for z in (0.9, 4.0):
+            of.slab(mb, a - 0.6, a + 0.6, z, z + 1.6, -0.02, 0.03, "glass")
+    of.slab(mb, -0.6, 0.6, 0.0, 2.4, -0.01, 0.04, "door")
+    mb.box(9.5 - 5.7, 9.5 + 5.7, d / 2 - 0.2, d / 2 + 3.2, 6.8, 7.1, "stone")
+    return mb, (w, d, h, rise)
+
+
+def warehouse():
+    # A modern distribution shed: tall clad walls (the wall colour) with dark corner
+    # trims, a shallow metal roof (the roof colour) with roof lights, a row of
+    # loading docks with coloured doors and black shelters, a glazed office pod.
+    w, d, h = 40.0, 30.0, 11.0
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0, h, "cladding")
+    mb.box(-w / 2 - 0.05, w / 2 + 0.05, -d / 2 - 0.05, d / 2 + 0.05, 0, 1.2, "render")        # plinth
+    for x in (-w / 2, w / 2):
+        for y in (-d / 2, d / 2):
+            mb.box(x - 0.25, x + 0.25, y - 0.25, y + 0.25, 0, h + 0.4, "metal")
+    mb.box(-w / 2 - 0.1, w / 2 + 0.1, -d / 2 - 0.1, d / 2 + 0.1, h, h + 0.4, "metal")         # coping
+    mb.box(-w / 2 + 0.1, w / 2 - 0.1, -d / 2 + 0.1, d / 2 - 0.1, h, h + 0.6, "sheet")         # roof
+    for x in range(-15, 16, 6):
+        for y in (-7.0, 0.0, 7.0):
+            mb.box(x - 1.0, x + 1.0, y - 1.6, y + 1.6, h + 0.6, h + 0.75, "glass")
+    f = front(w, d)
+    for k in range(6):
+        a = -17.0 + k * 3.8
+        f.slab(mb, a - 1.5, a + 1.5, 1.2, 4.4, 0.0, 0.06, "door")
+        f.slab(mb, a - 1.8, a + 1.8, 0.9, 4.8, 0.0, 0.5, "metal")                              # shelter
+        f.slab(mb, a - 1.4, a + 1.4, 1.2, 4.3, 0.0, 0.52, "door")
+    f.slab(mb, -19.5, 3.0, 5.3, 5.6, 0.0, 2.0, "metal")                                        # canopy
+    pod = Face((13.5, d / 2, 0), (1, 0, 0), (0, 1, 0))
+    pod.slab(mb, -5.5, 5.5, 0.0, 7.4, 0.0, 3.5, "render")
+    pf = Face((13.5, d / 2 + 3.5, 0), (1, 0, 0), (0, 1, 0))
+    ribbon(mb, pf, -5.2, 5.2, 1.0, 2.8, step=1.3)
+    ribbon(mb, pf, -5.2, 5.2, 4.3, 6.1, step=1.3)
+    mb.box(13.5 - 5.7, 13.5 + 5.7, d / 2 - 0.2, d / 2 + 3.7, 7.4, 7.7, "metal")
+    return mb, (w, d, h + 0.75, 0.0)
 
 
 def classical(storeys, kind):
@@ -916,16 +993,166 @@ def modern_floor(variant="a"):
     return mb, (w, d, h, 0.0)
 
 
+def faces4(w, d):
+    return ((front(w, d), w), (back(w, d), w), (left(w, d), d), (right(w, d), d))
+
+
 def glass_floor():
-    # Curtain walling: glass all round in a grid of slim mullions, a dark spandrel at each floor.
+    # Curtain walling: glass in the building's own tint (blue, green, bronze, silver)
+    # in a grid of slim mullions, with a spandrel band at each floor in its second colour.
     w, d, h = MOD_W, MOD_D, 3.2
     mb = Builder()
-    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, 0.32, "lead")
-    mb.box(-w / 2 + 0.02, w / 2 - 0.02, -d / 2 + 0.02, d / 2 - 0.02, 0.32, h, "glass")
-    for face, length in ((front(w, d), w), (back(w, d), w), (left(w, d), d), (right(w, d), d)):
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, 0.8, "accent")
+    mb.box(-w / 2 + 0.02, w / 2 - 0.02, -d / 2 + 0.02, d / 2 - 0.02, 0.8, h, "curtain")
+    for face, length in faces4(w, d):
         mullions(mb, face, -length / 2, length / 2, 0.0, h, 1.5, t=0.08, out=0.1)
-        face.slab(mb, -length / 2, length / 2, 0.28, 0.34, 0.0, 0.06, "metal")
+        face.slab(mb, -length / 2, length / 2, 0.76, 0.84, 0.0, 0.06, "metal")
     return mb, (w, d, h, 0.0)
+
+
+def tower_stone():
+    # A stone-clad office storey (art deco): stone piers running up between tall
+    # windows set well back, a dark spandrel panel (second colour) under each.
+    w, d, h = MOD_W, MOD_D, 3.2
+    mb = Builder()
+    mb.box(-w / 2 + 0.3, w / 2 - 0.3, -d / 2 + 0.3, d / 2 - 0.3, 0.0, h, "office")
+    for face, length in faces4(w, d):
+        n = max(3, round(length / 2.1))
+        step = length / n
+        for k in range(n + 1):
+            a = -length / 2 + k * step
+            half = 0.5 if k in (0, n) else 0.3
+            face.slab(mb, max(-length / 2, a - half), min(length / 2, a + half), 0.0, h, -0.3, 0.14, "stone")
+        for k in range(n):
+            a0 = -length / 2 + k * step
+            face.slab(mb, a0, a0 + step, 0.0, 0.3, -0.3, 0.02, "stone")
+            face.slab(mb, a0 + 0.2, a0 + step - 0.2, 0.3, 1.0, -0.3, -0.16, "accent")
+    return mb, (w, d, h, 0.0)
+
+
+def tower_grid():
+    # Precast concrete grid (the wall colour): deep frames round every bay, the
+    # glass set well back, so the face reads as a strong square grid.
+    w, d, h = MOD_W, MOD_D, 3.2
+    mb = Builder()
+    mb.box(-w / 2 + 0.55, w / 2 - 0.55, -d / 2 + 0.55, d / 2 - 0.55, 0.0, h, "office")
+    for face, length in faces4(w, d):
+        n = max(3, round(length / 1.9))
+        step = length / n
+        for k in range(n + 1):
+            a = -length / 2 + k * step
+            face.slab(mb, max(-length / 2, a - 0.22), min(length / 2, a + 0.22), 0.0, h, -0.55, 0.12, "render")
+        face.slab(mb, -length / 2, length / 2, 0.0, 0.6, -0.55, 0.12, "render")
+    return mb, (w, d, h, 0.0)
+
+
+def tower_band():
+    # A storey of flats: a band of render (the wall colour) under a strip of windows
+    # in white frames, every third bay a coloured panel (the second colour).
+    w, d, h = MOD_W, MOD_D, 3.2
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, 0.95, "render")
+    mb.box(-w / 2 + 0.15, w / 2 - 0.15, -d / 2 + 0.15, d / 2 - 0.15, 0.95, h - 0.2, "glass")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, h - 0.2, h, "render")
+    for face, length in faces4(w, d):
+        n = max(3, round(length / 1.5))
+        step = length / n
+        for k in range(n + 1):
+            a = -length / 2 + k * step
+            face.slab(mb, max(-length / 2, a - 0.07), min(length / 2, a + 0.07), 0.95, h - 0.2, -0.15, -0.02, "frame")
+        for k in range(n):
+            if k % 3 == 1:
+                a0 = -length / 2 + k * step
+                face.slab(mb, a0 + 0.07, a0 + step - 0.07, 0.95, h - 0.2, -0.15, -0.03, "accent")
+    return mb, (w, d, h, 0.0)
+
+
+def beacon(mb, x, y, z, mast=0.0):
+    """A red aviation light, on a short mast if mast > 0."""
+    if mast > 0:
+        mb.box(x - 0.08, x + 0.08, y - 0.08, y + 0.08, z, z + mast, "metal")
+    mb.box(x - 0.45, x + 0.45, y - 0.45, y + 0.45, z + mast, z + mast + 0.7, "beacon")
+
+
+def crown_plant():
+    # A tower's roof: a parapet (second colour), a set-back screen of ribbed metal
+    # louvres round the plant, a lift overrun, air handling units, aviation lights.
+    w, d = MOD_W, MOD_D
+    mb = Builder()
+    mb.box(-w / 2 + 0.2, w / 2 - 0.2, -d / 2 + 0.2, d / 2 - 0.2, 0.0, 0.15, "lead")
+    parapet(mb, w, d, 0.0, 1.2, 0.25, "accent")
+    sw, sd = w * 0.56, d * 0.6
+    mb.box(-sw / 2 - 1.0, sw / 2 - 1.0, -sd / 2 - 0.5, sd / 2 - 0.5, 0.0, 4.2, "cladding")
+    mb.box(-sw / 2 - 1.2, sw / 2 - 0.8, -sd / 2 - 0.7, sd / 2 - 0.3, 4.2, 4.4, "metal")
+    mb.box(w * 0.22, w * 0.36, -d * 0.2, d * 0.15, 0.0, 5.6, "frame")       # lift overrun
+    for k in range(3):
+        x = -w * 0.4 + k * 2.2
+        mb.box(x, x + 1.6, d * 0.2, d * 0.38, 0.0, 1.4, "metal")
+    beacon(mb, w / 2 - 0.6, d / 2 - 0.6, 1.2, 1.0)
+    beacon(mb, -w / 2 + 0.6, -d / 2 + 0.6, 1.2, 1.0)
+    return mb, (w, d, 5.6, 0.0)
+
+
+def crown_deco():
+    # An art deco top: the tower steps in three times in stone, each step edged with
+    # floodlit trim, fins up the middle step, and a flagpole with a red light.
+    w, d = MOD_W, MOD_D
+    mb = Builder()
+    steps = ((1.0, 1.0, 1.6), (0.78, 0.78, 4.2), (0.56, 0.58, 3.6), (0.34, 0.4, 3.0))
+    z = 0.0
+    for k, (fw, fd, sh) in enumerate(steps):
+        sw, sd = w * fw, d * fd
+        mb.box(-sw / 2, sw / 2, -sd / 2, sd / 2, z, z + sh, "stone")
+        if k in (1, 2):
+            for face, length in faces4(sw, sd):
+                n = max(2, round(length / 2.2))
+                for j in range(n):
+                    a = -length / 2 + (j + 0.5) * length / n
+                    face.slab(mb, a - 0.35, a + 0.35, z + 0.6, z + sh - 0.5, -0.02, 0.03, "office")
+                    face.slab(mb, a - 0.75, a - 0.55, z, z + sh, 0.0, 0.25, "stone")
+        parapet(mb, sw + 0.2, sd + 0.2, z + sh - 0.2, z + sh + 0.35, 0.2, "lamp")
+        z += sh
+    pyramid(mb, 0.0, 0.0, min(w * 0.34, d * 0.4) / 2, z, z + 2.4, "lead")
+    mb.box(-0.1, 0.1, -0.1, 0.1, z + 2.0, z + 8.0, "metal")
+    beacon(mb, 0.0, 0.0, z + 8.0)
+    return mb, (w, d, z + 8.5, 0.0)
+
+
+def crown_spire():
+    # A landmark's top: a tapering glass crown with metal ribs and floodlit edge,
+    # then a needle spire with a red light.
+    w, d = MOD_W, MOD_D
+    mb = Builder()
+    mb.box(-w / 2 + 0.2, w / 2 - 0.2, -d / 2 + 0.2, d / 2 - 0.2, 0.0, 0.15, "lead")
+    b, t, hh = (w * 0.42, d * 0.42), (w * 0.12, d * 0.16), 11.0
+    mb.box(-b[0] - 0.15, b[0] + 0.15, -b[1] - 0.15, b[1] + 0.15, 0.0, 0.6, "lamp")
+    mb.hexa([(-b[0], -b[1], 0.6), (b[0], -b[1], 0.6), (b[0], b[1], 0.6), (-b[0], b[1], 0.6),
+             (-t[0], -t[1], hh), (t[0], -t[1], hh), (t[0], t[1], hh), (-t[0], t[1], hh)], "curtain")
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            beam(mb, (sx * b[0], sy * b[1], 0.6), (sx * t[0], sy * t[1], hh), 0.3, "metal")
+    mb.box(-t[0] - 0.1, t[0] + 0.1, -t[1] - 0.1, t[1] + 0.1, hh, hh + 0.4, "lamp")
+    mb.box(-0.45, 0.45, -0.45, 0.45, hh, hh + 9.0, "frame")
+    mb.box(-0.18, 0.18, -0.18, 0.18, hh + 9.0, hh + 22.0, "frame")
+    beacon(mb, 0.0, 0.0, hh + 22.0)
+    return mb, (w, d, hh + 22.5, 0.0)
+
+
+def crown_slope():
+    # A sloping glass top, low at the front and high at the back, with metal ribs,
+    # a floodlit ridge and a red light at each end.
+    w, d = MOD_W, MOD_D
+    lo, hi = 1.5, 9.0
+    mb = Builder()
+    mb.extrude_x([(-d / 2, 0.0), (d / 2, 0.0), (d / 2, lo), (-d / 2, hi)], -w / 2, w / 2, "curtain")
+    for k in range(7):
+        x = -w / 2 + k * w / 6
+        x = max(-w / 2 + 0.15, min(w / 2 - 0.15, x))
+        beam(mb, (x, d / 2 + 0.05, lo + 0.05), (x, -d / 2 + 0.05, hi + 0.05), 0.2, "metal")
+    mb.box(-w / 2, w / 2, -d / 2, -d / 2 + 0.3, hi - 0.1, hi + 0.25, "lamp")
+    for x in (-w / 2 + 0.5, w / 2 - 0.5):
+        beacon(mb, x, -d / 2 + 0.3, hi + 0.25, 0.8)
+    return mb, (w, d, hi + 1.6, 0.0)
 
 
 def modern_top():
@@ -933,7 +1160,7 @@ def modern_top():
     # all glass with clad ends, under a thin projecting canopy.
     w, d = MOD_W, MOD_D
     mb = Builder()
-    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.05, 0.15, "lead")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.05, 0.15, "green")
     for x0, x1, y0, y1 in ((-w / 2, w / 2, d / 2 - 0.06, d / 2), (-w / 2, -w / 2 + 0.06, -d / 2, d / 2),
                            (w / 2 - 0.06, w / 2, -d / 2, d / 2), (-w / 2, w / 2, -d / 2, -d / 2 + 0.06)):
         mb.box(x0, x1, y0, y1, 0.15, 1.15, "glass")
@@ -947,7 +1174,8 @@ def modern_top():
     pb = Face((0.0, py - pd / 2, 0), (-1, 0, 0), (0, -1, 0))
     for face in (pf, pb):
         mullions(mb, face, -pw / 2 + 0.4, pw / 2 - 0.4, 0.15, 6.4, 1.6)
-    mb.box(-(pw + 3.0) / 2, (pw + 3.0) / 2, py - (pd + 2.5) / 2, py + (pd + 2.5) / 2, 6.4, 6.85, "frame")
+    mb.box(-(pw + 3.0) / 2, (pw + 3.0) / 2, py - (pd + 2.5) / 2, py + (pd + 2.5) / 2, 6.4, 6.62, "frame")
+    mb.box(-(pw + 2.8) / 2, (pw + 2.8) / 2, py - (pd + 2.3) / 2, py + (pd + 2.3) / 2, 6.62, 6.85, "lead")
     return mb, (w, d, 6.85, 0.0)
 
 
@@ -1351,10 +1579,12 @@ MODELS = {
     "shop2": lambda: shop_parade(True), "shop2_b": lambda: shop_parade(True, "b"),
     "shopflats2": lambda: shops_with_flats(2), "shopflats3": lambda: shops_with_flats(3),
     "shopflats4": lambda: shops_with_flats(4),
-    "shed": shed,
+    "shed": shed, "works": works, "warehouse": warehouse,
     "fire_station": fire_station, "fire_tower": fire_tower, "school": school, "hospital": hospital,
     "modern_base": modern_base, "modern_floor": modern_floor, "modern_floor_b": lambda: modern_floor("b"),
     "glass_floor": glass_floor, "modern_top": modern_top,
+    "tower_stone": tower_stone, "tower_grid": tower_grid, "tower_band": tower_band,
+    "crown_plant": crown_plant, "crown_deco": crown_deco, "crown_spire": crown_spire, "crown_slope": crown_slope,
     "coal_plant": coal_plant, "gas_plant": gas_plant, "nuclear_plant": nuclear_plant,
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
 }

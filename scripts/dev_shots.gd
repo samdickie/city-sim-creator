@@ -501,12 +501,33 @@ func _shot_list() -> Array[Dictionary]:
 		{"name": "24_yards", "at": Vector2(78, 65), "yaw": -50.0, "pitch": 38.0, "dist": 240.0},
 		{"name": "25_back_courts", "at": Vector2(41, 50), "yaw": -35.0, "pitch": 45.0, "dist": 210.0},
 		{"name": "26_shops", "at": Vector2(55, 52), "yaw": -35.0, "pitch": 40.0, "dist": 230.0},
+		# Buildings close up (before 27, which must stay last): skyscrapers, works, the
+		# high street, civic buildings, the towers at night.
+		{"name": "28_towers", "at": Vector2(46, 63), "yaw": -40.0, "pitch": 22.0, "dist": 520.0},
+		{"name": "29_works", "at": Vector2(80, 70), "yaw": -50.0, "pitch": 34.0, "dist": 330.0},
+		{"name": "30_high_street", "at": Vector2(54, 50), "yaw": -60.0, "pitch": 18.0, "dist": 170.0},
+		{"name": "31_civic_close", "at": Vector2(62, 51), "yaw": -30.0, "pitch": 32.0, "dist": 260.0},
+		{"name": "32_towers_night", "at": Vector2(46, 63), "yaw": -40.0, "pitch": 22.0, "dist": 620.0,
+			"time": NIGHT},
+		{"name": "33_abandoned", "at": Vector2(54, 51), "yaw": -35.0, "pitch": 38.0, "dist": 230.0,
+			"prep": _prep_abandoned},
 		{"name": "27_empty_plots", "at": Vector2(43, 29), "yaw": -40.0, "pitch": 38.0, "dist": 230.0,
 			"prep": _prep_empty_plots},
 	]
 
 
 const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
+
+
+func _prep_abandoned() -> void:
+	# Board up a few built plots (tenements and shops) to show the run-down look.
+	# Far from 27's plots, so that shot is unchanged.
+	for y: int in range(49, 54):
+		for x: int in range(52, 57):
+			var i := y * sim.w + x
+			if sim.is_zone(sim.tiles[i]) and sim.levels[i] > 0 and (x + y) % 2 == 0:
+				sim.abandoned[i] = 1
+	world.refresh_buildings()
 
 
 func _prep_empty_plots() -> void:

@@ -35,6 +35,13 @@ const MODEL_DIMS := {
 	# Modern blocks are stacked: a glazed ground floor, upper storeys, then the roof.
 	"modern_base": Vector4(21.0, 13.0, 4.6, 0.0), "modern_floor": Vector4(21.0, 13.0, 3.2, 0.0),
 	"glass_floor": Vector4(21.0, 13.0, 3.2, 0.0), "modern_top": Vector4(21.0, 13.0, 6.85, 0.0),
+	# Skyscraper storeys (stone and deco, concrete grid, bands of flats) and tops.
+	"tower_stone": Vector4(21.0, 13.0, 3.2, 0.0), "tower_grid": Vector4(21.0, 13.0, 3.2, 0.0),
+	"tower_band": Vector4(21.0, 13.0, 3.2, 0.0), "crown_plant": Vector4(21.0, 13.0, 5.6, 0.0),
+	"crown_deco": Vector4(21.0, 13.0, 20.9, 0.0), "crown_spire": Vector4(21.0, 13.0, 33.5, 0.0),
+	"crown_slope": Vector4(21.0, 13.0, 10.6, 0.0),
+	# More industry: an old works with a sawtooth roof, and a modern warehouse.
+	"works": Vector4(34.0, 28.0, 6.0, 3.2), "warehouse": Vector4(40.0, 30.0, 11.75, 0.0),
 }
 # Other designs with the same size as a model above; one is picked for each building.
 const MODEL_VARIANTS := {
@@ -44,7 +51,7 @@ const MODEL_VARIANTS := {
 	"modern_floor": ["modern_floor", "modern_floor_b"],
 }
 const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot", "fascia", "render",
-	"awning", "lead", "cladding", "sheet", "accent"]
+	"awning", "lead", "cladding", "sheet", "accent", "curtain", "display", "beacon", "lamp", "office", "green"]
 const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 const PAVING_SHADER = preload("res://shaders/paving.gdshader")
@@ -1068,6 +1075,7 @@ func _build_city_nodes() -> void:
 	chimney_mesh.radial_segments = 16
 	var chimney_mat := StandardMaterial3D.new()
 	chimney_mat.vertex_color_use_as_albedo = true
+	chimney_mat.vertex_color_is_srgb = true      # (the game's colours are sRGB, like the props')
 	chimney_mat.roughness = 0.9
 	chimneys.multimesh = _new_multimesh(chimney_mesh, false)
 	chimneys.material_override = chimney_mat
@@ -1992,7 +2000,8 @@ func _recolour(mm: MultiMesh, owners: PackedInt32Array, base: PackedColorArray) 
 			continue
 		var i := owners[n]
 		var c := overlay_image.get_pixel(i % map_w, i / map_w)
-		# Buildings use linear colour; the image is in sRGB like the ground.
+		# Building colours are sRGB, but overlay colours go in linear (the shaders
+		# convert only when the overlay is off); the image is in sRGB like the ground.
 		mm.set_instance_color(n, OV_GREY.srgb_to_linear() if c.a < 0.05 \
 			else Color(c.r, c.g, c.b).srgb_to_linear())
 
@@ -2639,10 +2648,18 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 	match t:
 		Tile.POLICE:
 			# A sandstone station with a blue sign over the door; patrol cars in the yard.
+			# (A navy slate roof and a blue band round the building, so it reads from afar.)
 			var spot := _place(i, front, -7.0, 4.0, 30.0, 15.0)
-			_classical_block(spot, 30.0, 15.0, 3, BLONDE_SANDSTONE, false, false, wall_list, roof_list)
+			_classical_block(spot, 30.0, 15.0, 3, BLONDE_SANDSTONE, false, false, wall_list, roof_list, true,
+				POLICE_ROOF)
 			_front_panel(spot, 15.0, 0.0, 0.0, 2.8, 3.2, POLICE_BLUE.darkened(0.35), wall_list)
 			_front_panel(spot, 15.0, 0.0, 3.3, 9.0, 0.8, POLICE_BLUE, wall_list)
+			var wing := _place(i, front, -12.0, 19.0, 18.0, 12.0)
+			_add_block(wing, 18.0, 12.0, 7.0, BLONDE_SANDSTONE, STYLE_CLASSICAL, 0.0, SLATE, wall_list, roof_list)
+			var wing_pos: Vector3 = wing["pos"]
+			_box_item(wall_list, wing_pos + Vector3.UP * 5.6, wing["x"], wing["z"], Vector3(18.3, 0.8, 12.3),
+				POLICE_BLUE, STYLE_PAINT)
+			_flag(_place(i, front, 10.0, 1.5, 1.0, 1.0), 9.0, SALTIRE_BLUE)
 			_slab(i, front, 16.0, 3.0, 16.0, depth - 5.0, CAR_PARK)
 			for k in 4:
 				_parked_car(i, front, 12.5 + (k % 2) * 7.0, 6.0 + (k / 2) * 8.0, true, rng, PATROL_WHITE)
@@ -2667,6 +2684,7 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 		Tile.SCHOOL:
 			# A Victorian sandstone school with a slate roof, a playground and a playing field.
 			var spot := _place(i, front, -4.0, 4.0, 38.0, 13.0)
+			_flag(_place(i, front, 19.0, 1.0, 0.2, 0.2), 8.0, SALTIRE_BLUE)
 			if _models.has("school"):
 				# The model has its own porch and wings standing forward of the front.
 				_add_model("school", spot, 38.0, 13.0, _model_total("school"), RED_SANDSTONE, SLATE)
@@ -2721,6 +2739,32 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 				_parked_car(i, front, 15.5 + k * 3.0, 16.0, true, rng)
 
 
+const POLICE_ROOF := Color(0.17, 0.24, 0.40)    # navy slate
+const SALTIRE_BLUE := Color(0.0, 0.37, 0.72)
+const COPPER_GREEN := Color(0.40, 0.64, 0.54)    # weathered copper domes and spires
+
+
+func _flag(spot: Dictionary, tall: float, colour: Color) -> void:
+	# A white flagpole with a flag flying from it (drawn with the chimneys and props).
+	var pos: Vector3 = spot["pos"]
+	var x_axis: Vector3 = spot["x"]
+	_cylinder(_spire_items, pos, 0.12, tall, WHITE_RENDER)
+	_box_item(_prop_items, pos + Vector3.UP * (tall - 1.4) + x_axis * 1.1, x_axis, spot["z"],
+		Vector3(2.2, 1.4, 0.06), colour)
+
+
+func _dome(at: Vector3, radius: float, colour: Color) -> void:
+	# A copper dome on a drum, stepped like a dome, with a lantern on top.
+	_cylinder(_spire_items, at, radius, radius * 0.7, colour.darkened(0.25))
+	var up := radius * 0.7
+	for k in 3:
+		var r: float = radius * (0.95 - k * 0.27)
+		var h: float = radius * (0.38 - k * 0.06)
+		_cylinder(_spire_items, at + Vector3.UP * up, r, h, colour)
+		up += h
+	_cylinder(_spire_items, at + Vector3.UP * up, radius * 0.16, radius * 0.5, WHITE_RENDER)
+
+
 func _hedge_colour(rng: RandomNumberGenerator) -> Color:
 	return Color(rng.randf_range(0.13, 0.19), rng.randf_range(0.27, 0.34), rng.randf_range(0.11, 0.15))
 
@@ -2752,10 +2796,11 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 	_slab(i, side, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
 	if t == Tile.HOMES and lv == 2 and sim.density[i] >= 1:
 		# A terrace along this street too.
-		var stone: Color = _house_colour(rng)
+		var stone: Color = _house_colour(rng, i)
+		var terrace_roof := _house_roof(rng, i)
 		for along: float in [-15.5, 0.0, 15.5]:
 			var spot := _place(i, side, along, 4.0, 15.0, 8.5)
-			_add_block(spot, 15.0, 8.5, 6.2, stone, STYLE_HOUSE, 3.2, SLATE, wall_list, roof_list)
+			_add_block(spot, 15.0, 8.5, 6.2, stone, STYLE_HOUSE, 3.2, terrace_roof, wall_list, roof_list)
 		return
 	if t == Tile.HOMES and lv <= 2:
 		# A row of villas with driveways and hedges.
@@ -2767,8 +2812,8 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 			var d := rng.randf_range(7.0, 8.5)
 			var house_along: float = along - 5.3 + w * 0.5
 			var spot := _place(i, side, house_along, 4.0, w, d)
-			_add_block(spot, w, d, 5.6 if rng.randf() < 0.8 else 3.2, _house_colour(rng), STYLE_HOUSE,
-				rng.randf_range(2.8, 3.6), SLATE if rng.randf() < 0.75 else ROOF_TILE, wall_list, roof_list)
+			_add_block(spot, w, d, 5.6 if rng.randf() < 0.8 else 3.2, _house_colour(rng, i), STYLE_HOUSE,
+				rng.randf_range(2.8, 3.6), _house_roof(rng, i), wall_list, roof_list)
 			var drive_along: float = along - 5.3 + w + 1.5
 			_slab(i, side, drive_along, 3.0, 2.6, d + 1.0, DRIVEWAY)
 			if rng.randf() < 0.5:
@@ -2789,12 +2834,12 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 		return
 	# Flats or shops along the street: storeys follow the plot's level.
 	var storeys := 3
-	var colour := RED_SANDSTONE if rng.randf() < 0.5 else BLONDE_SANDSTONE
+	var colour := _tenement_stone(rng, i)
 	var style := STYLE_FLATS
 	var roof_h := 4.5
 	if t == Tile.SHOPS:
 		style = STYLE_SHOP
-		colour = [WHITE_RENDER, BLONDE_SANDSTONE, CREAM_RENDER, GREY_RENDER][rng.randi_range(0, 3)]
+		colour = _pick(rng, SHOP_COLOURS)
 		storeys = 2 if lv == 1 else 3
 		roof_h = 0.0
 	for along: float in [-12.5, 12.5]:
@@ -2968,11 +3013,59 @@ func set_preview(items: Array, colour: Color) -> void:
 	hover_box.visible = items.is_empty() and hover_box.visible
 
 
-func _house_colour(rng: RandomNumberGenerator) -> Color:
-	var choices := [RED_SANDSTONE, BLONDE_SANDSTONE, WHITE_RENDER, WHITE_RENDER,
-		CREAM_RENDER, GREY_RENDER, BLONDE_SANDSTONE]
-	var c: Color = choices[rng.randi_range(0, choices.size() - 1)]
-	return c.darkened(rng.randf_range(-0.05, 0.08))
+# House walls and roofs. Neighbouring streets share a character (a palette),
+# picked by position in squares of HOUSE_AREA tiles, so a street reads as one
+# place and the next can differ: Victorian red or blonde sandstone under dark
+# slate, white and cream harling, inter-war pebbledash under red and brown
+# tiles, modern brick. (All colours in the game are sRGB.)
+const RED_SANDSTONE_DEEP := Color(0.49, 0.25, 0.19)
+const WHINSTONE := Color(0.44, 0.44, 0.43)
+const PEBBLEDASH := Color(0.72, 0.70, 0.64)
+const BUFF_BRICK := Color(0.72, 0.57, 0.40)
+const RED_BRICK := Color(0.55, 0.26, 0.18)
+const OCHRE_RENDER := Color(0.85, 0.72, 0.48)
+const SLATE_DARK := Color(0.18, 0.20, 0.23)
+const BROWN_TILE := Color(0.36, 0.24, 0.18)
+const GREY_TILE := Color(0.32, 0.32, 0.33)
+const HOUSE_AREA := 3
+const HOUSE_PALETTES := [
+	{"walls": [RED_SANDSTONE, RED_SANDSTONE_DEEP, RED_SANDSTONE, BLONDE_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
+	{"walls": [BLONDE_SANDSTONE, HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
+	{"walls": [WHITE_RENDER, CREAM_RENDER, WHITE_RENDER, OCHRE_RENDER], "roofs": [SLATE, SLATE_DARK, SLATE]},
+	{"walls": [PEBBLEDASH, CREAM_RENDER, GREY_RENDER, WHITE_RENDER], "roofs": [ROOF_TILE, BROWN_TILE, ROOF_TILE]},
+	{"walls": [BUFF_BRICK, RED_BRICK, BUFF_BRICK, CREAM_RENDER], "roofs": [BROWN_TILE, GREY_TILE, ROOF_TILE]},
+	{"walls": [RED_SANDSTONE, BLONDE_SANDSTONE, WHITE_RENDER, WHINSTONE], "roofs": [SLATE, SLATE_DARK]},
+]
+const HOUSE_PALETTE_ODDS := [0, 0, 1, 1, 2, 2, 3, 4, 5]   # how often each palette comes up
+
+
+func _house_palette(i: int) -> Dictionary:
+	var tile := Vector2i(i % map_w, i / map_w)
+	var r := _field_rand(floori(tile.x / float(HOUSE_AREA)), floori(tile.y / float(HOUSE_AREA)), 311)
+	var k: int = HOUSE_PALETTE_ODDS[mini(int(r * HOUSE_PALETTE_ODDS.size()), HOUSE_PALETTE_ODDS.size() - 1)]
+	return HOUSE_PALETTES[k]
+
+
+func _house_colour(rng: RandomNumberGenerator, i: int) -> Color:
+	# Half the houses take the street's main colour, the rest any of its others.
+	var walls: Array = _house_palette(i)["walls"]
+	var c: Color = walls[0] if rng.randf() < 0.5 else walls[rng.randi_range(0, walls.size() - 1)]
+	return c.darkened(rng.randf_range(-0.04, 0.08))
+
+
+func _house_roof(rng: RandomNumberGenerator, i: int) -> Color:
+	var roofs: Array = _house_palette(i)["roofs"]
+	var c: Color = roofs[0] if rng.randf() < 0.5 else roofs[rng.randi_range(0, roofs.size() - 1)]
+	return c.darkened(rng.randf_range(-0.05, 0.1))
+
+
+func _tenement_stone(rng: RandomNumberGenerator, i: int) -> Color:
+	# Tenement streets are mostly one stone: red or blonde, by the street's character.
+	var walls: Array = _house_palette(i)["walls"]
+	var first: Color = walls[0]
+	var red_odds := 0.85 if first == RED_SANDSTONE else (0.15 if first == BLONDE_SANDSTONE else 0.5)
+	var c: Color = RED_SANDSTONE if rng.randf() < red_odds else BLONDE_SANDSTONE
+	return c.darkened(rng.randf_range(-0.03, 0.08))
 
 
 func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
@@ -2991,10 +3084,10 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		for row_back: float in [3.0, back_row]:
 			for along: float in [-12.5, 12.5]:
 				var storeys := rng.randi_range(3, 4)
-				var stone := RED_SANDSTONE if rng.randf() < 0.5 else BLONDE_SANDSTONE
+				var stone := _tenement_stone(rng, i)
 				var spot := _place(i, front, along, row_back, 22.0, 13.0)
-				_add_block(spot, 22.0, 13.0, storeys * 3.0 + 0.5, stone, STYLE_FLATS, 4.5, SLATE,
-					wall_list, roof_list)
+				var slate: Color = SLATE_DARK if rng.randf() < 0.5 else SLATE
+				_add_block(spot, 22.0, 13.0, storeys * 3.0 + 0.5, stone, STYLE_FLATS, 4.5, slate, wall_list, roof_list)
 		_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)                       # front pavement
 		_tenement_court(i, front, back_row, rng)
 		return
@@ -3021,10 +3114,10 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			var w := rng.randf_range(7.0, 7.8)
 			var d := rng.randf_range(7.0, 9.0)
 			var h := 5.6 if rng.randf() < 0.8 else 3.2   # mostly two storeys, some bungalows
-			var roof := SLATE if rng.randf() < 0.75 else ROOF_TILE
+			var roof := _house_roof(rng, i)
 			var house_along: float = along - 5.3 + w * 0.5
 			var spot := _place(i, front, house_along, back, w, d)
-			var walls_colour := _house_colour(rng)
+			var walls_colour := _house_colour(rng, i)
 			_add_block(spot, w, d, h, walls_colour, STYLE_HOUSE,
 				rng.randf_range(2.8, 3.6), roof, wall_list, roof_list)
 			var drive_along: float = along - 5.3 + w + 1.5
@@ -3153,8 +3246,8 @@ func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGene
 	var back_row: float = depth - 13.0
 	var green := _hedge_colour(rng)
 	for row_back: float in [4.0, back_row]:
-		var stone: Color = _house_colour(rng)
-		var roof: Color = SLATE if rng.randf() < 0.7 else ROOF_TILE
+		var stone: Color = _house_colour(rng, i)
+		var roof: Color = _house_roof(rng, i)
 		for along: float in [-15.5, 0.0, 15.5]:
 			var spot := _place(i, front, along, row_back, 15.0, 8.5)
 			_add_block(spot, 15.0, 8.5, 6.2, stone.darkened(rng.randf_range(-0.04, 0.06)), STYLE_HOUSE,
@@ -3237,16 +3330,42 @@ func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: flo
 	_premium_court(i, front, 17.5, court_back - 1.0, rng)
 
 
+# Skyscraper materials (sRGB). Glass tints for curtain walling...
+const GLASS_TINTS := [Color(0.24, 0.38, 0.52), Color(0.26, 0.44, 0.42), Color(0.44, 0.34, 0.24),
+	Color(0.62, 0.66, 0.70), Color(0.15, 0.17, 0.20), Color(0.32, 0.50, 0.60)]   # blue, green, bronze, silver, smoke, sky
+# ...coloured spandrel panels between the glass...
+const SPANDRELS := [Color(0.88, 0.88, 0.85), Color(0.20, 0.21, 0.23), Color(0.64, 0.34, 0.24),
+	Color(0.72, 0.58, 0.32), Color(0.30, 0.40, 0.48)]                              # white, charcoal, terracotta, gold, slate blue
+# ...stone and brick for art deco towers, concrete for grids, render for towers of flats.
+const TOWER_STONES := [Color(0.86, 0.82, 0.72), Color(0.84, 0.71, 0.50), Color(0.60, 0.34, 0.27),
+	Color(0.55, 0.28, 0.20), Color(0.80, 0.78, 0.74)]                             # limestone, honey, red sandstone, brick, Portland
+const TOWER_CONCRETE := [Color(0.66, 0.66, 0.63), Color(0.88, 0.88, 0.85), Color(0.76, 0.68, 0.55),
+	Color(0.40, 0.41, 0.42)]                                                        # concrete, white, buff, dark
+const TOWER_RENDER := [Color(0.92, 0.92, 0.90), Color(0.86, 0.80, 0.67), Color(0.70, 0.42, 0.32),
+	Color(0.72, 0.74, 0.74), Color(0.55, 0.60, 0.66)]                             # white, cream, terracotta, pale grey, blue-grey
+const TOWER_PANELS := [Color(0.90, 0.70, 0.22), Color(0.22, 0.55, 0.56), Color(0.72, 0.22, 0.16),
+	Color(0.24, 0.40, 0.66), Color(0.42, 0.60, 0.30), Color(0.25, 0.26, 0.28)]   # yellow, teal, red, blue, green, charcoal
 const SKY_CLADDING := [Color(0.80, 0.82, 0.84), Color(0.33, 0.27, 0.21), Color(0.84, 0.71, 0.50),
-	Color(0.22, 0.23, 0.25), Color(0.92, 0.92, 0.90)]   # silver, bronze, stone, charcoal, white
+	Color(0.22, 0.23, 0.25), Color(0.92, 0.92, 0.90)]   # (box fallback) silver, bronze, stone, charcoal, white
+
+
+func _pick(rng: RandomNumberGenerator, list: Array) -> Color:
+	var c: Color = list[rng.randi_range(0, list.size() - 1)]
+	return c
 
 
 func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: float, offices: bool,
 		rng: RandomNumberGenerator, wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
-	# CBD skyscrapers. A three-storey podium along the street (glass, or classical
-	# with shopfronts), and a tower rising from it: stage 7 is 20-26 storeys with
-	# a set-back crown; stage 8 is a 32-42 storey landmark that steps in twice
-	# on the way up and finishes with a spire.
+	# CBD skyscrapers: a three-storey podium along the street (glass, or classical
+	# with shopfronts), and one or two towers rising from it. Each plot gets its
+	# own design (picked from the plot's own random numbers, so it never changes):
+	#   offices: tinted curtain glass, glass with coloured spandrels, art deco stone
+	#            with a stepped floodlit top, or a precast concrete grid;
+	#   flats:   bands of render with coloured panels, brick or stone, green or blue
+	#            glass, or a white grid; all with balconies.
+	# Footprints vary (slab, square, block, slender, twin towers), towers step in,
+	# and tops differ: plant screens, sloping glass, deco steps, a landmark spire.
+	# Stage 7 is 20-26 storeys; stage 8 a 32-42 storey landmark.
 	var classical_podium := rng.randf() < 0.4
 	var podium := _place(i, front, 0.0, 3.0, 46.0, 24.0)
 	var podium_h := 12.6
@@ -3264,50 +3383,133 @@ func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: flo
 		for along: float in [-17.0, 0.0, 17.0]:
 			_plant(i, front, along + rng.randf_range(-2.0, 2.0), plaza_from + (depth - plaza_from) * 0.5,
 				rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
-	var base := _place(i, front, 0.0, 5.0, 26.0, 20.0)
-	var x_axis: Vector3 = base["x"]
-	var z_axis: Vector3 = base["z"]
-	var at: Vector3 = base["pos"]
-	at.y += podium_h
-	var glassy := offices or value >= 0.75 or rng.randf() < 0.4
-	var cladding: Color = SKY_CLADDING[rng.randi_range(0, SKY_CLADDING.size() - 1)]
-	var style := STYLE_GLASS if glassy else STYLE_MODERN
-	var colour: Color = GLASS_FRAME if glassy else cladding
+
+	# The design: material family, floor model and colours.
+	var family := rng.randi_range(0, 3)
+	var floor_model := "glass_floor"
+	var colour := _pick(rng, GLASS_TINTS)
+	var accent := colour.darkened(0.35)
+	var box_style := STYLE_GLASS
+	if offices:
+		match family:
+			1:          # glass with coloured spandrels
+				accent = _pick(rng, SPANDRELS)
+			2:          # art deco stone
+				floor_model = "tower_stone"
+				colour = _pick(rng, TOWER_STONES)
+				accent = [BRONZE, CHARCOAL, Color(0.16, 0.28, 0.24)][rng.randi_range(0, 2)]
+				box_style = STYLE_CLASSICAL
+			3:          # precast concrete grid
+				floor_model = "tower_grid"
+				colour = _pick(rng, TOWER_CONCRETE)
+				accent = colour
+				box_style = STYLE_MODERN
+	else:
+		match family:
+			0, 1:       # bands of render with coloured panels
+				floor_model = "tower_band"
+				colour = _pick(rng, TOWER_RENDER)
+				accent = _pick(rng, TOWER_PANELS)
+				box_style = STYLE_MODERN
+			2:          # brick or stone with punched windows
+				floor_model = "tower_stone"
+				colour = _pick(rng, TOWER_STONES)
+				accent = CHARCOAL
+				box_style = STYLE_CLASSICAL
+			3:          # green or blue glass
+				colour = GLASS_TINTS[[0, 1, 5][rng.randi_range(0, 2)]]
+				accent = _pick(rng, SPANDRELS) if rng.randf() < 0.5 else colour.darkened(0.35)
+	var deco := floor_model == "tower_stone" and offices
+	var glass := floor_model == "glass_floor"
 	var floor_h := 3.6 if offices else 3.2
-	var floor_model := "glass_floor" if glassy else "modern_floor"
-	var stacked := _models.has(floor_model)
 	var storeys := rng.randi_range(20, 26) if lv == 7 else rng.randi_range(32, 42)
-	# Tiers: [width, depth, share of the storeys]
-	var tiers: Array = [[24.0, 19.0, 0.88], [18.0, 14.0, 0.12]]
-	if lv >= 8:
-		tiers = [[26.0, 20.0, 0.55], [21.0, 16.0, 0.30], [15.0, 12.0, 0.15]]
+
+	# Footprint and massing. Tiers: [width, depth, share of the storeys, offset along the street].
+	var shape := rng.randi_range(0, 4)
+	var dims: Array = [[26.0, 19.0], [32.0, 15.0], [22.0, 21.0], [19.0, 17.0], [16.0, 16.0]][shape]
+	var tw0: float = dims[0]
+	var td0: float = dims[1]
+	var tiers: Array = [[tw0, td0, 1.0, 0.0]]
+	if deco:
+		tiers = [[tw0, td0, 0.55, 0.0], [tw0 * 0.82, td0 * 0.84, 0.28, 0.0], [tw0 * 0.64, td0 * 0.68, 0.17, 0.0]]
+	elif lv >= 8:
+		tiers = [[tw0, td0, 0.58, 0.0], [tw0 * 0.8, td0 * 0.82, 0.27, 0.0], [tw0 * 0.6, td0 * 0.66, 0.15, 0.0]]
+	elif rng.randf() < 0.45:
+		if rng.randf() < 0.5:
+			tiers = [[tw0, td0, 0.8, 0.0], [tw0 * 0.72, td0 * 0.8, 0.2, 0.0]]          # one setback
+		else:
+			var side := -1.0 if rng.randf() < 0.5 else 1.0                          # stepped to one side
+			tiers = [[tw0, td0, 0.7, 0.0], [tw0 * 0.55, td0, 0.3, side * tw0 * 0.225]]
+	var crown := "crown_plant"
+	if deco:
+		crown = "crown_deco"
+	elif glass and lv >= 8:
+		crown = "crown_spire" if rng.randf() < 0.6 else "crown_slope"
+	elif glass and rng.randf() < 0.4:
+		crown = "crown_slope"
+	elif not offices and rng.randf() < 0.5:
+		crown = "modern_top"
+	var towers: Array[float] = [0.0]
+	if shape == 4 and lv == 7:
+		towers = [-11.5, 11.5]           # twin slender towers
+	elif tw0 < 30.0:
+		var shift: float = float(rng.randi_range(-1, 1)) * (23.0 - tw0 * 0.5 - 1.0)
+		towers = [shift]
+	for t_along: float in towers:
+		var twin := towers.size() > 1
+		var floors_total: int = storeys - (rng.randi_range(2, 5) if twin and t_along > 0.0 else 0)
+		var base := _place(i, front, t_along, 4.0, tw0, td0)
+		var at: Vector3 = base["pos"]
+		at.y += podium_h
+		_stack_tower(at, base["x"], base["z"], tiers, floors_total, floor_h, floor_model, crown, colour, accent,
+			box_style, not offices, wall_list, chimney_list, lv >= 8)
+
+
+func _stack_tower(at: Vector3, x_axis: Vector3, z_axis: Vector3, tiers: Array, storeys: int, floor_h: float,
+		floor_model: String, crown: String, colour: Color, accent: Color, box_style: int, balconies: bool,
+		wall_list: Array, chimney_list: Array, landmark: bool) -> void:
+	# A tower, storey by storey (the floor models stretched to each tier), stepping
+	# in tier by tier, then its top.
+	var stacked := _models.has(floor_model)
+	var tw: float = 0.0
+	var td: float = 0.0
+	var centre := at
 	for tier: Array in tiers:
-		var tw: float = tier[0]
-		var td: float = tier[1]
+		tw = tier[0]
+		td = tier[1]
+		centre = Vector3(at.x, at.y, at.z) + x_axis * float(tier[3])
 		var floors: int = maxi(roundi(storeys * float(tier[2])), 2)
 		var th: float = floors * floor_h
 		if stacked:
-			# The storey models, stretched to this tier's size.
-			var tier_spot := {"pos": at, "x": x_axis, "z": z_axis}
+			var tier_spot := {"pos": centre, "x": x_axis, "z": z_axis}
 			for f: int in floors:
-				_add_model(floor_model, _raised(tier_spot, f * floor_h), tw, td, floor_h, colour, colour)
+				_add_model(floor_model, _raised(tier_spot, f * floor_h), tw, td, floor_h, colour, accent)
 		else:
-			_box_item(wall_list, at, x_axis, z_axis, Vector3(tw, th, td), colour, style)
-		# A light slab edge where each tier steps in.
-		_box_item(wall_list, at + Vector3.UP * th, x_axis, z_axis, Vector3(tw + 0.6, 0.5, td + 0.6),
-			TRIM if glassy else cladding.lightened(0.2), STYLE_PAINT)
-		at += Vector3.UP * (th + 0.5)
-		if not offices:
-			# Glass balconies on the front, every other floor.
+			_box_item(wall_list, centre, x_axis, z_axis, Vector3(tw, th, td), colour, box_style)
+		if balconies:
+			# Balconies on the front and back, every other floor: a slab and glass front.
 			for f in range(1, floors, 2):
-				var y: float = at.y - th - 0.5 + f * floor_h
-				var balcony := Vector3(at.x, y, at.z) - z_axis * (td * 0.5 + 0.7)
-				_prop_items.append([Transform3D(Basis(x_axis * (tw * 0.6), Vector3.UP * 1.0, z_axis * 1.4),
-					balcony), BALCONY_GLASS])
-	# Roof plant and, on a landmark, a spire.
-	_box_item(wall_list, at, x_axis, z_axis, Vector3(8.0, 3.0, 6.0), CONCRETE, STYLE_PLANT)
-	if lv >= 8:
-		chimney_list.append([Transform3D(Basis.from_scale(Vector3(0.7, 28.0, 0.7)), at + Vector3.UP * 17.0),
+				for side: float in [-1.0, 1.0]:
+					var y: float = centre.y + f * floor_h
+					var balcony := Vector3(centre.x, y, centre.z) + z_axis * side * (td * 0.5 + 0.7) \
+						+ x_axis * (tw * 0.2 * side)
+					_prop_items.append([Transform3D(Basis(x_axis * (tw * 0.45), Vector3.UP * 0.2, z_axis * 1.4),
+						balcony), TRIM])
+					_prop_items.append([Transform3D(Basis(x_axis * (tw * 0.45), Vector3.UP * 1.0, z_axis * 0.08),
+						balcony + Vector3.UP * 0.2 + z_axis * side * 0.66), BALCONY_GLASS])
+		# A slab edge where the tower steps in.
+		_box_item(wall_list, centre + Vector3.UP * th, x_axis, z_axis, Vector3(tw + 0.5, 0.45, td + 0.5),
+			accent.lerp(colour, 0.5), STYLE_PAINT)
+		at = Vector3(at.x, centre.y + th + 0.45, at.z)
+		centre.y = at.y
+	var top := {"pos": centre, "x": x_axis, "z": z_axis}
+	if _models.has(crown):
+		_add_model(crown, top, tw, td, _model_total(crown), colour, accent)
+		return
+	# Without the models: roof plant and, on a landmark, a spire.
+	_box_item(wall_list, centre, x_axis, z_axis, Vector3(8.0, 3.0, 6.0), CONCRETE, STYLE_PLANT)
+	if landmark:
+		chimney_list.append([Transform3D(Basis.from_scale(Vector3(0.7, 28.0, 0.7)), centre + Vector3.UP * 17.0),
 			Color(0.80, 0.82, 0.84)])
 
 
@@ -3317,14 +3519,21 @@ func _classical_stone(rng: RandomNumberGenerator) -> Color:
 	return c.darkened(rng.randf_range(-0.03, 0.05))
 
 
+const TERRACOTTA := Color(0.72, 0.42, 0.30)
+const ZINC := Color(0.50, 0.53, 0.56)
+const SAGE := Color(0.56, 0.63, 0.50)
+
+
 func _modern_cladding(rng: RandomNumberGenerator) -> Color:
-	var options := [TIMBER, BRONZE, CREAM_STONE, CHARCOAL, TIMBER]
+	# Modern blocks: timber, bronze, stone, charcoal, brick, terracotta, zinc, sage render.
+	var options := [TIMBER, BRONZE, CREAM_STONE, CHARCOAL, BRICK, TERRACOTTA, ZINC, SAGE, BUFF_BRICK, TIMBER]
 	var c: Color = options[rng.randi_range(0, options.size() - 1)]
 	return c
 
 
 func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone: Color,
-		shops: bool, bays: bool, wall_list: Array, roof_list: Array, mansard: bool = true) -> void:
+		shops: bool, bays: bool, wall_list: Array, roof_list: Array, mansard: bool = true,
+		slate: Color = SLATE) -> void:
 	# Sandstone: tall rusticated ground floor, sash windows in stone surrounds,
 	# full-height bay windows, a cornice and a slate mansard roof with dormers.
 	var h: float = 4.2 + (storeys - 1) * 3.4 + 0.6
@@ -3333,7 +3542,7 @@ func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone:
 		var kind := "_shops" if shops else ("_bays" if bays and storeys >= 5 else "")
 		var model_name := "classical%d%s" % [storeys, kind]
 		if _models.has(model_name):
-			_add_model(model_name, spot, w, d, h + 0.9 + 4.0, stone, SLATE)
+			_add_model(model_name, spot, w, d, h + 0.9 + 4.0, stone, slate)
 			return
 	var x_axis: Vector3 = spot["x"]
 	var z_axis: Vector3 = spot["z"]
@@ -3349,7 +3558,7 @@ func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone:
 		return   # a podium: something else stands on top
 	# Mansard roof.
 	roof_list.append([Transform3D(Basis(x_axis * (w - 0.4), Vector3.UP * 4.0, z_axis * (d - 0.4)),
-		pos + Vector3.UP * (h + 0.9)), SLATE])
+		pos + Vector3.UP * (h + 0.9)), slate])
 	# Dormers along the front slope.
 	var dormers: int = maxi(2, int(w / 5.5))
 	for k: int in dormers:
@@ -3377,12 +3586,18 @@ func _modern_block(spot: Dictionary, w: float, d: float, storeys: int, cladding:
 	var body_floors: int = maxi(storeys - 3, 1)
 	var body_h: float = body_floors * 3.2
 	var floor_model := "glass_floor" if glassy else "modern_floor"
+	# All-glass blocks take a glass tint, picked by position (blue, green, bronze, silver...).
+	var pos0: Vector3 = spot["pos"]
+	var glass_tint: Color = GLASS_TINTS[int(fposmod(pos0.x * 0.131 + pos0.z * 0.173, 1.0) * GLASS_TINTS.size())]
 	var stacked: bool = _models.has("modern_base") and _models.has("modern_top") and _models.has(floor_model)
 	if stacked:
 		# The detailed models, storey by storey (the roof has the penthouse and terrace).
 		_add_model("modern_base", spot, w, d, base_h, cladding, cladding)
 		for f: int in body_floors:
-			_add_model(floor_model, _raised(spot, base_h + f * 3.2), w, d, 3.2, cladding, cladding)
+			if glassy:
+				_add_model(floor_model, _raised(spot, base_h + f * 3.2), w, d, 3.2, glass_tint, glass_tint.darkened(0.35))
+			else:
+				_add_model(floor_model, _raised(spot, base_h + f * 3.2), w, d, 3.2, cladding, cladding)
 		_add_model("modern_top", _raised(spot, base_h + body_h), w, d, _model_total("modern_top"), cladding, cladding)
 	else:
 		_modern_block_boxes(spot, w, d, base_h, body_h, cladding, glassy, wall_list)
@@ -3438,9 +3653,16 @@ func _premium_court(i: int, front: Vector2i, from: float, to: float, rng: Random
 		_extra_trees.append([Vector2(at.x, at.z), rng.randf_range(7.0, 11.0), _park_kind(rng)])
 
 
+# A high street's walls: sandstone, and render painted in many colours (sRGB).
+const SHOP_COLOURS := [Color(0.90, 0.89, 0.85), Color(0.80, 0.69, 0.52), Color(0.86, 0.80, 0.67),
+	Color(0.60, 0.34, 0.27), Color(0.62, 0.72, 0.78), Color(0.64, 0.72, 0.58), Color(0.86, 0.62, 0.52),
+	Color(0.90, 0.80, 0.50), Color(0.70, 0.82, 0.76), Color(0.84, 0.71, 0.50), Color(0.55, 0.26, 0.18)]
+	# white, blonde, cream, red sandstone, pale blue, sage, salmon, yellow ochre, mint, honey, brick
+
+
 func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array) -> void:
-	var colours := [WHITE_RENDER, BLONDE_SANDSTONE, CREAM_RENDER, RED_SANDSTONE, GREY_RENDER]
+	var colours := SHOP_COLOURS
 	var depth := _depth(i, front)
 	var value := _values[i] if i < _values.size() else 0.3
 	if lv >= 7:
@@ -3492,7 +3714,7 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			var spot := _place(i, front, along, 3.0, 15.5, 13.0)
 			_add_block(spot, 15.5, 13.0, height + rng.randf_range(-0.2, 0.4),
 				colours[rng.randi_range(0, colours.size() - 1)], STYLE_SHOP,
-				3.0 if lv == 2 else 0.0, SLATE, wall_list, roof_list)
+				3.0 if lv == 2 else 0.0, SLATE_DARK if rng.randf() < 0.5 else SLATE, wall_list, roof_list)
 	# Wide pavement out front with planters, a bench and bins (the shader paves
 	# the rest of the frontage).
 	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
@@ -3557,29 +3779,106 @@ func _street_furniture(i: int, front: Vector2i, shops: bool) -> void:
 		_prop(i, front, 20.0, 0.6, 0.5, 0.5, 1.4, POST_BOX)
 
 
+# Industrial sheds come in colourways: [wall cladding, roof sheet] (sRGB).
+const SHED_COLOURWAYS := [
+	[Color(0.55, 0.58, 0.62), Color(0.40, 0.42, 0.45)],   # grey
+	[Color(0.31, 0.42, 0.35), Color(0.30, 0.35, 0.32)],   # green
+	[Color(0.22, 0.35, 0.52), Color(0.42, 0.45, 0.49)],   # blue
+	[Color(0.82, 0.78, 0.66), Color(0.46, 0.46, 0.45)],   # cream ("goosewing grey")
+	[Color(0.50, 0.23, 0.17), Color(0.34, 0.29, 0.27)],   # rust red
+	[Color(0.74, 0.76, 0.78), Color(0.56, 0.58, 0.60)],   # silver
+	[Color(0.29, 0.31, 0.33), Color(0.22, 0.23, 0.25)],   # dark grey
+]
+const WORKS_WALLS := [Color(0.58, 0.30, 0.22), Color(0.50, 0.25, 0.18), Color(0.60, 0.34, 0.27),
+	Color(0.64, 0.56, 0.44)]                                # red brick, dark brick, red sandstone, buff stone
+const WORKS_ROOF := Color(0.34, 0.36, 0.38)
+const STEEL_STACK := Color(0.62, 0.63, 0.64)
+const SILO := Color(0.80, 0.81, 0.80)
+
+
+func _industrial(model_name: String, spot: Dictionary, w: float, d: float, h: float, roof_h: float,
+		colour: Color, roof_colour: Color, wall_list: Array, roof_list: Array) -> void:
+	# A works building: the model if it's there, otherwise the simple shed or block.
+	if _models.has(model_name):
+		_add_model(model_name, spot, w, d, h + roof_h, colour, roof_colour)
+	else:
+		_add_block(spot, w, d, h, colour, STYLE_INDUSTRY, roof_h, roof_colour, wall_list, roof_list)
+
+
 func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
-	var cladding := SHED_METAL if rng.randf() < 0.6 else SHED_GREEN
+	# Works get bigger and heavier stage by stage: small units or an old brick
+	# works with a sawtooth roof; then a bigger shed, works or warehouse; then a big
+	# distribution warehouse, a large works with a brick chimney, or a processing
+	# plant with silos and a steel stack. Sheds come in several colourways
+	# (neighbouring works on an estate tend to match); only heavy works have chimneys.
 	var depth := _depth(i, front)
 	var stack_at := Vector2(-14.0, depth - 10.0)
+	var tile := Vector2i(i % map_w, i / map_w)
+	var estate := _field_rand(tile.x / 3, tile.y / 3, 331)
+	var way_index := int(estate * SHED_COLOURWAYS.size()) if rng.randf() < 0.6 \
+		else rng.randi_range(0, SHED_COLOURWAYS.size() - 1)
+	var way: Array = SHED_COLOURWAYS[mini(way_index, SHED_COLOURWAYS.size() - 1)]
+	var cladding: Color = way[0]
+	var sheet: Color = way[1]
+	var brick: Color = _pick(rng, WORKS_WALLS)
+	var kind := rng.randi_range(0, 2)
 	if lv == 1:
-		var spot := _place(i, front, 0.0, 6.0, 34.0, 28.0)
-		_add_block(spot, 34.0, 28.0, 8.0, cladding, STYLE_INDUSTRY, 2.2, SHED_METAL.darkened(0.2),
-			wall_list, roof_list)
+		if kind == 0:
+			# An old works: brick, with a north-light roof.
+			var spot := _place(i, front, -2.0, 6.0, 32.0, 24.0)
+			_industrial("works", spot, 32.0, 24.0, 6.0, 3.0, brick, WORKS_ROOF, wall_list, roof_list)
+		else:
+			# Two small units side by side.
+			for along: float in [-12.5, 9.5]:
+				var spot := _place(i, front, along, 6.0, 17.0, 20.0)
+				_industrial("shed", spot, 17.0, 20.0, 6.0, 1.6, cladding, sheet, wall_list, roof_list)
 	elif lv == 2:
-		var a := _place(i, front, -7.0, 4.0, 32.0, 26.0)
-		_add_block(a, 32.0, 26.0, 9.0, cladding, STYLE_INDUSTRY, 2.2, SHED_METAL.darkened(0.2),
-			wall_list, roof_list)
-		var b := _place(i, front, 14.0, depth - 22.0, 18.0, 18.0)
-		_add_block(b, 18.0, 18.0, 7.0, CONCRETE, STYLE_INDUSTRY, 0.0, SLATE, wall_list, roof_list)
+		match kind:
+			0:
+				var a := _place(i, front, -7.0, 4.0, 32.0, 26.0)
+				_industrial("shed", a, 32.0, 26.0, 9.0, 2.2, cladding, sheet, wall_list, roof_list)
+				var b := _place(i, front, 14.0, depth - 22.0, 18.0, 18.0)
+				_add_block(b, 18.0, 18.0, 7.0, CONCRETE, STYLE_INDUSTRY, 0.0, SLATE, wall_list, roof_list)
+			1:
+				var a := _place(i, front, -4.0, 4.0, 36.0, 28.0)
+				_industrial("works", a, 36.0, 28.0, 7.0, 3.2, brick, WORKS_ROOF, wall_list, roof_list)
+				var b := _place(i, front, 16.0, depth - 18.0, 14.0, 14.0)
+				_industrial("shed", b, 14.0, 14.0, 5.5, 1.4, cladding, sheet, wall_list, roof_list)
+			_:
+				var a := _place(i, front, -4.0, 4.0, 36.0, 26.0)
+				_industrial("warehouse", a, 36.0, 26.0, 9.5, 0.0, cladding, sheet, wall_list, roof_list)
 	else:
-		var spot := _place(i, front, -3.0, 4.0, 42.0, depth - 18.0)
-		_add_block(spot, 42.0, depth - 18.0, 13.0, cladding, STYLE_INDUSTRY, 3.0, SHED_METAL.darkened(0.25),
-			wall_list, roof_list)
-		var chimney := _place(i, front, 20.0, depth - 8.0, 4.0, 4.0)
-		var pos: Vector3 = chimney["pos"]
-		chimney_list.append([Transform3D(Basis.from_scale(Vector3(2.0, 34.0, 2.0)),
-			pos + Vector3.UP * 17.0), RED_SANDSTONE.darkened(0.3)])
+		match kind:
+			0:
+				# A big distribution warehouse with silos behind.
+				var spot := _place(i, front, -3.0, 4.0, 42.0, depth - 18.0)
+				_industrial("warehouse", spot, 42.0, depth - 18.0, 13.0, 0.0, cladding, sheet, wall_list, roof_list)
+			1:
+				# A large works with a tall brick chimney.
+				var spot := _place(i, front, -3.0, 4.0, 42.0, depth - 18.0)
+				_industrial("works", spot, 42.0, depth - 18.0, 8.0, 3.6, brick, WORKS_ROOF, wall_list, roof_list)
+				var chimney := _place(i, front, 20.0, depth - 8.0, 4.0, 4.0)
+				var pos: Vector3 = chimney["pos"]
+				chimney_list.append([Transform3D(Basis.from_scale(Vector3(1.8, 32.0, 1.8)),
+					pos + Vector3.UP * 16.0), brick.darkened(0.15)])
+				chimney_list.append([Transform3D(Basis.from_scale(Vector3(2.1, 1.2, 2.1)),
+					pos + Vector3.UP * 31.4), brick.darkened(0.35)])
+			_:
+				# A processing plant: a shed, a tall mill block, a row of silos and a steel stack.
+				var shed := _place(i, front, -9.0, 4.0, 30.0, 26.0)
+				_industrial("shed", shed, 30.0, 26.0, 10.0, 2.2, cladding, sheet, wall_list, roof_list)
+				var mill := _place(i, front, 13.0, 4.0, 12.0, 16.0)
+				_add_block(mill, 12.0, 16.0, 19.0, cladding.lerp(CONCRETE, 0.5), STYLE_INDUSTRY, 0.0, SLATE,
+					wall_list, roof_list)
+				for k in 3:
+					var silo := _place(i, front, 10.0 + k * 5.2, 23.0, 4.6, 4.6)
+					_cylinder(chimney_list, silo["pos"], 2.3, 17.0, SILO)
+					_cylinder(chimney_list, Vector3(silo["pos"]) + Vector3.UP * 17.0, 1.6, 1.4, SILO.darkened(0.2))
+				var stack := _place(i, front, 20.0, depth - 8.0, 3.0, 3.0)
+				_cylinder(chimney_list, stack["pos"], 1.1, 28.0, STEEL_STACK)
+				_cylinder(chimney_list, Vector3(stack["pos"]) + Vector3.UP * 25.0, 1.15, 1.0, CROSS_RED)
+				_prop(i, front, 6.5, 10.0, 2.0, 1.0, 1.0, STEEL_STACK.darkened(0.3), 9.0)     # a pipe bridge
 	# Shipping containers stacked in the yard.
 	for k in 4:
 		var colour: Color = CONTAINERS[rng.randi_range(0, CONTAINERS.size() - 1)]
@@ -3838,6 +4137,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			var spot := _place(i, front, 0.0, 9.0, 26.0, 16.0)
 			_classical_block(spot, 26.0, 16.0, 2, CREAM_STONE, false, false, wall_list, roof_list)
 			_columns(spot, 16.0, 4, 10.0, 7.5, CREAM_STONE.lightened(0.1), wall_list, roof_list)
+			_dome(Vector3(spot["pos"]) + Vector3.UP * (4.2 + 3.4 + 0.6 + 0.9 + 4.0), 4.0, COPPER_GREEN)
 			for k in 4:
 				_plant(i, front, -20.0 + (k % 2) * 40.0, 12.0 + (k / 2) * 14.0, rng.randf_range(7.0, 10.0),
 					TreeKind.BROADLEAF, rng)
@@ -3847,6 +4147,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			var spot := _place(i, front, -5.0, 10.0, 34.0, 20.0)
 			_classical_block(spot, 34.0, 20.0, 3, HONEY_STONE, false, false, wall_list, roof_list)
 			_columns(spot, 20.0, 6, 16.0, 10.5, HONEY_STONE.lightened(0.12), wall_list, roof_list)
+			_dome(Vector3(spot["pos"]) + Vector3.UP * (4.2 + 2 * 3.4 + 0.6 + 0.9 + 4.0), 5.5, COPPER_GREEN)
 			var wing := _place(i, front, 18.0, 14.0, 12.0, 16.0)
 			if _models.has("museum_wing"):
 				_add_model("museum_wing", wing, 12.0, 16.0, _model_total("museum_wing"), HONEY_STONE, SLATE)
@@ -3901,7 +4202,8 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_columns(spot, 18.0, 4, 10.0, 11.0, BLONDE_SANDSTONE.lightened(0.12), wall_list, roof_list)
 			var tower := _place(i, front, 0.0, 16.0, 7.0, 7.0)
 			var tower_pos: Vector3 = tower["pos"]
-			_add_block(tower, 7.0, 7.0, 32.0, BLONDE_SANDSTONE, STYLE_CLASSICAL, 5.0, SLATE, wall_list, roof_list)
+			_add_block(tower, 7.0, 7.0, 32.0, BLONDE_SANDSTONE, STYLE_CLASSICAL, 5.0, COPPER_GREEN, wall_list, roof_list)
+			_flag(_raised(_place(i, front, 0.0, 19.5, 0.2, 0.2), 37.0), 6.0, SALTIRE_BLUE)
 			_box_item(wall_list, tower_pos + Vector3.UP * 26.0 - Vector3(tower["z"]) * 3.62,
 				tower["x"], tower["z"], Vector3(2.6, 2.6, 0.2), WHITE_RENDER, STYLE_PAINT)   # clock
 			for along: float in [-18.0, 18.0]:
@@ -4686,10 +4988,15 @@ func set_time_of_day(t: float) -> void:
 		_sky_energy = sky_energy
 		sky_material.set("energy_multiplier", sky_energy)
 
+	# How late in the night it is (0 in the evening, 1 in the small hours): homes go dark.
+	var since_sunset := fposmod(t - 0.75, 1.0)
+	var late := smoothstep(0.08, 0.3, since_sunset) * (1.0 - smoothstep(0.42, 0.5, since_sunset))
 	if wall_material:
 		wall_material.set_shader_parameter("night", night)
+		wall_material.set_shader_parameter("late", late)
 	for mat in _model_materials:
 		mat.set_shader_parameter("night", night)
+		mat.set_shader_parameter("late", late)
 	if road_material:
 		road_material.set_shader_parameter("night", night)
 

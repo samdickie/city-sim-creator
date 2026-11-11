@@ -15,7 +15,9 @@ import bpy
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import make_buildings as mb  # noqa: E402
 
-# Colours from scripts/world3d.gd (linear, as the game uses them).
+# Colours from scripts/world3d.gd. The game treats its building and prop colours
+# as sRGB (its shaders make them linear), so those are passed with srgb=True here;
+# the ground, trees and the shader's own fixed colours are linear.
 RED_SANDSTONE = (0.60, 0.34, 0.27)
 BLONDE_SANDSTONE = (0.80, 0.69, 0.52)
 WHITE_RENDER = (0.90, 0.89, 0.85)
@@ -59,6 +61,10 @@ GAS_BLUE = (0.10, 0.36, 0.56)
 NUCLEAR_CONCRETE = (0.80, 0.80, 0.78)
 NUCLEAR_BLUE = (0.30, 0.42, 0.56)
 HEDGE = (0.16, 0.30, 0.12)
+POLICE_ROOF = (0.17, 0.24, 0.40)
+COPPER_GREEN = (0.40, 0.64, 0.54)
+SALTIRE_BLUE = (0.0, 0.37, 0.72)
+GLASS_BLUE = (0.24, 0.38, 0.52)
 CONTAINERS = [(0.62, 0.18, 0.12), (0.12, 0.30, 0.55), (0.75, 0.55, 0.10), (0.20, 0.45, 0.30)]
 CAR_PAINT = [(0.55, 0.05, 0.05), (0.05, 0.12, 0.35), (0.85, 0.85, 0.85), (0.08, 0.08, 0.08), (0.45, 0.45, 0.47)]
 
@@ -108,9 +114,17 @@ def _textured(nodes, links, tex, tint, metres):
     return mix.outputs["Result"]
 
 
-def material(kind, tint=(0.8, 0.8, 0.8), rough=0.85, metal=0.0, emit=None):
-    """kind: 'plain', 'stone' (sandstone photo), 'slate', 'grass', 'tarmac' or 'glass'."""
-    key = (kind, tuple(round(c, 3) for c in tint), rough, metal)
+def lin(c):
+    """An sRGB colour made linear (as the game's shaders do)."""
+    return tuple(v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in c[:3])
+
+
+def material(kind, tint=(0.8, 0.8, 0.8), rough=0.85, metal=0.0, emit=None, srgb=False):
+    """kind: 'plain', 'stone' (sandstone photo), 'slate', 'grass', 'tarmac' or 'glass'.
+    srgb: the tint is an sRGB colour from the game (made linear here)."""
+    if srgb:
+        tint = lin(tint)
+    key = (kind, tuple(round(c, 4) for c in tint), rough, metal)
     if key in _materials:
         return _materials[key]
     m = bpy.data.materials.new("%s_%d" % (kind, len(_materials)))
@@ -135,18 +149,25 @@ def model_materials(wall, roof, r):
         return options[int(x * 6) % 6]
     doors = [(0.08, 0.16, 0.32), (0.10, 0.24, 0.16), (0.45, 0.08, 0.08), (0.05, 0.05, 0.06),
              (0.32, 0.10, 0.16), (0.06, 0.28, 0.30)]
-    fascias = [(0.06, 0.20, 0.15), (0.06, 0.10, 0.22), (0.04, 0.04, 0.05), (0.35, 0.06, 0.08),
-               (0.75, 0.70, 0.58), (0.20, 0.28, 0.30)]
+    fascias = [(0.04, 0.16, 0.10), (0.03, 0.06, 0.20), (0.03, 0.03, 0.035), (0.36, 0.03, 0.04),
+               (0.62, 0.42, 0.06), (0.04, 0.22, 0.24)]
     awnings = [(0.55, 0.10, 0.10), (0.10, 0.32, 0.20), (0.10, 0.16, 0.38), (0.50, 0.40, 0.10),
                (0.15, 0.15, 0.15), (0.45, 0.18, 0.30)]
+    finish = (r * 3.3) % 1    # flat roofs: membrane, gravel or sedum
+    lead = (0.045, 0.048, 0.052) if finish < 0.55 else (0.12, 0.118, 0.112)
+    green = (0.10, 0.12, 0.04) if finish < 0.45 else (0.12, 0.118, 0.112)
     parts = {
-        "stone": material("stone", wall), "roof": material("slate", roof, 0.65),
+        "stone": material("stone", wall, srgb=True), "roof": material("slate", roof, 0.65, srgb=True),
         "glass": material("plain", (0.05, 0.07, 0.09), 0.08, 0.35), "frame": material("plain", (0.88, 0.87, 0.82), 0.55),
         "door": material("plain", pick((r * 3.7) % 1, doors), 0.4), "metal": material("plain", (0.09, 0.09, 0.10), 0.45, 0.4),
-        "pot": material("plain", (0.55, 0.30, 0.20)), "fascia": material("plain", pick((r * 5.3) % 1, fascias), 0.35),
-        "render": material("plain", wall), "awning": material("plain", pick((r * 2.9) % 1, awnings)),
-        "lead": material("plain", (0.30, 0.32, 0.34), 0.6), "cladding": material("plain", wall, 0.5, 0.35),
-        "sheet": material("plain", roof, 0.5, 0.35), "accent": material("plain", roof, 0.4),
+        "pot": material("plain", (0.30, 0.11, 0.06)), "fascia": material("plain", pick((r * 5.3) % 1, fascias), 0.35),
+        "render": material("plain", wall, srgb=True), "awning": material("plain", pick((r * 2.9) % 1, awnings)),
+        "lead": material("plain", lead, 0.8), "cladding": material("plain", wall, 0.5, 0.35, srgb=True),
+        "sheet": material("plain", roof, 0.5, 0.35, srgb=True), "accent": material("plain", roof, 0.4, srgb=True),
+        "curtain": material("plain", tuple(c * 0.8 for c in lin(wall)), 0.05, 0.55),
+        "display": material("plain", (0.10, 0.09, 0.08), 0.06, 0.3), "beacon": material("plain", (0.5, 0.04, 0.03)),
+        "lamp": material("plain", (0.80, 0.80, 0.76), 0.5), "office": material("plain", (0.06, 0.07, 0.085), 0.05, 0.4),
+        "green": material("plain", green, 0.95),
     }
     return [parts[name] for name in mb.MATERIALS]
 
@@ -189,11 +210,11 @@ def model(name, along, back, w, d, total_h=None, wall=BLONDE_SANDSTONE, roof=SLA
     return obj
 
 
-def box(along, back, w, d, h, colour, z0=0.0, kind="plain", rough=0.85):
+def box(along, back, w, d, h, colour, z0=0.0, kind="plain", rough=0.85, srgb=True):
     b = mb.Builder()
     y = _y(back, d)
     b.box(along - w / 2, along + w / 2, y - d / 2, y + d / 2, z0, z0 + h, "stone")
-    return _mesh_object("box", b, [material(kind, colour, rough)] * len(mb.MATERIALS))
+    return _mesh_object("box", b, [material(kind, colour, rough, srgb=srgb)] * len(mb.MATERIALS))
 
 
 def slab(along, back, w, d, colour, lift=0.0, kind="plain"):
@@ -208,7 +229,7 @@ def gabled(along, back, w, d, h, rise, colour, roof=SLATE, windows=True):
     if rise > 0:
         sec = [(y - d / 2 - 0.4, h - 0.1), (y + d / 2 + 0.4, h - 0.1), (y, h + rise)]
         b.extrude_x(sec, along - w / 2 - 0.2, along + w / 2 + 0.2, "stone")
-        _mesh_object("roof", b, [material("slate", roof, 0.65)] * len(mb.MATERIALS))
+        _mesh_object("roof", b, [material("slate", roof, 0.65, srgb=True)] * len(mb.MATERIALS))
     if windows:
         g = mb.Builder()
         floors = max(1, int(h / 3.0))
@@ -221,7 +242,7 @@ def gabled(along, back, w, d, h, rise, colour, roof=SLATE, windows=True):
         _mesh_object("windows", g, [material("plain", (0.05, 0.07, 0.09), 0.1, 0.3)] * len(mb.MATERIALS))
 
 
-def cylinder(along, back, radius, h, colour, z0=0.0, taper=1.0):
+def cylinder(along, back, radius, h, colour, z0=0.0, taper=1.0, srgb=True):
     b = mb.Builder()
     y = _y(back, 0)
     sides = 24
@@ -235,15 +256,15 @@ def cylinder(along, back, radius, h, colour, z0=0.0, taper=1.0):
         j = (k + 1) % sides
         faces.append([k, j, sides + j, sides + k])
     b._add(pts, faces, "stone")
-    return _mesh_object("cyl", b, [material("plain", colour, 0.8)] * len(mb.MATERIALS))
+    return _mesh_object("cyl", b, [material("plain", colour, 0.8, srgb=srgb)] * len(mb.MATERIALS))
 
 
 def tree(along, back, h=9.0, colour=(0.20, 0.36, 0.13), kind="broad"):
-    cylinder(along, back, 0.18 + h * 0.015, h * 0.5, (0.30, 0.22, 0.15))
+    cylinder(along, back, 0.18 + h * 0.015, h * 0.5, (0.30, 0.22, 0.15), srgb=False)
     y = _y(back, 0)
     if kind == "conifer":
         for k in range(3):
-            cylinder(along, back, h * (0.22 - k * 0.05), h * 0.3, colour, h * (0.2 + k * 0.22), 0.0)
+            cylinder(along, back, h * (0.22 - k * 0.05), h * 0.3, colour, h * (0.2 + k * 0.22), 0.0, srgb=False)
         return
     for dx, dy, dz, s in ((0, 0, 0.62, 0.32), (0.18, 0.1, 0.55, 0.22), (-0.15, -0.12, 0.6, 0.24), (0.05, -0.15, 0.75, 0.2)):
         bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=h * s,
@@ -256,7 +277,8 @@ def tree(along, back, h=9.0, colour=(0.20, 0.36, 0.13), kind="broad"):
 def car(along, back, colour, across=False):
     w, d = (1.8, 4.2) if not across else (4.2, 1.8)
     box(along, back, w, d, 0.8, colour, 0.25, rough=0.3)
-    box(along, back + (0.3 if not across else 0), w * 0.85, d * 0.5, 0.6, (0.12, 0.14, 0.16), 1.05, rough=0.2)
+    box(along, back + (0.3 if not across else 0), w * 0.85, d * 0.5, 0.6, (0.06, 0.08, 0.10), 1.05, rough=0.2,
+        srgb=False)
 
 
 def hedge(along, back, w, d, h=1.1):
@@ -352,7 +374,7 @@ def shops_0():
     ground()
     for k, along in enumerate((-16.5, 0.0, 16.5)):
         model(("shop1", "shop1_b", "shop1")[k], along, 3.0, 15.5, 13.0, 4.6,
-              (WHITE_RENDER, CREAM_RENDER, BLONDE_SANDSTONE)[k], r=0.2 + k * 0.3)
+              (WHITE_RENDER, (0.62, 0.72, 0.78), BLONDE_SANDSTONE)[k], r=0.2 + k * 0.3)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     slab(0.0, 17.0, 47.0, 31.0, CAR_PARK)
     for k in range(8):
@@ -363,7 +385,7 @@ def shops_1():
     ground()
     for k, along in enumerate((-16.5, 0.0, 16.5)):
         model(("shop2", "shop2_b", "shop2")[k], along, 3.0, 15.5, 13.0, 10.2,
-              (CREAM_RENDER, WHITE_RENDER, GREY_RENDER)[k], r=0.15 + k * 0.33)
+              (CREAM_RENDER, (0.86, 0.62, 0.52), (0.64, 0.72, 0.58))[k], r=0.15 + k * 0.33)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     slab(0.0, 17.0, 47.0, 31.0, CAR_PARK)
     for k in range(7):
@@ -459,7 +481,7 @@ def wind():
         pts = [(cx + nx, y + 4.6, cz + nz), (cx - nx, y + 4.6, cz - nz), (tip[0], y + 4.6, tip[1]),
                (cx + nx, y + 4.9, cz + nz), (cx - nx, y + 4.9, cz - nz), (tip[0], y + 4.9, tip[1])]
         b._add(pts, [[0, 2, 1], [3, 4, 5], [0, 1, 4, 3], [1, 2, 5, 4], [2, 0, 3, 5]], "stone")
-    _mesh_object("turbine", b, [material("plain", TURBINE_WHITE, 0.4)] * len(mb.MATERIALS))
+    _mesh_object("turbine", b, [material("plain", TURBINE_WHITE, 0.4, srgb=True)] * len(mb.MATERIALS))
 
 
 def solar():
@@ -472,7 +494,7 @@ def solar():
                (22, y + 1.8 * math.cos(t), 0.6 + 3.6 * math.sin(t)), (-22, y + 1.8 * math.cos(t), 0.6 + 3.6 * math.sin(t))]
         pts += [(x, yy, z + 0.12) for x, yy, z in pts]
         b.hexa(pts, "stone")
-        _mesh_object("panel", b, [material("plain", PANEL_BLUE, 0.15, 0.4)] * len(mb.MATERIALS))
+        _mesh_object("panel", b, [material("plain", PANEL_BLUE, 0.15, 0.4, srgb=True)] * len(mb.MATERIALS))
 
 
 def power_line():
@@ -520,8 +542,11 @@ def recycling():
 def police():
     ground()
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
-    model("classical3", -7.0, 4.0, 30.0, 15.0, 17.4, BLONDE_SANDSTONE, r=0.05)
+    model("classical3", -7.0, 4.0, 30.0, 15.0, 17.4, BLONDE_SANDSTONE, POLICE_ROOF, r=0.05)
     box(-7.0, 3.6, 9.0, 0.3, 0.8, POLICE_BLUE, 3.3)
+    gabled(-12.0, 19.0, 18.0, 12.0, 7.0, 0.0, BLONDE_SANDSTONE)
+    box(-12.0, 18.85, 18.3, 12.3, 0.8, POLICE_BLUE, 5.6)
+    flag(10.0, 1.5, 0.0, 9.0)
     slab(16.0, 3.0, 16.0, 45.0, CAR_PARK)
     for k in range(4):
         car(12.5 + (k % 2) * 7.0, 6.0 + (k // 2) * 8.0, (0.95, 0.95, 0.95))
@@ -582,6 +607,23 @@ def golf():
     tree(-18, 36, 11, (0.10, 0.22, 0.13), "conifer")
 
 
+def dome(along, back, z, radius, colour=COPPER_GREEN):
+    """A copper dome on a drum with a lantern, stepped as the game draws it."""
+    cylinder(along, back, radius, radius * 0.7, tuple(c * 0.75 for c in colour), z)
+    up = z + radius * 0.7
+    for k in range(3):
+        r = radius * (0.95 - k * 0.27)
+        h = radius * (0.38 - k * 0.06)
+        cylinder(along, back, r, h, colour, up)
+        up += h
+    cylinder(along, back, radius * 0.16, radius * 0.5, WHITE_RENDER, up)
+
+
+def flag(along, back, z, tall):
+    cylinder(along, back, 0.12, tall, WHITE_RENDER, z)
+    box(along + 1.1, back, 2.2, 0.06, 1.4, SALTIRE_BLUE, z + tall - 1.4)
+
+
 def library():
     ground()
     slab(0.0, 0.0, 49.0, 9.0, PAVEMENT)
@@ -589,6 +631,7 @@ def library():
     for k in range(4):
         box(-5.0 + k * 3.33, 6.0, 0.9, 0.9, 7.5, CREAM_STONE)
     box(0.0, 5.5, 12.0, 4.0, 0.9, CREAM_STONE, 7.5)
+    dome(0.0, 17.0, 13.1, 4.0)
     for (a, b) in ((-20, 12), (20, 12), (-20, 26), (20, 26)):
         tree(a, b, 9.0)
 
@@ -600,6 +643,7 @@ def museum():
     for k in range(6):
         box(-13.0 + k * 3.2, 7.0, 0.9, 0.9, 10.5, (0.92, 0.82, 0.62))
     box(-5.0, 6.5, 18.0, 4.0, 0.9, (0.92, 0.82, 0.62), 10.5)
+    dome(-5.0, 20.0, 16.5, 5.5)
     model("museum_wing", 18.0, 14.0, 12.0, 16.0, None, HONEY_STONE)
 
 
@@ -636,8 +680,9 @@ def town_hall():
     for k in range(4):
         box(-5.0 + k * 3.33, 9.0, 0.9, 0.9, 11.0, (0.9, 0.82, 0.66))
     box(0.0, 8.5, 12.0, 4.0, 0.9, (0.9, 0.82, 0.66), 11.0)
-    gabled(0.0, 16.0, 7.0, 7.0, 32.0, 5.0, BLONDE_SANDSTONE)
+    gabled(0.0, 16.0, 7.0, 7.0, 32.0, 5.0, BLONDE_SANDSTONE, roof=COPPER_GREEN)
     box(0.0, 15.8, 2.6, 0.2, 2.6, (0.95, 0.94, 0.9), 26.0)
+    flag(0.0, 19.5, 37.0, 6.0)
     for along in (-18.0, 18.0):
         tree(along, 5.0, 8.0)
 
@@ -677,8 +722,8 @@ def _district(colour, tall):
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
     if tall:
         for f in range(20):
-            model("glass_floor", -10.0, 6.0, 16.0, 14.0, 3.5, z0=f * 3.5)
-        box(-10.0, 9.0, 8.0, 6.0, 3.0, CONCRETE, 70.0)
+            model("glass_floor", -10.0, 6.0, 16.0, 14.0, 3.5, GLASS_BLUE, (0.15, 0.25, 0.34), z0=f * 3.5)
+        model("crown_plant", -10.0, 6.0, 16.0, 14.0, None, GLASS_BLUE, (0.15, 0.25, 0.34), z0=70.0)
         model("classical6_shops", 12.0, 4.0, 21.0, 13.0, 27.6, HONEY_STONE)
     else:
         model("tenement4", -12.0, 3.0, 22.0, 13.0, 17.3, RED_SANDSTONE)

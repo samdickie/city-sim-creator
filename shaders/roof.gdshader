@@ -16,9 +16,13 @@ float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+vec3 to_linear(vec3 c) {
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-	roof_colour = COLOR.rgb;
+	roof_colour = overlay_on ? COLOR.rgb : to_linear(COLOR.rgb);   // sRGB, or a linear overlay colour
 	derelict = COLOR.a < 0.75 ? 1.0 : 0.0;
 }
 

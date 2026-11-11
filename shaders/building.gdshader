@@ -18,6 +18,7 @@ uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);   // the stone photo's ave
 uniform float night = 0.0;                                // 0 = day, 1 = night: lights come on
 uniform float lit_share = 0.25;                           // share of windows lit at night
 uniform float lamp_strength = 1.0;                        // how bright a lit window is
+uniform float late = 0.0;                                 // 0 = evening, 1 = small hours: homes go dark
 uniform bool overlay_on = false;   // map overlay: COLOR is the plot's overlay colour
 
 varying vec3 local_pos;
@@ -30,11 +31,17 @@ float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
 
+vec3 to_linear(vec3 c) {
+	// The game's colours are written as sRGB (as a paint chart would give them).
+	return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
 void vertex() {
 	local_pos = VERTEX;            // unit box: x,z from -0.5 to 0.5, y from 0 to 1
 	local_normal = NORMAL;
 	size_style = INSTANCE_CUSTOM;
-	wall_colour = COLOR.rgb;
+	// (Map overlay colours arrive already linear.)
+	wall_colour = overlay_on ? COLOR.rgb : to_linear(COLOR.rgb);
 	derelict = COLOR.a < 0.75 ? 1.0 : 0.0;
 }
 
@@ -73,6 +80,20 @@ void fragment() {
 	float metal = 0.0;
 	vec3 glow = vec3(0.0);
 	float sash_bar = 0.0;      // 1 on the white glazing bars of classical sash windows
+
+	if (is_roof && style != 4 && style != 9) {
+		// Flat roofs: dark bitumen membrane or grey gravel, never the wall colour.
+		vec2 top = local_pos.xz * size.xz;
+		float grain = hash(floor(top * 3.0) + size.xz);
+		float gravel = step(0.5, hash(size.xz * 0.37));
+		colour = mix(vec3(0.045, 0.048, 0.052), vec3(0.13, 0.12, 0.10) * (0.85 + 0.3 * grain), gravel);
+		// A parapet edge in the wall colour.
+		vec2 edge = min(top + size.xz * 0.5, size.xz * 0.5 - top);
+		if (min(edge.x, edge.y) < 0.35) {
+			colour = wall_colour * 0.8;
+		}
+		colour *= derelict > 0.5 ? 0.7 : 1.0;
+	}
 
 	if (!is_roof) {
 		float floor_h = style == 2 ? 6.0 : 3.0;
@@ -187,9 +208,13 @@ void fragment() {
 				rough = 0.6;
 				metal = 0.0;
 			}
-			// At night about a third of the windows are lit, in slightly different warm tones.
-			float lit = step(1.0 - lit_share, hash(window_id + vec2(3.7, 1.3)));
-			vec3 lamp = mix(vec3(1.0, 0.42, 0.11), vec3(1.0, 0.58, 0.22), hash(window_id + 9.1));
+			// At night some windows are lit: warm in homes (fewer late on), cooler in offices.
+			bool homes = style == 0 || style == 3 || style == 6;
+			float share = homes ? lit_share * (1.0 - 0.55 * late) : lit_share * 1.3;
+			float lit = step(1.0 - share, hash(window_id + vec2(3.7, 1.3)));
+			float tone = hash(window_id + 9.1);
+			vec3 lamp = homes ? mix(vec3(1.0, 0.45, 0.12), vec3(1.0, 0.68, 0.36), tone)
+				: (tone < 0.5 ? vec3(0.66, 0.80, 1.0) : vec3(1.0, 0.76, 0.48));
 			if (style == 1 && storey < 0.5) {
 				lit = 1.0;   // shop windows stay lit
 				lamp = vec3(1.0, 0.92, 0.78);
