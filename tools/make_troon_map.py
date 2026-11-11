@@ -29,9 +29,9 @@ import zipfile
 import zlib
 from collections import deque
 
-# British National Grid box around Troon, in metres (6 km x 6 km).
-# Covers the harbour, the town centre, Barassie and Royal Troon.
-TROON_BOX = (229300, 628200, 235300, 634200)
+# British National Grid box around Troon, in metres (7 km x 6.5 km).
+# Covers the harbour, the town centre, Barassie, Royal Troon and the hills to the east.
+TROON_BOX = (230300, 628200, 237300, 634700)
 
 CREDITS = ("Contains OS data © Crown copyright and database right "
            "(OS Terrain 50, Open Government Licence)")

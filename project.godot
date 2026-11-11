@@ -29,8 +29,6 @@ export/convert_text_resources_to_binary=false
 
 [rendering]
 
-renderer/rendering_method="forward_plus"
-renderer/rendering_method.mobile="mobile"
-anti_aliasing/quality/msaa_3d=2
 lights_and_shadows/directional_shadow/size=8192
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+anti_aliasing/quality/msaa_3d=2
