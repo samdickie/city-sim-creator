@@ -425,6 +425,19 @@ func _report() -> void:
 			why_empty[key] = int(why_empty.get(key, 0)) + 1
 	for key: String in why_empty:
 		print("[shots]   empty plots, %d x %s" % [int(why_empty[key]), key])
+	# What drawing the town costs: one more re-plan of every plot, timed, and the
+	# number of things in each of the town's MultiMeshes.
+	var t0 := Time.get_ticks_usec()
+	world.refresh_buildings()
+	var counts: Array[String] = []
+	for node_name: String in ["walls", "roofs", "chimneys", "paving", "props", "parked_bodies",
+			"city_trunks", "city_crowns", "city_cones"]:
+		var node: MultiMeshInstance3D = world.get(node_name)
+		counts.append("%s %d" % [node_name, node.multimesh.instance_count])
+	var model_items: Array = world.get("_model_items")
+	counts.append("model parts %d" % model_items.size())
+	print("[shots]   refresh_buildings %.0f ms; instances: %s" % [(Time.get_ticks_usec() - t0) / 1000.0,
+		", ".join(counts)])
 	var wind := 46 * sim.w + 92
 	if sim.tiles[wind] == Simulation.Tile.WIND:
 		print("[shots]   wind farm on the town's power network: %s" % ("yes" if sim.power_map()[wind] == 1 and
@@ -480,10 +493,34 @@ func _shot_list() -> Array[Dictionary]:
 		{"name": "19_beach", "at": Vector2(44, 108), "yaw": -70.0, "pitch": 34.0, "dist": 320.0},
 		{"name": "20_hills", "at": Vector2(112, 40), "yaw": -40.0, "pitch": 30.0, "dist": 1500.0},
 		{"name": "21_map_edge", "at": Vector2(132, 112), "yaw": -55.0, "pitch": 32.0, "dist": 2400.0},
+		# The ground of the town close up: gardens, a park, works yards, tenement
+		# back courts, shops' car parks, and (last, as it zones a few plots) empty
+		# plots and building sites.
+		{"name": "22_gardens", "at": Vector2(44, 39), "yaw": -40.0, "pitch": 42.0, "dist": 190.0},
+		{"name": "23_park", "at": Vector2(37, 64), "yaw": -40.0, "pitch": 40.0, "dist": 260.0},
+		{"name": "24_yards", "at": Vector2(78, 65), "yaw": -50.0, "pitch": 38.0, "dist": 240.0},
+		{"name": "25_back_courts", "at": Vector2(41, 50), "yaw": -35.0, "pitch": 45.0, "dist": 210.0},
+		{"name": "26_shops", "at": Vector2(55, 52), "yaw": -35.0, "pitch": 40.0, "dist": 230.0},
+		{"name": "27_empty_plots", "at": Vector2(43, 29), "yaw": -40.0, "pitch": 38.0, "dist": 230.0,
+			"prep": _prep_empty_plots},
 	]
 
 
 const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
+
+
+func _prep_empty_plots() -> void:
+	# Zone a row of plots on the open land north of the suburb, by its top street:
+	# homes at each density (no demand for homes, so they wait: empty plots) then
+	# shops and industry (wanted, so they become building sites). This changes
+	# the town, so it must stay the last shot.
+	var kinds := [Simulation.Tile.HOMES, Simulation.Tile.HOMES, Simulation.Tile.HOMES, Simulation.Tile.SHOPS,
+		Simulation.Tile.SHOPS, Simulation.Tile.INDUSTRY]
+	for k: int in kinds.size():
+		var i := 29 * sim.w + 40 + k
+		if sim.tiles[i] == Simulation.Tile.EMPTY:
+			sim.set_tile(i, kinds[k], [0, 1, 2, 1, 2, 0][k])
+	world.refresh_all()
 
 
 func _hud_reset() -> void:

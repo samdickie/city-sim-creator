@@ -47,6 +47,7 @@ const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot",
 	"awning", "lead", "cladding", "sheet", "accent"]
 const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
+const PAVING_SHADER = preload("res://shaders/paving.gdshader")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
@@ -60,7 +61,6 @@ const KERB_HALF_WIDTH := 0.85  # pavement width at junctions, halved
 const ROAD_NORMAL := Vector2(0.0, 1.0)   # road texture: pavement, tarmac, pavement
 const ROAD_PLAIN := Vector2(0.5, 0.5)    # tarmac only
 const ROAD_KERB := Vector2(0.0, 0.0)     # pavement only
-const ZONE_STRENGTH := [0.28, 0.48, 0.7]  # zone colour on empty plots, by density
 
 # Optional photo textures. Drop files here and they're used automatically.
 const TEXTURE_DIR := "res://assets/textures/"
@@ -85,7 +85,7 @@ const CONCRETE := Color(0.64, 0.64, 0.62)
 const PAVEMENT := Color(0.66, 0.65, 0.62)
 const DRIVEWAY := Color(0.58, 0.56, 0.53)
 const COURT := Color(0.55, 0.54, 0.50)
-const CAR_PARK := Color(0.20, 0.20, 0.21)
+const CAR_PARK := Color(0.30, 0.30, 0.31)
 const BAY_LINE := Color(0.92, 0.92, 0.88)
 const YARD := Color(0.50, 0.50, 0.48)
 const CONTAINERS := [Color(0.62, 0.16, 0.12), Color(0.12, 0.30, 0.55), Color(0.18, 0.42, 0.26),
@@ -130,8 +130,8 @@ var heights := PackedFloat32Array()   # ground height at each tile centre (sea l
 var water := PackedByteArray()
 
 var terrain_material: ShaderMaterial
-var zone_image: Image
-var zone_texture: ImageTexture
+var lot_image: Image                  # per map tile: what the terrain shader paints on the plot (see _plan_lots)
+var lot_texture: ImageTexture
 var warn_image: Image
 var warn_texture: ImageTexture
 
@@ -169,11 +169,49 @@ var _infill := PackedByteArray()      # 0 = none, 1 = pocket park, 2 = allotment
 const INFILL_PARK := 1
 const INFILL_ALLOTMENTS := 2
 const INFILL_CAR_PARK := 3
+
+# The ground of every plot is painted by the terrain shader (shaders/lots.gdshaderinc)
+# from lot_image, one pixel per tile, worked out in _plan_lots:
+#   R = kind (LOT_...)
+#   G = bits 0-1 the side facing the street (0 = +y, 1 = -y, 2 = +x, 3 = -x, as
+#       _frontage), bits 3-7 a detail (building stage; park layout)
+#   B = bits 0-3 which neighbours are the same kind (+x, -x, +y, -y); on empty
+#       zoned plots bits 4-5 the zone (1 homes, 2 shops, 3 industry), bits 6-7 density
+#   A = bit 0 abandoned, bit 1 in the CBD, bits 4-7 the sides whose road verge the
+#       plot reaches into (+x, -x, +y, -y; see _street_reach)
+# Keep the kinds and layouts in step with the shader.
+const LOT_NONE := 0
+const LOT_ROAD := 1          # its verges belong to the plots beside it
+const LOT_VILLAS := 2
+const LOT_TERRACES := 3
+const LOT_TENEMENTS := 4
+const LOT_COURT := 5         # tall homes round a landscaped court
+const LOT_SHOPS := 6
+const LOT_PLAZA := 7         # offices and skyscrapers: paved all over
+const LOT_INDUSTRY := 8
+const LOT_EMPTY := 9         # zoned, nothing happening yet
+const LOT_SITE := 10         # zoned and being built on
+const LOT_PARK := 11
+const LOT_ALLOTMENTS := 12
+const LOT_CAR_PARK := 13
+const LOT_CIVIC := 14        # paved forecourts: town hall, library, museum, police, station
+const LOT_SCHOOL := 15
+const LOT_GOLF := 16
+const LOT_YARD := 17         # concrete and gravel: fire station, depots, utilities, power stations
+const LOT_HOSPITAL := 18
+const LOT_MEADOW := 19       # rough grass under wind turbines and solar panels
+const SIDES: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
+var _lot_kind := PackedByteArray()
+var _lot_detail := PackedByteArray()
 const HOARDING := Color(0.86, 0.87, 0.84)
 const FOUNDATION := Color(0.48, 0.47, 0.45)
 const SITE_CABIN := Color(0.20, 0.36, 0.62)
 const CRANE_YELLOW := Color(0.95, 0.74, 0.10)
 const SOIL := Color(0.32, 0.23, 0.16)
+const BRICK := Color(0.58, 0.30, 0.22)
+const SCAFFOLD := Color(0.62, 0.64, 0.66)
+const SCAFFOLD_BOARD := Color(0.62, 0.50, 0.34)
+const SAND_PILE := Color(0.78, 0.68, 0.48)
 const CROPS := Color(0.30, 0.48, 0.20)
 var preview := MultiMeshInstance3D.new()   # tiles a drag will build on
 var hover_box := MeshInstance3D.new()
@@ -418,6 +456,7 @@ var land_map_image: Image               # per padded tile: R = damp hollows, G =
 var land_map_texture: ImageTexture
 var built_image: Image                  # per map tile: R = built on (so fields and wild ground give way)
 var built_texture: ImageTexture
+var _noise_tex: ImageTexture            # four smooth noises (terrain, paving)
 var terrain_root := Node3D.new()
 var sea_material: ShaderMaterial
 
@@ -427,8 +466,8 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 	var gw := map_w + PADDING * 2
 	var gh := map_h + PADDING * 2
 
-	zone_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
-	zone_texture = ImageTexture.create_from_image(zone_image)
+	lot_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
+	lot_texture = ImageTexture.create_from_image(lot_image)
 	warn_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
 	warn_texture = ImageTexture.create_from_image(warn_image)
 	overlay_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RGBA8)
@@ -437,7 +476,12 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 	terrain_material = ShaderMaterial.new()
 	terrain_material.shader = TERRAIN_SHADER
 	terrain_material.set_shader_parameter("map_size", Vector2(map_w, map_h) * cell)
-	terrain_material.set_shader_parameter("zone_map", zone_texture)
+	terrain_material.set_shader_parameter("lot_map", lot_texture)
+	terrain_material.set_shader_parameter("tile_metres", cell)
+	terrain_material.set_shader_parameter("street_reach", cell * 0.5 - ROAD_HALF_WIDTH - 1.0)
+	terrain_material.set_shader_parameter("zone_homes", ZONE_TINTS[Tile.HOMES])
+	terrain_material.set_shader_parameter("zone_shops", ZONE_TINTS[Tile.SHOPS])
+	terrain_material.set_shader_parameter("zone_industry", ZONE_TINTS[Tile.INDUSTRY])
 	terrain_material.set_shader_parameter("warn_map", warn_texture)
 	terrain_material.set_shader_parameter("overlay_map", overlay_texture)
 	var grass := _optional_texture("grass")
@@ -462,7 +506,8 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 	built_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_R8)
 	built_texture = ImageTexture.create_from_image(built_image)
 	terrain_material.set_shader_parameter("built_map", built_texture)
-	terrain_material.set_shader_parameter("noise_tex", _noise_texture())
+	_noise_tex = _noise_texture()
+	terrain_material.set_shader_parameter("noise_tex", _noise_tex)
 	_set_field_uniforms(terrain_material)
 
 	# The ground is drawn as square pieces sharing one flat grid mesh; the shader
@@ -1044,10 +1089,9 @@ func _build_city_nodes() -> void:
 	cables.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(cables)
 
-	var flat := StandardMaterial3D.new()
-	flat.vertex_color_use_as_albedo = true
-	flat.vertex_color_is_srgb = true
-	flat.roughness = 0.92
+	var flat := ShaderMaterial.new()
+	flat.shader = PAVING_SHADER
+	flat.set_shader_parameter("noise_tex", _noise_tex)
 	paving.multimesh = _new_multimesh(_unit_box_mesh(), false)
 	paving.material_override = flat
 	paving.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1147,10 +1191,9 @@ func refresh_all() -> void:
 
 
 func refresh_ground(layout_changed: bool = true) -> void:
-	# Zone colours and warnings on the ground; roads, power lines and woods too
-	# when the layout has changed (they only depend on what's where).
+	# Warnings on the ground; roads, power lines and woods too when the layout
+	# has changed (they only depend on what's where).
 	var tiles: PackedByteArray = sim.tiles
-	var levels: PackedByteArray = sim.levels
 	var reach: PackedByteArray = sim.road_reach_map()
 	var power: PackedByteArray = sim.power_map()
 	if layout_changed:
@@ -1158,19 +1201,14 @@ func refresh_ground(layout_changed: bool = true) -> void:
 			for x in map_w:
 				var k := y * map_w + x
 				_infill[k] = _infill_kind(x, y) if tiles[k] == Tile.EMPTY else 0
+	# (The plots' own ground, zone colours included, is painted from the lot map:
+	# see _plan_lots, refreshed with the buildings.)
 	for y in map_h:
 		for x in map_w:
 			var i := y * map_w + x
 			var t := tiles[i]
-			var tint := Color(0, 0, 0, 0)
 			var warn := Color(0, 0, 0, 0)
 			if ZONE_TINTS.has(t):
-				var c: Color = ZONE_TINTS[t]
-				# Coloured while waiting to be built on; once built, it's lawn and gardens.
-				var strength: float = 0.5
-				if t != Tile.INDUSTRY:
-					strength = ZONE_STRENGTH[sim.density[i]]
-				tint = Color(c, strength) if levels[i] == 0 else Color(0, 0, 0, 0)
 				if not sim.has_road_access(i):
 					warn.r = 1.0
 				elif power[i] == 0:
@@ -1188,21 +1226,7 @@ func refresh_ground(layout_changed: bool = true) -> void:
 						warn.r = 1.0
 					elif not sim.building_working(i):
 						warn.g = 1.0
-				if t == Tile.POWER_PLANT or t == Tile.GAS or t == Tile.NUCLEAR or t == Tile.RECYCLING:
-					tint = Color(0.55, 0.55, 0.55, 0.6)
-				elif t == Tile.GOLF:
-					tint = Color(0.44, 0.74, 0.30, 0.6)      # fairway
-				elif t == Tile.LANDFILL:
-					tint = Color(0.42, 0.36, 0.27, 0.75)
-			elif t == Tile.PARK:
-				tint = Color(0.40, 0.72, 0.32, 0.45)
-			if _infill[i] == INFILL_PARK:
-				tint = Color(0.40, 0.68, 0.30, 0.35)   # mown grass
-			elif _infill[i] == INFILL_ALLOTMENTS:
-				tint = Color(0.36, 0.30, 0.20, 0.35)
-			zone_image.set_pixel(x, y, tint)
 			warn_image.set_pixel(x, y, warn)
-	zone_texture.update(zone_image)
 	warn_texture.update(warn_image)
 	_build_alerts()
 	if overlay != Overlay.NONE:
@@ -1300,6 +1324,7 @@ func refresh_buildings() -> void:
 	_values = sim.land_value_map()
 	_wall_owner.clear()
 	_roof_owner.clear()
+	_plan_lots()
 	for i in tiles.size():
 		var t := tiles[i]
 		var lv := levels[i]
@@ -1316,8 +1341,12 @@ func refresh_buildings() -> void:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
 		elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
 			_plan_service(i, t, wall_list, roof_list)
-		elif ZONE_TINTS.has(t) and sim.has_road_access(i):
+		elif ZONE_TINTS.has(t) and _lot_kind[i] == LOT_SITE:
 			_plan_site(i, t, wall_list)
+		elif ZONE_TINTS.has(t):
+			_plan_empty(i, t)
+		elif t == Tile.PARK:
+			_plan_park(i)
 		elif t == Tile.EMPTY and _infill[i] > 0:
 			_plan_infill(i)
 		for n in wall_list.size() - walls_before:
@@ -1334,6 +1363,7 @@ func refresh_buildings() -> void:
 	chimney_list.append_array(_spire_items)
 	_fill(chimneys.multimesh, chimney_list, false)
 	_place_smoke()
+	_plan_street_furniture(tiles)
 	_fill(paving.multimesh, _paving_items, false)
 	_fill(props.multimesh, _prop_items, false)
 	var bodies: Array = []
@@ -1344,6 +1374,399 @@ func refresh_buildings() -> void:
 	_fill(parked_bodies.multimesh, bodies, false)
 	_fill(parked_cabins.multimesh, cabins, false)
 	_build_city_trees(tiles)
+	_write_lots()
+
+
+const LAMP_GREY := Color(0.30, 0.32, 0.33)
+const SHELTER_GLASS := Color(0.62, 0.72, 0.76)
+
+
+func _plan_street_furniture(tiles: PackedByteArray) -> void:
+	# Along every straight street: lamp posts where the road shader puts its pools
+	# of light (every 25 m, staggered), and by flats, shops and offices a bus
+	# shelter, litter bins and the odd post box. On the pavement (the road's
+	# outer 1.7 m), facing the road.
+	for i in tiles.size():
+		if tiles[i] != Tile.ROAD:
+			continue
+		var tile := Vector2i(i % map_w, i / map_w)
+		for axis: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+			if not (_is_road(tile + axis) and _is_road(tile - axis)):
+				continue
+			var normal_axis := Vector2i(axis.y, axis.x)
+			if _is_road(tile + normal_axis) or _is_road(tile - normal_axis):
+				continue
+			var c := tile_centre(tile)
+			var ax := Vector2(axis)
+			var nx := Vector2(normal_axis)
+			# Lamps: one side mid-tile, the other at the tile's ends (see road.gdshader).
+			var lamp_side := Vector2(-axis.y, axis.x)
+			for spot: Vector2 in [Vector2(0.0, 1.0), Vector2(-cell * 0.5 + 0.5, -1.0)]:
+				_lamp(c + ax * spot.x + lamp_side * spot.y * 5.4, -lamp_side * spot.y)
+			for side: int in [-1, 1]:
+				var beside: Vector2i = tile + normal_axis * side
+				if beside.x < 0 or beside.y < 0 or beside.x >= map_w or beside.y >= map_h:
+					continue
+				var kind: int = _lot_kind[beside.y * map_w + beside.x]
+				var busy := kind == LOT_SHOPS or kind == LOT_PLAZA or kind == LOT_TENEMENTS or kind == LOT_COURT \
+					or kind == LOT_CIVIC
+				var r := _field_rand(tile.x * 2 + (side + 1) / 2, tile.y, 301 + axis.x)
+				var out := nx * float(side)
+				if busy and r < 0.22:
+					_bus_shelter(c + ax * 8.0 + out * 5.35, -out, ax)
+				if busy and r > 0.5:
+					_street_box(c + ax * -6.0 + out * 5.5, Vector3(0.5, 0.9, 0.5), CHARCOAL)       # litter bin
+				if r > 0.93:
+					_street_box(c + ax * 14.0 + out * 5.4, Vector3(0.5, 1.4, 0.5), POST_BOX)
+
+
+func _street_box(at: Vector2, size: Vector3, colour: Color, lift: float = 0.0) -> void:
+	var pos := Vector3(at.x, maxf(height_at(at.x, at.y), 0.0) + 0.3 + lift, at.y)
+	_prop_items.append([Transform3D(Basis.from_scale(size), pos), colour])
+
+
+func _lamp(at: Vector2, towards_road: Vector2) -> void:
+	# A street lamp: a slim post and a head leaning out over the road.
+	_street_box(at, Vector3(0.16, 7.2, 0.16), LAMP_GREY)
+	var head := at + towards_road * 0.7
+	_street_box(head, Vector3(0.3 + absf(towards_road.x) * 1.2, 0.18, 0.3 + absf(towards_road.y) * 1.2),
+		LAMP_GREY, 7.0)
+
+
+func _bus_shelter(at: Vector2, towards_road: Vector2, along: Vector2) -> void:
+	# A glass bus shelter: back and end panels, a roof, a bench inside.
+	var z_axis := Vector3(towards_road.x, 0.0, towards_road.y)
+	var x_axis := Vector3(along.x, 0.0, along.y)
+	var base := Vector3(at.x, maxf(height_at(at.x, at.y), 0.0) + 0.3, at.y)
+	_box_item(_prop_items, base - z_axis * 0.55, x_axis, z_axis, Vector3(3.4, 2.3, 0.08), SHELTER_GLASS)
+	_box_item(_prop_items, base - x_axis * 1.65, x_axis, z_axis, Vector3(0.08, 2.3, 1.1), SHELTER_GLASS)
+	_box_item(_prop_items, base + Vector3.UP * 2.3, x_axis, z_axis, Vector3(3.6, 0.12, 1.4), CHARCOAL)
+	_box_item(_prop_items, base - z_axis * 0.3, x_axis, z_axis, Vector3(2.4, 0.45, 0.4), CHARCOAL)
+
+
+func _plan_lots() -> void:
+	# What kind of ground each plot has (see LOT_...), for the shader and for
+	# the plot plans (a park's layout, whether an empty plot is being built on).
+	var tiles: PackedByteArray = sim.tiles
+	_lot_kind.resize(tiles.size())
+	_lot_detail.resize(tiles.size())
+	for i in tiles.size():
+		var t := tiles[i]
+		var kind := LOT_NONE
+		var detail := 0
+		if t == Tile.ROAD:
+			kind = LOT_ROAD
+		elif ZONE_TINTS.has(t) and sim.levels[i] == 0:
+			# Being built on (the town wants it and it can grow), or still waiting.
+			var growing: bool = sim.has_road_access(i) and sim.growth_state(i) == Growth.GROWING
+			kind = LOT_SITE if growing else LOT_EMPTY
+		elif t == Tile.HOMES:
+			var s: int = sim.stage(i)
+			detail = s
+			if s >= 7:
+				kind = LOT_PLAZA
+			elif s >= 4:
+				kind = LOT_COURT
+			elif s == 3:
+				kind = LOT_TENEMENTS
+			elif s == 2 and sim.density[i] >= 1:
+				kind = LOT_TERRACES
+			else:
+				kind = LOT_VILLAS
+		elif t == Tile.SHOPS:
+			var s: int = sim.stage(i)
+			detail = s
+			kind = LOT_PLAZA if s >= 4 else LOT_SHOPS
+		elif t == Tile.INDUSTRY:
+			kind = LOT_INDUSTRY
+			detail = sim.stage(i)
+		elif t == Tile.PARK or (t == Tile.EMPTY and _infill[i] == INFILL_PARK):
+			kind = LOT_PARK
+		elif t == Tile.EMPTY and _infill[i] == INFILL_ALLOTMENTS:
+			kind = LOT_ALLOTMENTS
+		elif t == Tile.EMPTY and _infill[i] == INFILL_CAR_PARK:
+			kind = LOT_CAR_PARK
+		else:
+			match t:
+				Tile.POLICE, Tile.LIBRARY, Tile.MUSEUM, Tile.TOWN_HALL, Tile.STATION, Tile.STADIUM, Tile.MARINA:
+					kind = LOT_CIVIC
+				Tile.SCHOOL:
+					kind = LOT_SCHOOL
+				Tile.HOSPITAL:
+					kind = LOT_HOSPITAL
+				Tile.GOLF:
+					kind = LOT_GOLF
+				Tile.WIND, Tile.SOLAR:
+					kind = LOT_MEADOW
+				Tile.FIRE, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
+						Tile.LANDFILL, Tile.RECYCLING, Tile.BUS_DEPOT, Tile.HARBOUR:
+					kind = LOT_YARD
+		_lot_kind[i] = kind
+		_lot_detail[i] = detail
+	# Parks: each tile picks a layout, knowing which of its sides join more park.
+	for i in tiles.size():
+		if _lot_kind[i] == LOT_PARK:
+			_lot_detail[i] = _park_layout(i)
+
+
+func _write_lots() -> void:
+	for y in map_h:
+		for x in map_w:
+			var i := y * map_w + x
+			var kind: int = _lot_kind[i]
+			if kind == LOT_NONE:
+				lot_image.set_pixel(x, y, Color(0, 0, 0, 0))
+				continue
+			var g := 0
+			var b := 0
+			var a := 0
+			if kind != LOT_ROAD:
+				var front := _frontage(i)
+				g = SIDES.find(front)
+				g = [2, 3, 0, 1][g]          # SIDES order -> _frontage order (+y, -y, +x, -x)
+				g |= mini(_lot_detail[i], 31) << 3
+				b = _same_kind_mask(i)
+				for s: int in 4:
+					if _street_reach(i, SIDES[s]) > 0.0:
+						a |= 16 << s
+				if kind == LOT_EMPTY or kind == LOT_SITE:
+					var zone: int = sim.tiles[i] - Tile.HOMES + 1
+					b |= (zone << 4) | (int(sim.density[i]) << 6)
+				if ZONE_TINTS.has(sim.tiles[i]) and sim.is_abandoned(i):
+					a |= 1
+				if sim.district[i] == 2:
+					a |= 2
+			lot_image.set_pixel(x, y, Color8(kind, g, b, a))
+	lot_texture.update(lot_image)
+
+
+const PARK_LAWN := 0         # open lawn, a winding path, clumps of trees
+const PARK_POND := 1         # a pond with reeds and a path round it
+const PARK_FORMAL := 2       # cross paths, a fountain, flower beds
+const PARK_PLAY := 3         # a playground
+const PARK_PITCH := 4        # a football pitch
+const PARK_BANDSTAND := 5    # a bandstand on a round paved plaza
+
+
+func _park_layout(i: int) -> int:
+	# Picked by position, so the same park always looks the same; neighbouring
+	# tiles of one park differ. (The shader draws the layout's ground.)
+	var x := i % map_w
+	var y := i / map_w
+	var choices: Array[int] = [PARK_POND, PARK_FORMAL, PARK_PLAY, PARK_BANDSTAND, PARK_LAWN]
+	if sim.tiles[i] == Tile.EMPTY:
+		choices = [PARK_LAWN, PARK_PLAY, PARK_FORMAL]          # pocket parks
+	elif _same_kind_mask(i) != 0:
+		choices = [PARK_POND, PARK_PITCH, PARK_LAWN, PARK_PLAY, PARK_FORMAL, PARK_BANDSTAND, PARK_LAWN]
+	var pick := int(_field_rand(x, y, 101) * choices.size()) % choices.size()
+	for d: Vector2i in [Vector2i(-1, 0), Vector2i(0, -1), Vector2i(-1, 0)]:
+		var n := Vector2i(x, y) + d
+		if n.x < 0 or n.y < 0:
+			continue
+		var k := n.y * map_w + n.x
+		if _lot_kind[k] == LOT_PARK and _lot_detail[k] == choices[pick]:
+			pick = (pick + 1) % choices.size()
+	return choices[pick]
+
+
+const RAILINGS := Color(0.12, 0.13, 0.13)
+const BENCH := Color(0.42, 0.30, 0.19)
+const PLAY_COLOURS := [Color(0.85, 0.20, 0.15), Color(0.15, 0.45, 0.80), Color(0.95, 0.75, 0.15),
+	Color(0.20, 0.60, 0.30)]
+
+
+func _park_prop(i: int, x: float, z: float, w: float, d: float, h: float, colour: Color,
+		lift: float = 0.0) -> void:
+	# A box in a park, placed by x, z from the tile's middle (parks are laid out
+	# square to the map, not to a street).
+	var c := tile_centre(Vector2i(i % map_w, i / map_w))
+	var pos := Vector3(c.x + x, maxf(height_at(c.x + x, c.y + z), 0.0) - 0.1 + lift, c.y + z)
+	_prop_items.append([Transform3D(Basis(Vector3.RIGHT * w, Vector3.UP * h, Vector3.BACK * d), pos), colour])
+
+
+func _park_shape(i: int) -> Dictionary:
+	# The numbers the shader lays a park tile out by (lots.gdshaderinc park()).
+	var x := i % map_w
+	var y := i / map_w
+	var ext: Array[float] = []
+	for s: int in 4:
+		ext.append(cell * 0.5 + ((cell * 0.5 - ROAD_HALF_WIDTH - 1.0) if _street_reach(i, SIDES[s]) > 0.0 else 0.0))
+	return {"plan": int(_lot_detail[i]), "same": _same_kind_mask(i), "ext": ext,
+		"off": (Vector2(_field_rand(x, y, 111), _field_rand(x, y, 112)) - Vector2(0.5, 0.5)) * 8.0}
+
+
+func _park_edge(shape: Dictionary, x: float, z: float) -> float:
+	# How far x, z is from the park's outer edge (sides joining more park don't count).
+	var ext: Array[float] = shape["ext"]
+	var same: int = shape["same"]
+	var edge := 1e4
+	if (same & 1) == 0:
+		edge = minf(edge, ext[0] - x)
+	if (same & 2) == 0:
+		edge = minf(edge, ext[1] + x)
+	if (same & 4) == 0:
+		edge = minf(edge, ext[2] - z)
+	if (same & 8) == 0:
+		edge = minf(edge, ext[3] + z)
+	return edge
+
+
+func _park_open(i: int, shape: Dictionary, x: float, z: float) -> bool:
+	# Is x, z open grass, clear of the paths and features the shader paints?
+	var edge := _park_edge(shape, x, z)
+	if edge < 1.5 or absf(edge - 4.2) < 2.8:
+		return false
+	var same: int = shape["same"]
+	var c := tile_centre(Vector2i(i % map_w, i / map_w))
+	var tx := i % map_w
+	var ty := i / map_w
+	var ew := (same & 3) != 0 and ((same & 12) == 0 or ty % 2 == 0)
+	var ns := (same & 12) != 0 and ((same & 3) == 0 or tx % 2 == 0)
+	if ew and absf(z - 7.0 * sin((c.x + x) / 21.0 + ty * 1.7)) < 3.0:
+		return false
+	if ns and absf(x - 7.0 * sin((c.y + z) / 23.0 + tx * 2.3)) < 3.0:
+		return false
+	var off: Vector2 = shape["off"]
+	var p := Vector2(x, z)
+	match int(shape["plan"]):
+		PARK_POND:
+			return p.distance_to(off) > 17.0
+		PARK_FORMAL:
+			return absf(x) > 16.5 or absf(z) > 16.5
+		PARK_PLAY:
+			var q := p - Vector2(7.0, -7.0) - off * 0.4
+			return (absf(q.x) > 10.5 or absf(q.y) > 8.5) and absf(x + z * 0.9) > 2.5
+		PARK_PITCH:
+			return absf(x) > 23.0 or absf(z) > 15.0
+		PARK_BANDSTAND:
+			return p.length() > 13.5 and absf(x - z) > 2.5
+		_:
+			return same != 0 or absf(z - x * 0.5 - 6.0 * sin(x / 9.0 + ty)) > 2.8
+	return true
+
+
+func _plan_park(i: int) -> void:
+	# What stands in a park (its ground is painted by the shader): railings along
+	# the street sides with a gate, benches by the paths, the layout's own pieces
+	# (a fountain, a playground, goals, a bandstand) and trees on the open grass.
+	var shape := _park_shape(i)
+	var ext: Array[float] = shape["ext"]
+	var same: int = shape["same"]
+	var off: Vector2 = shape["off"]
+	var pocket: bool = sim.tiles[i] == Tile.EMPTY
+	var rng := RandomNumberGenerator.new()
+	rng.seed = i * 5333 + 11
+	# Railings round the outside, a gate in the middle of each side.
+	for s: int in 4:
+		if (same & (1 << s)) != 0:
+			continue
+		var side: Vector2i = SIDES[s]
+		var e: float = ext[s] - 0.2
+		var run_lo: float = -ext[3] if side.x != 0 else -ext[1]
+		var run_hi: float = ext[2] if side.x != 0 else ext[0]
+		for part: Vector2 in [Vector2(run_lo, -1.5), Vector2(1.5, run_hi)]:
+			var length := part.y - part.x
+			var mid := (part.x + part.y) * 0.5
+			if side.x != 0:
+				_park_prop(i, side.x * e, mid, 0.06, length, 1.1, RAILINGS)
+			else:
+				_park_prop(i, mid, side.y * e, length, 0.06, 1.1, RAILINGS)
+	match int(shape["plan"]):
+		PARK_POND:
+			for k in 3:
+				var a := rng.randf() * TAU
+				var at := off + Vector2.from_angle(a) * 13.0
+				_park_bench(i, at, -Vector2.from_angle(a))
+		PARK_FORMAL:
+			_park_prop(i, 0.0, 0.0, 0.5, 0.5, 1.6, WHITE_RENDER)          # the fountain's jet
+			_park_prop(i, 0.0, 0.0, 1.3, 1.3, 0.7, CREAM_STONE)           # ...and its pedestal
+			for corner: Vector2 in [Vector2(5.0, 5.0), Vector2(-5.0, 5.0), Vector2(5.0, -5.0), Vector2(-5.0, -5.0)]:
+				_park_bench(i, corner * 1.25, -corner.normalized())
+		PARK_PLAY:
+			var q := Vector2(7.0, -7.0) + off * 0.4
+			# Swings: two A-frames and a top bar; a slide; a climbing frame; a fence.
+			for end: float in [-2.2, 2.2]:
+				_park_prop(i, q.x - 4.0 + end, q.y - 2.0, 0.12, 1.6, 2.3, PLAY_COLOURS[1])
+			_park_prop(i, q.x - 4.0, q.y - 2.0, 4.6, 0.12, 0.12, PLAY_COLOURS[1], 2.25)
+			_park_prop(i, q.x + 4.0, q.y - 2.5, 1.0, 3.5, 1.4, PLAY_COLOURS[0])
+			_park_prop(i, q.x + 4.0, q.y - 4.6, 1.2, 1.2, 2.0, PLAY_COLOURS[2])
+			_park_prop(i, q.x + 3.0, q.y + 2.5, 2.6, 2.6, 2.0, PLAY_COLOURS[3])
+			_park_prop(i, q.x + 3.0, q.y + 2.5, 3.0, 3.0, 0.15, PLAY_COLOURS[0], 2.0)
+			_park_prop(i, q.x, q.y - 6.1, 16.0, 0.05, 1.0, PLAY_COLOURS[3])
+			_park_prop(i, q.x, q.y + 6.1, 16.0, 0.05, 1.0, PLAY_COLOURS[3])
+			_park_prop(i, q.x - 8.1, q.y, 0.05, 12.0, 1.0, PLAY_COLOURS[3])
+			_park_bench(i, q + Vector2(-10.0, 3.0), Vector2(1.0, 0.0))
+		PARK_PITCH:
+			var h := Vector2(minf(minf(ext[0], ext[1]) - 6.0, 26.0), minf(minf(ext[2], ext[3]) - 6.0, 17.0))
+			for end: float in [-1.0, 1.0]:
+				for post: float in [-3.6, 3.6]:
+					_park_prop(i, end * h.x, post, 0.12, 0.12, 2.4, WHITE_RENDER)
+				_park_prop(i, end * h.x, 0.0, 0.12, 7.3, 0.12, WHITE_RENDER, 2.35)
+		PARK_BANDSTAND:
+			_cylinder(_spire_items, _park_point(i, 0.0, 0.0), 4.2, 0.8, CREAM_STONE)
+			for k in 8:
+				var at := Vector2.from_angle(k * TAU / 8.0) * 3.6
+				_park_prop(i, at.x, at.y, 0.18, 0.18, 3.6, WHITE_RENDER, 0.7)
+			_cylinder(_spire_items, _park_point(i, 0.0, 0.0) + Vector3.UP * 4.3, 4.6, 0.5, Color(0.25, 0.42, 0.35))
+			_cylinder(_spire_items, _park_point(i, 0.0, 0.0) + Vector3.UP * 4.8, 2.4, 1.2, Color(0.25, 0.42, 0.35))
+			for k in 4:
+				var a := (k + 0.5) * TAU / 4.0
+				_park_bench(i, Vector2.from_angle(a) * 8.0, -Vector2.from_angle(a))
+		_:
+			for k in 2:
+				var a := rng.randf_range(-20.0, 20.0)
+				_park_bench(i, Vector2(a, a * 0.5 + 6.0 * sin(a / 9.0 + i / map_w) + 2.2), Vector2(0.0, -1.0))
+	# Benches along the path round the inside.
+	if not pocket:
+		for s: int in 4:
+			if (same & (1 << s)) == 0 and rng.randf() < 0.6:
+				var side: Vector2 = Vector2(SIDES[s])
+				var along := rng.randf_range(-14.0, 14.0)
+				var at := side * (ext[s] - 6.1) + Vector2(side.y, side.x) * along
+				_park_bench(i, at, -side)
+	# Trees on the open grass: some round the edge, the rest in loose clumps.
+	var wanted := 7 if pocket else 12
+	var planted := 0
+	var tries := 0
+	var c := tile_centre(Vector2i(i % map_w, i / map_w))
+	var clump := Vector2(rng.randf_range(-15.0, 15.0), rng.randf_range(-15.0, 15.0))
+	while planted < wanted and tries < 60:
+		tries += 1
+		var at: Vector2
+		if tries % 3 == 0:
+			at = clump + Vector2(rng.randf_range(-7.0, 7.0), rng.randf_range(-7.0, 7.0))
+		else:
+			at = Vector2(rng.randf_range(-ext[1] + 2.0, ext[0] - 2.0), rng.randf_range(-ext[3] + 2.0, ext[2] - 2.0))
+		if not _park_open(i, shape, at.x, at.y):
+			continue
+		_extra_trees.append([c + at, rng.randf_range(7.0, 15.0), _park_kind(rng)])
+		planted += 1
+
+
+func _park_point(i: int, x: float, z: float) -> Vector3:
+	var c := tile_centre(Vector2i(i % map_w, i / map_w))
+	return Vector3(c.x + x, maxf(height_at(c.x + x, c.y + z), 0.0), c.y + z)
+
+
+func _park_bench(i: int, at: Vector2, facing: Vector2) -> void:
+	# A bench (seat and back) turned to face the way given.
+	var p := _park_point(i, at.x, at.y)
+	var z_axis := Vector3(facing.x, 0.0, facing.y).normalized()
+	var x_axis := Vector3.UP.cross(z_axis).normalized()
+	_box_item(_prop_items, p + Vector3.UP * 0.35, x_axis, z_axis, Vector3(1.7, 0.1, 0.5), BENCH)
+	_box_item(_prop_items, p + Vector3.UP * 0.35 - z_axis * 0.25, x_axis, z_axis, Vector3(1.7, 0.5, 0.08), BENCH)
+	_box_item(_prop_items, p, x_axis, z_axis, Vector3(1.5, 0.35, 0.4), CHARCOAL)
+
+
+func _same_kind_mask(i: int) -> int:
+	# Which neighbours (+x, -x, +y, -y as bits 0-3) are the same kind of ground.
+	var tile := Vector2i(i % map_w, i / map_w)
+	var mask := 0
+	for s: int in 4:
+		var n: Vector2i = tile + SIDES[s]
+		if n.x >= 0 and n.y >= 0 and n.x < map_w and n.y < map_h and _lot_kind[n.y * map_w + n.x] == _lot_kind[i]:
+			mask |= 1 << s
+	return mask
 
 
 func _plan_abandoned(i: int, t: int, wall_list: Array, roof_list: Array, chimney_list: Array,
@@ -1686,10 +2109,12 @@ func _build_roads(tiles: PackedByteArray) -> void:
 				# Junction: an open square of tarmac, an arm to each road, and
 				# pavement along any side without a road.
 				_road_path(_line_points(c - Vector2(hw, 0), c + Vector2(hw, 0)), hw, ROAD_PLAIN, 0.0)
+				var crossing := 1.0 if _busy_junction(x, y, tiles) else 0.5
 				for d: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
 					if d in links:
-						# Arm into the junction, with a zebra crossing just before it.
-						_road_path(_line_points(c + d * half, c + d * hw), hw, ROAD_NORMAL, 1.0, 0.0, 1.0)
+						# Arm into the junction: a give-way line, and a zebra crossing
+						# just before it where the streets are busy.
+						_road_path(_line_points(c + d * half, c + d * hw), hw, ROAD_NORMAL, 1.0, 0.0, crossing)
 					else:
 						var edge := c + d * (hw - KERB_HALF_WIDTH)
 						var along := Vector2(-d.y, d.x) * hw
@@ -1709,6 +2134,24 @@ func _build_roads(tiles: PackedByteArray) -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	road_instance.mesh = mesh
+
+
+func _busy_junction(x: int, y: int, tiles: PackedByteArray) -> bool:
+	# Zebra crossings where people walk: by shops, offices, flats and public
+	# buildings. Quiet suburbs (houses, parks, open land) only get give-way lines.
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var nx := x + dx
+			var ny := y + dy
+			if nx < 0 or ny < 0 or nx >= map_w or ny >= map_h:
+				continue
+			var k := ny * map_w + nx
+			var t: int = tiles[k]
+			if t == Tile.SHOPS or (t >= Tile.POLICE and t <= Tile.HOSPITAL) or (t >= Tile.LIBRARY and t <= Tile.STATION):
+				return true
+			if t == Tile.HOMES and (sim.density[k] >= 1 or sim.district[k] == 2):
+				return true
+	return false
 
 
 func _line_points(from: Vector2, to: Vector2) -> PackedVector2Array:
@@ -2090,18 +2533,39 @@ func _slab(i: int, front: Vector2i, along: float, back: float, w: float, d: floa
 	var z_axis: Vector3 = spot["z"]
 	# Thick enough to clear the ground on a slope (like a levelled car park).
 	var b3 := Basis(x_axis * w, Vector3.UP * (float(spot["rise"]) + 0.45 + lift), z_axis * d)
-	_paving_items.append([Transform3D(b3, spot["pos"]), colour])
+	_paving_items.append([Transform3D(b3, spot["pos"]), Color(colour, _surface_of(colour))])
+
+
+func _surface_of(colour: Color) -> float:
+	# What a slab is made of, for the paving shader (alpha: see paving.gdshader).
+	if colour == CAR_PARK:
+		return 0.8
+	if colour == PAVEMENT:
+		return 0.6
+	if colour == DRIVEWAY:
+		return 0.4
+	if colour == CONCRETE or colour == YARD or colour == FOUNDATION:
+		return 0.2
+	return 1.0
 
 
 func _prop(i: int, front: Vector2i, along: float, back: float, w: float, d: float, h: float,
-		colour: Color) -> void:
-	# A box standing on the plot: hedge, wall, container.
-	var spot := _place(i, front, along, back, w, d)
-	var x_axis: Vector3 = spot["x"]
-	var z_axis: Vector3 = spot["z"]
-	var pos: Vector3 = spot["pos"]
-	pos.y = float(spot["ground"]) - 0.1
+		colour: Color, lift: float = 0.0) -> void:
+	# A box standing on the plot (hedge, wall, container), or held lift metres up.
+	# (The same spot as _place gives, worked out more cheaply: there are a lot of these.)
+	var mid := _plot_point(i, front, along, back + d * 0.5)
+	var fwd := Vector2(front)
+	var x_axis := Vector3(-fwd.y, 0.0, fwd.x)
+	var z_axis := Vector3(-fwd.x, 0.0, -fwd.y)
+	var pos := Vector3(mid.x, maxf(height_at(mid.x, mid.y), 0.0) - 0.1 + lift, mid.y)
 	_prop_items.append([Transform3D(Basis(x_axis * w, Vector3.UP * h, z_axis * d), pos), colour])
+
+
+func _plot_point(i: int, front: Vector2i, along: float, back: float) -> Vector2:
+	# World x, z of a point on a plot (along the street, back from its front), as _place.
+	var fwd := Vector2(front)
+	var front_edge := tile_centre(Vector2i(i % map_w, i / map_w)) + fwd * (cell * 0.5 + _street_reach(i, front))
+	return front_edge + Vector2(-fwd.y, fwd.x) * along - fwd * back
 
 
 func _parked_car(i: int, front: Vector2i, along: float, back: float, nose_to_street: bool,
@@ -2126,12 +2590,20 @@ func _parking_bays(i: int, front: Vector2i, from: float, to: float, chance: floa
 	# a 6 m aisle. Some bays have a car in them.
 	var row_back := from
 	var facing_street := true
+	var row := 0
 	while row_back + 5.0 <= to:
-		for k in 15:
-			var bay := -19.6 + k * 2.8
+		for k in 13:
+			var bay := -16.8 + k * 2.8
 			_slab(i, front, bay - 1.4, row_back, 0.12, 4.8, BAY_LINE, 0.03)
 			if rng.randf() < chance:
 				_parked_car(i, front, bay, row_back + 0.2, facing_street, rng)
+		_slab(i, front, 16.8 + 1.4, row_back, 0.12, 4.8, BAY_LINE, 0.03)
+		# A planted island at each end of the row, a tree in every other one.
+		for end: float in [-20.0, 20.0]:
+			_prop(i, front, end, row_back + 0.3, 3.2, 4.4, 0.45, HEDGE_GREEN)
+			if (row + int(end > 0.0)) % 2 == 0:
+				_plant(i, front, end, row_back + 2.5, rng.randf_range(5.0, 7.5), TreeKind.ORNAMENTAL, rng)
+		row += 1
 		row_back += 5.0 if facing_street else 11.0
 		facing_street = not facing_street
 
@@ -2190,7 +2662,6 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 				_add_model("fire_tower", tower, 6.0, 6.0, _model_total("fire_tower"), RED_SANDSTONE, SLATE)
 			else:
 				_add_block(tower, 6.0, 6.0, 22.0, RED_SANDSTONE, STYLE_FLATS, 0.0, SLATE, wall_list, roof_list)
-			_slab(i, front, 0.0, 27.0, 49.0, depth - 29.0, YARD)
 			_prop(i, front, -12.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)       # a fire engine
 			_prop(i, front, -6.0, 30.0, 2.6, 8.5, 3.2, FIRE_RED)
 		Tile.SCHOOL:
@@ -2203,18 +2674,12 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 				_add_block(spot, 38.0, 13.0, 9.0, RED_SANDSTONE, STYLE_CLASSICAL, 4.5, SLATE, wall_list, roof_list)
 				var porch := _place(i, front, -4.0, 2.2, 8.0, 3.0)
 				_add_block(porch, 8.0, 3.0, 10.5, RED_SANDSTONE, STYLE_CLASSICAL, 3.0, SLATE, wall_list, roof_list)
-			_slab(i, front, 20.0, 3.0, 8.0, 15.0, CAR_PARK)        # playground
-			var field_from := 19.0
-			var field_d := depth - field_from - 2.0
-			_slab(i, front, 0.0, field_from, 46.0, field_d, LAWN)
-			# Pitch markings: outline and halfway line.
-			var a := field_from + 2.0
-			var b := field_from + field_d - 2.0
-			_slab(i, front, 0.0, a, 38.0, 0.15, BAY_LINE, 0.03)
-			_slab(i, front, 0.0, b - 0.15, 38.0, 0.15, BAY_LINE, 0.03)
-			_slab(i, front, -19.0, a, 0.15, b - a, BAY_LINE, 0.03)
-			_slab(i, front, 19.0, a, 0.15, b - a, BAY_LINE, 0.03)
-			_slab(i, front, 0.0, a, 0.15, b - a, BAY_LINE, 0.03)
+			# (The playground and the playing field with its markings are painted
+			# by the shader.) Goals at the ends of the pitch.
+			for end: float in [-19.0, 19.0]:
+				_prop(i, front, end, (21.0 + depth - 4.0) * 0.5 - 3.6, 0.12, 7.3, 0.12, WHITE_RENDER, 2.35)
+				for post: float in [-3.6, 3.6]:
+					_prop(i, front, end, (21.0 + depth - 4.0) * 0.5 + post, 0.12, 0.12, 2.4, WHITE_RENDER)
 			# Railings along the street and a few trees round the field.
 			_prop(i, front, 0.0, 0.2, 48.0, 0.1, 1.4, CHARCOAL)
 			for k in 4:
@@ -2245,6 +2710,13 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 			_slab(i, front, 18.5, 3.0, 12.0, depth - 5.0, CAR_PARK)
 			_prop(i, front, 15.5, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
 			_prop(i, front, 21.0, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
+			# The ambulance bays, boxed in yellow; trees on the lawn round the building.
+			for along: float in [15.5, 21.0]:
+				_slab(i, front, along - 1.7, 4.2, 0.15, 7.6, AMBULANCE_YELLOW, 0.03)
+				_slab(i, front, along + 1.7, 4.2, 0.15, 7.6, AMBULANCE_YELLOW, 0.03)
+			_slab(i, front, 18.25, 11.7, 7.0, 0.15, AMBULANCE_YELLOW, 0.03)
+			for k in 3:
+				_plant(i, front, -21.0 + k * 7.5, depth - 6.0, rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
 			for k in 3:
 				_parked_car(i, front, 15.5 + k * 3.0, 16.0, true, rng)
 
@@ -2333,23 +2805,57 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 func _plan_site(i: int, t: int, wall_list: Array) -> void:
 	# A zoned plot waiting to grow: hoarding round it, foundations, a site cabin,
 	# piles of materials and sometimes a tower crane.
+	# The ground is churned earth with a hard-core track in from the street
+	# (painted by the shader). Hoarding in the zone's colour, so zones still read.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = i * 4241 + t
 	var front := _frontage(i)
 	var depth := _depth(i, front)
-	_slab(i, front, -4.0, 5.0, 30.0, 16.0, FOUNDATION)
-	_prop(i, front, 0.0, 1.0, 46.0, 0.2, 2.2, HOARDING)                 # front hoarding
-	_prop(i, front, -23.0, 1.0, 0.2, depth - 3.0, 2.2, HOARDING)
-	_prop(i, front, 23.0, 1.0, 0.2, depth - 3.0, 2.2, HOARDING)
-	var cabin := _place(i, front, 16.0, 4.0, 6.0, 2.6)
+	var zone: Color = ZONE_TINTS[t]
+	var panel := HOARDING.lerp(zone, 0.55)
+	var dens: int = 1 if t == Tile.INDUSTRY else int(sim.density[i])
+	_prop(i, front, -5.75, 1.0, 34.5, 0.2, 2.2, panel)                 # front hoarding, a gate for the track
+	_prop(i, front, 20.0, 1.0, 6.0, 0.2, 2.2, panel)
+	_prop(i, front, -23.0, 1.0, 0.2, depth - 3.0, 2.2, panel)
+	_prop(i, front, 23.0, 1.0, 0.2, depth - 3.0, 2.2, panel)
+	_prop(i, front, 0.0, depth - 2.0, 46.0, 0.2, 2.2, panel)
+	# Foundations, and the building starting to rise on them.
+	_slab(i, front, -4.0, 6.0, 30.0, 16.0, FOUNDATION)
+	if t == Tile.HOMES and dens == 0:
+		# Houses: brick walls part-built on each footprint.
+		for k in 3:
+			var at := -14.0 + k * 10.0
+			var wall_h := rng.randf_range(0.8, 2.6)
+			_prop(i, front, at, 8.0, 7.5, 0.3, wall_h, BRICK, 0.45)
+			_prop(i, front, at, 15.5, 7.5, 0.3, wall_h, BRICK, 0.45)
+			_prop(i, front, at - 3.6, 8.0, 0.3, 7.8, wall_h, BRICK, 0.45)
+			_prop(i, front, at + 3.6, 8.0, 0.3, 7.8, wall_h * 0.6, BRICK, 0.45)
+	else:
+		# A concrete (or for industry, steel) frame going up, wrapped in scaffold.
+		var floors: int = 1 + dens + rng.randi_range(0, 1)
+		var frame_colour: Color = Color(0.45, 0.30, 0.22) if t == Tile.INDUSTRY else CONCRETE
+		for k in 6:
+			for r in 3:
+				_prop(i, front, -18.0 + k * 5.6, 7.0 + r * 6.5, 0.45, 0.45, floors * 3.3, frame_colour, 0.45)
+		for f in floors:
+			_prop(i, front, -4.0, 6.5, 30.0, 15.0, 0.3, frame_colour.lightened(0.1), 0.45 + (f + 1) * 3.3 - 0.3)
+		var top: float = floors * 3.3 + 1.5
+		for k in 7:
+			_prop(i, front, -19.2 + k * 5.2, 5.4, 0.08, 0.08, top, SCAFFOLD, 0.45)
+		for f in floors + 1:
+			_prop(i, front, -4.0, 5.0, 31.5, 0.9, 0.08, SCAFFOLD_BOARD, 0.45 + f * 3.3 + 1.2)
+	# A site cabin by the gate, a portable toilet, a skip, pallets of bricks and blocks, timber.
+	var cabin := _place(i, front, 19.5, 4.0, 6.0, 2.6)
 	var cx: Vector3 = cabin["x"]
 	var cz: Vector3 = cabin["z"]
 	wall_list.append([Transform3D(Basis(cx * 6.0, Vector3.UP * 2.7, cz * 2.6), cabin["pos"]),
 		SITE_CABIN, Color(6.0, 2.7, 2.6, STYLE_PLANT)])
-	for k in 3:
-		_prop(i, front, rng.randf_range(-18.0, 10.0), rng.randf_range(24.0, depth - 8.0),
-			rng.randf_range(2.0, 4.0), rng.randf_range(2.0, 4.0), rng.randf_range(0.8, 1.8),
-			[CONCRETE, RED_SANDSTONE, Color(0.55, 0.42, 0.28)][k])
+	_prop(i, front, 21.5, 8.0, 1.1, 1.1, 2.3, Color(0.15, 0.35, 0.70))
+	_prop(i, front, 19.0, depth - 9.0, 1.9, 3.8, 1.3, CRANE_YELLOW)
+	for k in 4:
+		_prop(i, front, -18.0 + k * 1.5, 25.5, 1.2, 1.0, 0.9, [BRICK, CONCRETE][k % 2])
+	_prop(i, front, 2.0, 26.0, 5.0, 1.2, 0.6, TIMBER)
+	_prop(i, front, rng.randf_range(-15.0, 0.0), rng.randf_range(30.0, depth - 10.0), 3.5, 3.5, 1.1, SAND_PILE)
 	if t != Tile.INDUSTRY and sim.density[i] >= 1 and rng.randf() < (0.4 if sim.density[i] == 1 else 0.8):
 		# Tower crane: mast, jib out over the foundations, counterweight.
 		var mast := _place(i, front, 8.0, 22.0, 1.8, 1.8)
@@ -2363,6 +2869,29 @@ func _plan_site(i: int, t: int, wall_list: Array) -> void:
 			base + Vector3.UP * top + jib_dir * 9.0), CRANE_YELLOW])
 		_prop_items.append([Transform3D(Basis(mx * 3.0, Vector3.UP * 2.0, mz * 2.0),
 			base + Vector3.UP * (top - 1.0) - jib_dir * 6.0), CONCRETE])
+
+
+func _plan_empty(i: int, t: int) -> void:
+	# A zoned plot with nothing happening yet: rough ground (the shader draws it,
+	# with a line in the zone's colour round the edge), a surveyor's peg in the
+	# zone colour at each corner and a "plot available" board by the street.
+	var front := _frontage(i)
+	var depth := _depth(i, front)
+	var zone: Color = ZONE_TINTS[t]
+	for corner: Vector2 in [Vector2(-23.2, 1.0), Vector2(23.2, 1.0), Vector2(-23.2, depth - 1.6),
+			Vector2(23.2, depth - 1.6)]:
+		_prop(i, front, corner.x, corner.y, 0.35, 0.35, 1.3, zone)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = i * 3373 + t
+	var along := rng.randf_range(-16.0, 16.0)
+	for post: float in [-1.1, 1.1]:
+		_prop(i, front, along + post, 1.6, 0.14, 0.14, 2.6, CHARCOAL)
+	var board := _place(i, front, along, 1.5, 3.0, 0.12)
+	var board_pos: Vector3 = board["pos"]
+	board_pos.y = float(board["ground"]) + 1.3
+	_box_item(_prop_items, board_pos, board["x"], board["z"], Vector3(3.0, 1.3, 0.12), zone.lerp(WHITE_RENDER, 0.15))
+	_box_item(_prop_items, board_pos + Vector3.UP * 0.25 - Vector3(board["z"]) * 0.07, board["x"], board["z"],
+		Vector3(2.4, 0.3, 0.02), WHITE_RENDER)
 
 
 func _infill_kind(x: int, y: int) -> int:
@@ -2402,17 +2931,10 @@ func _plan_infill(i: int) -> void:
 	var depth := _depth(i, front)
 	match _infill[i]:
 		INFILL_PARK:
-			# Paths crossing the green (trees are planted with the other city trees).
-			_slab(i, front, 0.0, 0.0, 2.4, depth - 1.0, PAVEMENT)
-			_slab(i, front, 0.0, depth * 0.5 - 1.2, 46.0, 2.4, PAVEMENT)
+			_plan_park(i)
 		INFILL_ALLOTMENTS:
-			# Rows of beds, alternating soil and crops, with a couple of sheds.
-			for row in 6:
-				for col in 4:
-					var colour := SOIL if (row + col + rng.randi_range(0, 1)) % 2 == 0 else CROPS
-					_slab(i, front, -16.5 + col * 11.0, 4.0 + row * ((depth - 10.0) / 6.0), 9.5,
-						(depth - 10.0) / 6.0 - 1.2, colour)
-			for k in 2:
+			# Plots of vegetables and soil (painted by the shader) and a few sheds.
+			for k in 3:
 				_prop(i, front, rng.randf_range(-18.0, 18.0), rng.randf_range(6.0, depth - 10.0),
 					2.4, 3.0, 2.2, Color(0.30, 0.38, 0.30))
 		INFILL_CAR_PARK:
@@ -2474,18 +2996,7 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 				_add_block(spot, 22.0, 13.0, storeys * 3.0 + 0.5, stone, STYLE_FLATS, 4.5, SLATE,
 					wall_list, roof_list)
 		_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)                       # front pavement
-		_slab(i, front, 0.0, 16.5, 48.0, back_row - 17.0, COURT)            # back court
-		var mid := (16.5 + back_row) * 0.5 - 2.2
-		for k in 7:
-			if rng.randf() < 0.6:
-				_parked_car(i, front, -18.0 + k * 6.0, mid, rng.randf() < 0.5, rng)
-		# A few trees round the edge of the back court.
-		for edge: float in [18.5, back_row - 2.0]:
-			if edge > mid + 3.5 or edge < mid - 3.0:
-				for along: float in [-20.0, 0.0, 20.0]:
-					if rng.randf() < 0.7:
-						_plant(i, front, along + rng.randf_range(-2.0, 2.0), edge,
-							rng.randf_range(6.0, 10.0), _park_kind(rng), rng)
+		_tenement_court(i, front, back_row, rng)
 		return
 
 	if lv == 2 and sim.density[i] >= 1:
@@ -2498,10 +3009,12 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	var rows: Array = [6.0] if lv == 1 else [6.0, depth - 17.0]
 	var lane_at := depth - 25.0
 	var green := _hedge_colour(rng)
+	var tile := Vector2i(i % map_w, i / map_w)
 	for row in rows.size():
 		var back: float = rows[row]
-		for along: float in [-17.25, -5.75, 5.75, 17.25]:
-			if row == 0 and lv >= 2 and along < -17.0:
+		for lot: int in 4:
+			var along: float = -17.25 + lot * 11.5
+			if row == 0 and lv >= 2 and lot == 0:
 				continue   # this lot is the lane
 			if rng.randf() < 0.1:
 				continue   # the odd empty garden plot
@@ -2511,15 +3024,28 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			var roof := SLATE if rng.randf() < 0.75 else ROOF_TILE
 			var house_along: float = along - 5.3 + w * 0.5
 			var spot := _place(i, front, house_along, back, w, d)
-			_add_block(spot, w, d, h, _house_colour(rng), STYLE_HOUSE,
+			var walls_colour := _house_colour(rng)
+			_add_block(spot, w, d, h, walls_colour, STYLE_HOUSE,
 				rng.randf_range(2.8, 3.6), roof, wall_list, roof_list)
 			var drive_along: float = along - 5.3 + w + 1.5
 			var drive_from := 0.0 if row == 0 else lane_at + 3.0
 			_slab(i, front, drive_along, drive_from, 2.6, back + d - drive_from, DRIVEWAY)
 			if rng.randf() < 0.6:
 				_parked_car(i, front, drive_along, drive_from + 0.8, rng.randf() < 0.3, rng)
-			# Hedge along the front of the garden.
-			_prop(i, front, house_along, drive_from + 0.3, w, 0.8, 1.1, green)
+			# The front boundary: a hedge or a low wall, with a gap for the path
+			# to the door (the path itself is painted by the shader).
+			var wall_front := _field_rand(tile.x * 4 + lot, tile.y, 204) < 0.35
+			var gate := along - 2.0
+			var left := along - 5.3
+			var right := along - 5.3 + w
+			for part: Vector2 in [Vector2(left, gate - 0.6), Vector2(gate + 0.6, right)]:
+				var pw := part.y - part.x
+				if wall_front:
+					_prop(i, front, (part.x + part.y) * 0.5, drive_from + 0.35, pw, 0.35, 0.75, walls_colour.darkened(0.15))
+				else:
+					_prop(i, front, (part.x + part.y) * 0.5, drive_from + 0.3, pw, 0.8, 1.1, green)
+			var garden_to: float = lane_at - 0.5 if (row == 0 and lv >= 2) else depth - 0.8
+			_villa_garden(i, front, along, back + 9.3, garden_to, tile.x * 4 + lot, tile.y)
 		# Garden trees: a couple behind each house, sometimes one out front.
 		var garden_to: float = lane_at - 1.5 if (row == 0 and lv >= 2) else depth - 2.5
 		for along: float in [-17.25, -5.75, 5.75, 17.25]:
@@ -2531,14 +3057,93 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			if row == 0 and rng.randf() < 0.35:
 				_plant(i, front, along + rng.randf_range(-3.0, 1.0), rng.randf_range(2.0, 4.0),
 					rng.randf_range(4.0, 6.5), TreeKind.ORNAMENTAL, rng)
-		# Hedges between neighbouring lots, front to back.
+		# Between neighbouring lots, front to back: hedges, or fences out the back.
 		var row_from := 0.3 if row == 0 else lane_at + 3.3
 		var row_to := lane_at if (row == 0 and lv >= 2) else depth - 0.5
-		for edge: float in [-11.5, 0.0, 11.5]:
-			_prop(i, front, edge, row_from, 0.7, row_to - row_from, 1.4, green)
+		for edge: float in [-11.5, 0.0, 11.5, 23.0]:
+			if _field_rand(tile.x * 5 + int(edge), tile.y, 205) < 0.45:
+				_prop(i, front, edge, row_from, 0.7, back + 9.0 - row_from, 1.4, green)
+				_prop(i, front, edge, back + 9.0, 0.1, row_to - back - 9.0, 1.7, FENCE_TIMBER)
+			else:
+				_prop(i, front, edge, row_from, 0.7, row_to - row_from, 1.4, green)
+	# A fence along the back of the gardens, where the next street's gardens begin.
+	_prop(i, front, 0.0, depth - 0.45, 46.0, 0.1, 1.7, FENCE_TIMBER)
 	if lv >= 2:
 		_slab(i, front, -17.25, 0.0, 3.2, lane_at + 3.0, DRIVEWAY)     # lane in from the street
 		_slab(i, front, 0.0, lane_at, 48.0, 3.0, DRIVEWAY)              # lane behind the front gardens
+
+
+const FENCE_TIMBER := Color(0.42, 0.31, 0.21)
+const SHEDS := [Color(0.30, 0.40, 0.30), Color(0.50, 0.37, 0.24), Color(0.56, 0.57, 0.56), Color(0.36, 0.43, 0.52),
+	Color(0.62, 0.55, 0.42)]
+const GREENHOUSE := Color(0.78, 0.86, 0.86)
+const PATIO_SET := [Color(0.92, 0.92, 0.90), Color(0.45, 0.32, 0.20), Color(0.20, 0.22, 0.24)]
+
+
+func _villa_garden(i: int, front: Vector2i, centre: float, from: float, to: float, salt_x: int, salt_y: int) -> void:
+	# A back garden's things, matching what the shader paints there (the same
+	# hashes: patio by the house, a border on one side, a vegetable patch near
+	# the end): a shed at the bottom, sometimes a greenhouse, a rotary washing
+	# line, a table on the patio.
+	var s1 := _field_rand(salt_x, salt_y, 201)
+	var s2 := _field_rand(salt_x, salt_y, 202)
+	var s3 := _field_rand(salt_x, salt_y, 203)
+	var length := to - from
+	if length < 5.0:
+		return
+	var side := -1.0 if s3 < 0.5 else 1.0          # the side the shader's border runs down
+	if s1 > 0.28:
+		var shed_at := centre - side * 3.3
+		var colour: Color = SHEDS[int(s2 * 17.0) % SHEDS.size()]
+		_prop(i, front, shed_at, to - 2.4, 2.4, 1.9, 1.9, colour)
+		_prop(i, front, shed_at, to - 2.4, 2.7, 2.3, 0.15, colour.darkened(0.45), 1.9)       # felt roof
+	if s2 > 0.72 and length > 14.0:
+		_prop(i, front, centre + 3.0, to - 8.0, 2.4, 3.2, 2.2, GREENHOUSE)
+	if s3 > 0.2 and s3 < 0.7 and length > 9.0:
+		var at := Vector2(centre + 1.6, from + 6.5)
+		_prop(i, front, at.x, at.y, 0.07, 0.07, 1.9, PATIO_SET[0])
+		_prop(i, front, at.x, at.y, 2.6, 0.04, 0.04, PATIO_SET[0], 1.82)
+		_prop(i, front, at.x, at.y, 0.04, 2.6, 0.04, PATIO_SET[0], 1.82)
+	if s1 < 0.6:
+		var patio_w := 3.5 + 3.5 * s2
+		_prop(i, front, centre - 5.3 + patio_w * 0.5, from + 1.5, 1.0, 1.0, 0.75,
+			PATIO_SET[int(s1 * 10.0) % PATIO_SET.size()])
+
+
+const BIN_STORE := Color(0.30, 0.31, 0.30)
+const BINS := [Color(0.16, 0.30, 0.18), Color(0.20, 0.32, 0.55), Color(0.35, 0.36, 0.37), Color(0.55, 0.38, 0.20)]
+
+
+func _tenement_court(i: int, front: Vector2i, back_row: float, rng: RandomNumberGenerator) -> void:
+	# The shared back court (its ground is painted by the shader: paving by the
+	# back doors, a path down the middle and up each close, four drying greens):
+	# sandstone walls at the sides, a bin store by each close, clothes poles and
+	# lines on the greens, trees in the corners.
+	var mid := (16.5 + back_row) * 0.5
+	var stone := RED_SANDSTONE.darkened(0.1) if rng.randf() < 0.5 else BLONDE_SANDSTONE.darkened(0.1)
+	for along: float in [-23.9, 23.9]:
+		_prop(i, front, along, 16.5, 0.35, back_row - 16.5, 1.6, stone)
+	for along: float in [-7.0, 7.0]:
+		for at: float in [18.4, back_row - 3.9]:
+			_prop(i, front, along, at, 3.2, 1.5, 1.5, BIN_STORE)
+			_prop(i, front, along, at - 0.1, 3.5, 1.8, 0.12, BIN_STORE.darkened(0.3), 1.5)
+	for green: Vector2 in [Vector2(-12.0, (18.2 + mid) * 0.5), Vector2(12.0, (18.2 + mid) * 0.5),
+			Vector2(-12.0, (mid + back_row - 2.3) * 0.5), Vector2(12.0, (mid + back_row - 2.3) * 0.5)]:
+		var span := minf(7.0, (mid - 18.2) * 0.5 - 1.5)
+		if span < 2.0:
+			continue
+		for end: float in [-1.0, 1.0]:
+			_prop(i, front, green.x + end * 5.0, green.y - span, 0.1, 0.1, 2.2, CHARCOAL)
+			_prop(i, front, green.x + end * 5.0, green.y + span, 0.1, 0.1, 2.2, CHARCOAL)
+			_prop(i, front, green.x + end * 5.0, green.y - span, 0.03, span * 2.0, 0.03, WHITE_RENDER, 2.05)
+		if rng.randf() < 0.6:
+			# Washing out: a few things pegged on one line.
+			for k in 4:
+				var colour: Color = [WHITE_RENDER, Color(0.30, 0.45, 0.70), Color(0.80, 0.30, 0.30),
+					Color(0.95, 0.85, 0.40)][rng.randi_range(0, 3)]
+				_prop(i, front, green.x - 5.0, green.y - span + 1.0 + k * span * 0.45, 0.04, 0.8, 0.6, colour, 1.45)
+	for corner: Vector2 in [Vector2(-21.0, 19.8), Vector2(21.0, back_row - 3.6)]:
+		_plant(i, front, corner.x, corner.y, rng.randf_range(7.0, 10.0), _park_kind(rng), rng)
 
 
 func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGenerator,
@@ -2569,6 +3174,23 @@ func _plan_terraces(i: int, front: Vector2i, depth: float, rng: RandomNumberGene
 	for k in 4:
 		if rng.randf() < 0.5:
 			_parked_car(i, front, -18.0 + k * 12.0, lane - 0.7, rng.randf() < 0.5, rng)
+	# Fences between the strip gardens (one per house, as the shader paints
+	# them), and a shed at the lane end of some.
+	var tile := Vector2i(i % map_w, i / map_w)
+	var strip_w := 46.0 / 9.0
+	for area: Vector2 in [Vector2(12.5, lane), Vector2(lane + 3.0, back_row - 0.4)]:
+		if area.y - area.x < 4.0:
+			continue
+		for k in range(1, 9):
+			_prop(i, front, -23.0 + k * strip_w, area.x, 0.08, area.y - area.x, 1.5, FENCE_TIMBER)
+		var lane_end: float = area.y - 2.0 if area.x < lane else area.x + 0.2
+		for k in 9:
+			var s := _field_rand(tile.x * 9 + k, tile.y + int(area.x), 213)
+			if s < 0.5:
+				var colour: Color = SHEDS[int(s * 31.0) % SHEDS.size()]
+				var at := -23.0 + (k + 0.5) * strip_w + (1.1 if s < 0.25 else -1.1)
+				_prop(i, front, at, lane_end, 1.8, 1.7, 1.8, colour)
+				_prop(i, front, at, lane_end - 0.15, 2.1, 2.0, 0.12, colour.darkened(0.45), 1.8)
 
 
 func _plan_tall_homes(i: int, lv: int, front: Vector2i, depth: float, value: float,
@@ -2635,6 +3257,7 @@ func _plan_skyscraper(i: int, lv: int, front: Vector2i, depth: float, value: flo
 		_add_block(podium, 46.0, 24.0, podium_h, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
 		_front_panel(podium, 24.0, 0.0, 4.6, 48.0, 0.6, TRIM, wall_list)     # canopy over the entrance
 	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+	_street_furniture(i, front, offices)
 	var plaza_from := 28.0
 	if depth - plaza_from > 6.0:
 		_slab(i, front, 0.0, plaza_from, 46.0, depth - plaza_from - 1.0, PAVEMENT)
@@ -2805,8 +3428,6 @@ func _premium_court(i: int, front: Vector2i, from: float, to: float, rng: Random
 	_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)
 	if to - from < 4.0:
 		return
-	_slab(i, front, 0.0, from, 46.0, to - from, LAWN)
-	_slab(i, front, 0.0, from, 2.4, to - from, PAVEMENT, 0.02)
 	for k: int in 6:
 		var along: float = rng.randf_range(-20.0, 20.0)
 		if absf(along) < 3.0:
@@ -2851,18 +3472,19 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			_modern_block(tower, 24.0, 16.0, rng.randi_range(10, 12) + extra * 2, _modern_cladding(rng),
 				true, wall_list, roof_list)
 		_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+		_street_furniture(i, front, true)
 		# A multi-storey car park behind.
 		var deck := _place(i, front, 0.0, 28.0, 40.0, depth - 31.0)
 		_add_block(deck, 40.0, depth - 31.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
 		return
-	var park_from := 17.0
+	var park_from := 16.0           # the back of the shops
 	if lv >= 3:
 		for along: float in [-12.5, 12.5]:
 			var spot := _place(i, front, along, 3.0, 23.0, 18.0)
 			_add_block(spot, 23.0, 18.0, rng.randi_range(3, 4) * 3.2 + 0.6,
 				colours[rng.randi_range(0, colours.size() - 1)], STYLE_SHOP, 0.0, SLATE,
 				wall_list, roof_list)
-		park_from = 23.0
+		park_from = 21.0
 	else:
 		# A parade of shops along the street; flats above from level 2.
 		var height := 4.2 if lv == 1 else 7.0
@@ -2871,24 +3493,74 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 			_add_block(spot, 15.5, 13.0, height + rng.randf_range(-0.2, 0.4),
 				colours[rng.randi_range(0, colours.size() - 1)], STYLE_SHOP,
 				3.0 if lv == 2 else 0.0, SLATE, wall_list, roof_list)
-	# Wide pavement out front; a car park filling the rest of the plot.
+	# Wide pavement out front with planters, a bench and bins (the shader paves
+	# the rest of the frontage).
 	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
-	var park_depth := depth - park_from - 1.0
-	_slab(i, front, 0.0, park_from, 47.0, park_depth, CAR_PARK)
-	# Rows of marked bays: each double row is 2 x 5 m bays plus a 6 m aisle.
-	_parking_bays(i, front, park_from + 1.0, park_from + park_depth - 0.5, 0.55, rng)
-	# Trees round the edge of the car park.
-	for along: float in [-22.5, 22.5]:
+	_street_furniture(i, front, true)
+	# A concrete service yard behind the shops (painted by the shader): bins,
+	# pallets, roll cages and a delivery lorry now and then.
+	for k in 5:
+		_prop(i, front, -21.0 + k * 1.0, park_from + 0.6, 0.7, 0.8, 1.1, BINS[(k + i) % BINS.size()])
+	_prop(i, front, -14.0, park_from + 1.0, 1.2, 1.0, rng.randf_range(0.5, 1.4), PALLETS)
+	_prop(i, front, -12.5, park_from + 1.0, 0.8, 0.8, 1.7, SCAFFOLD)
+	if rng.randf() < 0.5:
+		_lorry(i, front, rng.randf_range(0.0, 10.0), park_from + 3.5, true, rng)
+	# Then the car park: marked bays with planted islands, a trolley shelter.
+	var park_at := park_from + 7.0
+	var park_depth := depth - park_at - 1.6
+	_slab(i, front, 0.0, park_at, 44.0, park_depth, CAR_PARK)
+	_parking_bays(i, front, park_at + 1.0, park_at + park_depth - 0.5, 0.55, rng)
+	_prop(i, front, 0.0, park_at + park_depth - 2.2, 4.0, 1.6, 2.2, BALCONY_GLASS)
+	_prop(i, front, 0.0, park_at + park_depth - 2.3, 4.4, 1.9, 0.1, CHARCOAL, 2.2)
+	for along: float in [-23.4, 23.4]:
 		for k in 2:
-			_plant(i, front, along, park_from + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),
+			_plant(i, front, along, park_at + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),
 				TreeKind.BROADLEAF, rng)
+
+
+const PALLETS := Color(0.60, 0.47, 0.31)
+const HEDGE_GREEN := Color(0.16, 0.30, 0.12)
+const LORRY_TRAILERS := [Color(0.92, 0.92, 0.90), Color(0.75, 0.76, 0.78), Color(0.20, 0.35, 0.60),
+	Color(0.55, 0.12, 0.10)]
+const LORRY_CABS := [Color(0.92, 0.92, 0.90), Color(0.70, 0.12, 0.10), Color(0.15, 0.25, 0.50),
+	Color(0.25, 0.27, 0.30)]
+const BOLLARD := Color(0.20, 0.21, 0.22)
+const POST_BOX := Color(0.75, 0.08, 0.06)
+
+
+func _lorry(i: int, front: Vector2i, along: float, back: float, nose_to_street: bool,
+		rng: RandomNumberGenerator, length: float = 10.0) -> void:
+	# A lorry (cab and box trailer) parked along the plot's depth.
+	var cab_back: float = back if nose_to_street else back + length + 0.3
+	var trailer_back: float = back + 2.8 if nose_to_street else back
+	_prop(i, front, along, cab_back, 2.4, 2.5, 3.0, LORRY_CABS[rng.randi_range(0, LORRY_CABS.size() - 1)], 0.3)
+	_prop(i, front, along, trailer_back, 2.5, length, 3.2, LORRY_TRAILERS[rng.randi_range(0, LORRY_TRAILERS.size() - 1)],
+		0.9)
+	_prop(i, front, along, trailer_back + 0.5, 2.2, length - 1.0, 0.9, CHARCOAL)       # wheels and chassis
+
+
+func _street_furniture(i: int, front: Vector2i, shops: bool) -> void:
+	# On the pavement in front of shops and offices: planters with small trees,
+	# a bench, litter bins, bollards; a post box now and then.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = i * 7717 + 3
+	for along: float in [-18.0, 6.0]:
+		var at := along + rng.randf_range(-2.0, 2.0)
+		_prop(i, front, at, 0.6, 1.5, 1.5, 0.6, CREAM_STONE.darkened(0.15))
+		_plant(i, front, at, 1.2, rng.randf_range(4.5, 6.0), TreeKind.ORNAMENTAL, rng)
+	_prop(i, front, -6.0, 0.8, 1.8, 0.55, 0.45, BENCH)
+	_prop(i, front, -3.8, 0.7, 0.5, 0.5, 0.9, CHARCOAL)
+	if shops:
+		for k in 3:
+			_prop(i, front, 12.0 + k * 2.0, 0.35, 0.18, 0.18, 0.9, BOLLARD)
+	if rng.randf() < 0.15:
+		_prop(i, front, 20.0, 0.6, 0.5, 0.5, 1.4, POST_BOX)
 
 
 func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
 	var cladding := SHED_METAL if rng.randf() < 0.6 else SHED_GREEN
 	var depth := _depth(i, front)
-	_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 	var stack_at := Vector2(-14.0, depth - 10.0)
 	if lv == 1:
 		var spot := _place(i, front, 0.0, 6.0, 34.0, 28.0)
@@ -2917,6 +3589,25 @@ func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator
 	for k in 4:
 		if rng.randf() < 0.6:
 			_parked_car(i, front, 12.0 + k * 3.0, 0.8, true, rng)
+	# The yard (concrete, gravel at the back, scrub by the fences: painted by the
+	# shader): a chain-link fence round it with a gap for the gate, pallets
+	# stacked at the back, a skip, tanks, a lorry at the side of the shed.
+	var fence := Color(0.34, 0.38, 0.36)
+	_prop(i, front, -8.0, 0.4, 33.0, 0.05, 2.2, fence)
+	_prop(i, front, -24.3, 0.4, 0.05, depth - 1.2, 2.2, fence)
+	_prop(i, front, 24.3, 0.4, 0.05, depth - 1.2, 2.2, fence)
+	_prop(i, front, 0.0, depth - 0.8, 48.6, 0.05, 2.2, fence)
+	for k in rng.randi_range(2, 5):
+		_prop(i, front, -22.0 + k * 1.4, depth - 12.8, 1.2, 1.0, rng.randf_range(0.4, 1.5), PALLETS)
+	_prop(i, front, -20.5, depth - 7.0, 1.8, 3.8, 1.4,
+		[CRANE_YELLOW, Color(0.20, 0.42, 0.25), Color(0.20, 0.32, 0.60)][rng.randi_range(0, 2)])
+	if lv >= 2 or rng.randf() < 0.5:
+		for along: float in [-1.5, 2.5]:
+			var tank := _place(i, front, along, depth - 6.5, 3.6, 3.6)
+			_cylinder(_spire_items, tank["pos"], rng.randf_range(1.4, 1.8), rng.randf_range(4.0, 7.0),
+				[TANK_GREY, WHITE_RENDER, Color(0.45, 0.50, 0.42)][rng.randi_range(0, 2)])
+	if rng.randf() < 0.7:
+		_lorry(i, front, 16.0 if lv == 2 else 21.0, 8.0, false, rng, 12.0)
 
 
 # --------------------------------------------- power, utilities, leisure, transport
@@ -2924,8 +3615,6 @@ func _plan_industry(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator
 const TURBINE_WHITE := Color(0.92, 0.93, 0.93)
 const PANEL_BLUE := Color(0.10, 0.15, 0.28)
 const TANK_GREY := Color(0.64, 0.70, 0.74)
-const GREEN_SPEC := Color(0.42, 0.68, 0.30)    # putting green
-const BUNKER_SAND := Color(0.86, 0.80, 0.62)
 const BUS_RED := Color(0.70, 0.12, 0.12)
 const TRAIN_RED := Color(0.62, 0.12, 0.18)
 const TEAM_BLUE := Color(0.12, 0.28, 0.62)
@@ -3011,7 +3700,6 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 	var centre := Vector3(c2.x, maxf(height_at(c2.x, c2.y), 0.0), c2.y)
 	match t:
 		Tile.GAS:
-			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 			if _models.has("gas_plant"):
 				# Clad turbine hall, two boilers with slim stacks, a gasholder, tanks and pipes.
 				var site := _place(i, front, 0.0, 3.0, 44.0, 44.0)
@@ -3029,7 +3717,6 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_cylinder(chimney_list, tank["pos"], 4.5, 8.0, Color(0.86, 0.86, 0.84))
 			_plan_fence(i, front, depth)
 		Tile.NUCLEAR:
-			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 			if _models.has("nuclear_plant"):
 				# Domed containment, turbine hall, vent stack and two cooling towers.
 				var site := _place(i, front, 0.0, 2.0, 46.0, 46.0)
@@ -3077,7 +3764,6 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 					_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.2, 1.2, 0.2)),
 						at + Vector3(leg, -1.0, 0.0)), CHARCOAL])
 		Tile.WATER_PUMP:
-			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 			var house := _place(i, front, -12.0, 5.0, 12.0, 9.0)
 			_add_block(house, 12.0, 9.0, 5.5, RED_SANDSTONE, STYLE_PLANT, 3.0, SLATE, wall_list, roof_list)
 			for along: float in [6.0, 18.0]:
@@ -3086,7 +3772,6 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_prop(i, front, 0.0, 12.0, 20.0, 0.8, 0.8, CHARCOAL)        # pipework
 			_plan_fence(i, front, depth)
 		Tile.WATER_TOWER:
-			_slab(i, front, 0.0, 0.0, 30.0, 30.0, YARD)
 			if _models.has("water_tower"):
 				# Concrete shaft and tank, standing in the middle of the plot, its door to the street.
 				var tower_spot := _place(i, front, 0.0, 0.0, 16.0, 16.0)
@@ -3106,7 +3791,6 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			_prop(i, front, -20.0, 2.0, 2.6, 7.0, 3.2, CRANE_YELLOW)
 			_plan_fence(i, front, depth)
 		Tile.RECYCLING:
-			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, YARD)
 			var shed := _place(i, front, -5.0, 8.0, 32.0, 20.0)
 			_add_block(shed, 32.0, 20.0, 10.0, SHED_GREEN, STYLE_INDUSTRY, 2.0, SHED_METAL.darkened(0.2),
 				wall_list, roof_list)
@@ -3117,14 +3801,11 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 		Tile.GOLF:
 			# Fairway (the ground colour), a green with its flag, bunkers, a tee and
 			# a few trees in the rough.
-			var green_at := Vector2(rng.randf_range(-12.0, 12.0), rng.randf_range(14.0, depth - 16.0))
-			_slab(i, front, green_at.x, green_at.y, 13.0, 11.0, GREEN_SPEC)
-			for k in rng.randi_range(2, 3):
-				var angle := rng.randf() * TAU
-				_slab(i, front, green_at.x + cos(angle) * 9.0, green_at.y + sin(angle) * 8.0,
-					rng.randf_range(4.0, 6.0), rng.randf_range(3.0, 4.5), BUNKER_SAND)
-			_slab(i, front, -green_at.x * 0.5, depth - 6.0, 6.0, 4.0, GREEN_SPEC)    # tee
-			var flag := _place(i, front, green_at.x + 2.0, green_at.y + 4.0, 0.1, 0.1)
+			# (The green, bunkers and tee are painted by the shader, lots.gdshaderinc golf(),
+			# from the same hashes.)
+			var green_at := Vector2((_field_rand(tile.x, tile.y, 121) - 0.5) * 24.0,
+				14.0 + _field_rand(tile.x, tile.y, 122) * (depth - 30.0))
+			var flag := _place(i, front, green_at.x + 2.0, green_at.y - 0.05, 0.1, 0.1)
 			var flag_pos: Vector3 = flag["pos"]
 			flag_pos.y = float(flag["ground"])
 			_prop_items.append([Transform3D(Basis.from_scale(Vector3(0.08, 2.4, 0.08)), flag_pos), WHITE_RENDER])
@@ -3160,6 +3841,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 4:
 				_plant(i, front, -20.0 + (k % 2) * 40.0, 12.0 + (k / 2) * 14.0, rng.randf_range(7.0, 10.0),
 					TreeKind.BROADLEAF, rng)
+			_street_furniture(i, front, false)
 		Tile.MUSEUM:
 			_slab(i, front, 0.0, 0.0, 49.0, 10.0, PAVEMENT)
 			var spot := _place(i, front, -5.0, 10.0, 34.0, 20.0)
@@ -3224,6 +3906,11 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				tower["x"], tower["z"], Vector3(2.6, 2.6, 0.2), WHITE_RENDER, STYLE_PAINT)   # clock
 			for along: float in [-18.0, 18.0]:
 				_plant(i, front, along, 5.0, rng.randf_range(7.0, 9.0), TreeKind.BROADLEAF, rng)
+			# A statue on a plinth in the square, benches facing it.
+			_prop(i, front, 0.0, 4.5, 2.4, 2.4, 1.6, CREAM_STONE)
+			_prop(i, front, 0.0, 5.3, 0.8, 0.8, 2.2, BRONZE.darkened(0.2), 1.5)
+			for along: float in [-7.0, 7.0]:
+				_prop(i, front, along, 5.5, 1.8, 0.55, 0.45, BENCH)
 		Tile.BUS_DEPOT:
 			_slab(i, front, 0.0, 0.0, 49.0, depth - 1.0, CAR_PARK)
 			var shed := _place(i, front, 0.0, depth - 26.0, 44.0, 22.0)
@@ -3767,10 +4454,8 @@ func _garden_kind(rng: RandomNumberGenerator) -> int:
 func _plant(i: int, front: Vector2i, along: float, back: float, tall: float, kind: int,
 		rng: RandomNumberGenerator) -> void:
 	# A tree on a plot, planted with the other city trees.
-	var spot := _place(i, front, along, back, 1.0, 1.0)
-	var pos: Vector3 = spot["pos"]
 	var k: int = _garden_kind(rng) if kind == TreeKind.GARDEN else kind
-	_extra_trees.append([Vector2(pos.x, pos.z), tall, k])
+	_extra_trees.append([_plot_point(i, front, along, back + 0.5), tall, k])
 
 
 func _leaf_colour(base: Color, rng: RandomNumberGenerator) -> Color:
@@ -3876,9 +4561,9 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 
 
 func _update_natural_trees(tiles: PackedByteArray) -> void:
-	# Trees stay on open land and in parks; building anything else clears them.
+	# Trees stay on open land; building anything clears them (parks plant their own).
 	for i in tiles.size():
-		var show := 1 if ((tiles[i] == Tile.EMPTY and _infill[i] == 0) or tiles[i] == Tile.PARK) else 0
+		var show := 1 if (tiles[i] == Tile.EMPTY and _infill[i] == 0) else 0   # (parks plant their own)
 		if show == _tile_has_trees[i]:
 			continue
 		_tile_has_trees[i] = show
@@ -3892,22 +4577,8 @@ func _update_natural_trees(tiles: PackedByteArray) -> void:
 func _build_city_trees(tiles: PackedByteArray) -> void:
 	# Planted trees: in parks and pocket parks, on plots (gardens, courts, car
 	# parks; see the plot plans) and along the streets.
+	# (Park trees are planted by _plan_park, clear of the paths and ponds.)
 	var lists: Array = [[], [], []]
-	for i in tiles.size():
-		var t := tiles[i]
-		var count := 0
-		if t == Tile.PARK:
-			count = 10
-		elif t == Tile.EMPTY and _infill[i] == INFILL_PARK:
-			count = 6
-		if count == 0:
-			continue
-		var rng := RandomNumberGenerator.new()
-		rng.seed = i * 31 + t
-		var c := tile_centre(Vector2i(i % map_w, i / map_w))
-		for k in count:
-			var spot := c + Vector2(rng.randf_range(-21.0, 21.0), rng.randf_range(-21.0, 21.0))
-			_add_tree(lists, _tree(spot, rng.randf_range(7.0, 15.0), _park_kind(rng), rng))
 	var plot_rng := RandomNumberGenerator.new()
 	plot_rng.seed = 7
 	for tree: Array in _extra_trees:

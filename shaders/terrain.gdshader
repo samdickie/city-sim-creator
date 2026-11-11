@@ -2,14 +2,15 @@
 // paler dry slopes and hilltops, damp dark hollows, rough hill grazing, rock on
 // steep faces; a patchwork of fields with hedges in open country; sand beaches
 // with wet sand at the waterline and dune grass behind; dark ground under the
-// woods. Zone colours, warnings and map overlays are painted on top.
+// woods. The town's plots (lawns, gardens, paving, yards, parks, empty and
+// building plots with their zone colours; lots.gdshaderinc), warnings and map
+// overlays are painted on top.
 // The mesh is a flat grid: the vertex shader lifts it to the height field (see
 // world3d.gd _build_height_field), the same one height_at() reads.
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
 uniform vec2 map_size = vec2(7000.0, 6500.0);      // playable area in metres
-uniform sampler2D zone_map : source_color, filter_nearest;  // zone tint per tile (alpha = strength)
 uniform sampler2D warn_map : filter_nearest;        // R = no road, G = no power
 uniform float time_now = 0.0;
 uniform sampler2D overlay_map : source_color, filter_nearest;  // map overlay colour per tile
@@ -82,6 +83,8 @@ float frand(int x, int y, uint salt) {
 	h ^= h >> 16u;
 	return float(h & 65535u) / 65535.0;
 }
+
+#include "res://shaders/lots.gdshaderinc"
 
 float row_line(int r, float u) {
 	// Where the boundary at the bottom of field row r runs (v, in the field frame).
@@ -257,13 +260,13 @@ void fragment() {
 	col *= hedge_shade;
 
 	// --- Photo detail close up (two scales, so it never visibly repeats).
+	vec3 grass_detail = vec3(1.0 + (nD.g - 0.5) * 0.15 * near);
 	if (use_textures) {
 		vec2 uv = p / 6.0;
 		vec3 detail = mix(texture(grass_tex, uv).rgb, texture(grass_tex, uv.yx * 0.213 + 0.37).rgb, 0.45);
-		col *= mix(vec3(1.0), clamp(detail / grass_average, 0.55, 1.6), 0.8 * near);
-	} else {
-		col *= 1.0 + (nD.g - 0.5) * 0.15 * near;
+		grass_detail = mix(vec3(1.0), clamp(detail / grass_average, 0.55, 1.6), 0.8 * near);
 	}
+	col *= grass_detail;
 
 	// --- Woods: dark leaf litter and undergrowth; needles under plantations.
 	// Beyond where the trees themselves are drawn, the canopy is painted on.
@@ -300,8 +303,18 @@ void fragment() {
 	float under = 1.0 - smoothstep(-2.5, -0.05, h);
 	col = mix(col, lin(SEABED) * (0.75 + 0.3 * nC.r) * mix(1.0, 0.55, smoothstep(0.0, 8.0, -h)), under);
 
-	// --- Zone colours, warnings and map overlays, one map tile at a time.
+	// --- The town's plots, warnings and map overlays, one map tile at a time.
 	vec3 glow = vec3(0.0);
+	float shine = 0.0;
+	if (inside && !overlay_on && built > 0.0) {
+		Ctx c = Ctx(p, px, near, nC, nD, grass_detail);
+		vec3 plot_col;
+		if (lot_ground(c, plot_col, shine)) {
+			float cover = (1.0 - under) * (1.0 - sandy);     // not out on the beach
+			col = mix(col, plot_col, cover);
+			shine *= cover;
+		}
+	}
 	if (inside && overlay_on) {
 		// Map overlay: plain grey ground with each tile's colour on top.
 		vec4 ov = texture(overlay_map, tile_uv);
@@ -309,8 +322,6 @@ void fragment() {
 		col = mix(col, ov.rgb, ov.a);
 		glow = ov.rgb * ov.a * 0.15;                    // still readable at night
 	} else if (inside) {
-		vec4 zone = texture(zone_map, tile_uv);
-		col = mix(col, zone.rgb, zone.a);
 		vec4 warn = texture(warn_map, tile_uv);
 		float stripes = step(0.5, fract((p.x + p.y) / 8.0));
 		col = mix(col, vec3(0.05), warn.r * stripes * 0.55);           // no road: dark stripes
@@ -330,8 +341,8 @@ void fragment() {
 
 	ALBEDO = col;
 	EMISSION = glow;
-	ROUGHNESS = mix(mix(0.95, 0.8, sandy), 0.45, wet);
-	SPECULAR = mix(0.25, 0.5, wet);
+	ROUGHNESS = mix(mix(mix(0.95, 0.8, sandy), 0.45, wet), 0.12, shine);
+	SPECULAR = mix(mix(0.25, 0.5, wet), 0.6, shine);
 	// Slopes turned a little further towards or away from the light than they
 	// really are, so gentle hills read (looks only; the ground keeps its shape).
 	vec3 n = normalize(vec3(world_normal.x * normal_boost, world_normal.y, world_normal.z * normal_boost));
