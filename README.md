@@ -2,7 +2,7 @@
 
 A SimCity-style city builder on Troon's real terrain. Built with Godot (free).
 
-**Status: Phase 2 – Living city, now in 3D.** Zones grow when they have a road and power; demand, taxes and upkeep run monthly.
+**Status: Phase 3 – Real game, in 3D.** Services, happiness, pollution, advisors and districts are in. See `CLAUDE.md` for progress and `GAME_DESIGN.md` for the design.
 
 ## Play it
 
