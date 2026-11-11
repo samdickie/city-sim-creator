@@ -47,6 +47,7 @@ var hud: Hud
 var traffic: Traffic
 var out_dir := ""
 var only: PackedStringArray = []
+var perf := false                     # --shots-perf: a table of what each part of the picture costs
 var _pending: Array = []              # [id, from, to, near_sea] waiting for the town to unlock them
 var _forced: Array[String] = []       # what the showcase step changed
 var _harbour := Vector2i(39, 85)
@@ -69,6 +70,8 @@ func _init(game_node: Node3D, args: PackedStringArray) -> void:
 			out_dir = a.trim_prefix("--shots=")
 		elif a.begins_with("--shots-only="):
 			only = a.trim_prefix("--shots-only=").split(",", false)
+		elif a == "--shots-perf":
+			perf = true
 	if out_dir == "":
 		out_dir = "screenshots"
 	if out_dir.is_relative_path():
@@ -91,6 +94,7 @@ func _ready() -> void:
 func _run() -> void:
 	var started := Time.get_ticks_msec()
 	DirAccess.make_dir_recursive_absolute(out_dir)
+	_skip_import(out_dir)
 	print("[shots] saving to %s" % out_dir)
 	# The same town every run: fix every random number generator the town uses.
 	seed(SEED)
@@ -98,6 +102,11 @@ func _run() -> void:
 	traffic.set("_rng", _seeded_rng(SEED + 1))
 	game.call("_set_speed", 0)        # the game clock stays still; months are run below
 	game.set("day_cycle", false)
+	# Pictures in pixels, as the shots always were: no Retina interface or 3D scaling.
+	game.set("fit_to_screen", false)
+	get_window().content_scale_factor = 1.0
+	get_viewport().scaling_3d_scale = 1.0
+	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	# A fixed size in pixels, whatever the screen's scaling (--resolution is in
 	# points on a Retina Mac, and gets squeezed to fit the screen).
 	get_window().mode = Window.MODE_WINDOWED
@@ -110,6 +119,10 @@ func _run() -> void:
 	_finish_town()
 	print("[shots] town ready in %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	_report()
+	if perf:
+		await _perf_report()
+		get_tree().quit(0)
+		return
 
 	for shot: Dictionary in _shot_list():
 		var shot_name: String = shot["name"]
@@ -118,6 +131,15 @@ func _run() -> void:
 		await _shoot(shot)
 	print("[shots] done in %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	get_tree().quit(1 if _failed > 0 else 0)
+
+
+static func _skip_import(dir: String) -> void:
+	# Pictures saved inside the project would be imported by the Godot editor as
+	# game textures (slow, and clutter): a .gdignore file in the folder stops that.
+	if dir.begins_with(ProjectSettings.globalize_path("res://")):
+		var f := FileAccess.open(dir.path_join(".gdignore"), FileAccess.WRITE)
+		if f:
+			f.close()
 
 
 func _seeded_rng(s: int) -> RandomNumberGenerator:
@@ -433,7 +455,8 @@ func _report() -> void:
 	for node_name: String in ["walls", "roofs", "chimneys", "paving", "props", "parked_bodies",
 			"city_trunks", "city_crowns", "city_cones"]:
 		var node: MultiMeshInstance3D = world.get(node_name)
-		counts.append("%s %d" % [node_name, node.multimesh.instance_count])
+		counts.append("%s %d" % [node_name, world.call("instance_total", node) if world.has_method("instance_total")
+			else node.multimesh.instance_count])
 	var model_items: Array = world.get("_model_items")
 	counts.append("model parts %d" % model_items.size())
 	print("[shots]   refresh_buildings %.0f ms; instances: %s" % [(Time.get_ticks_usec() - t0) / 1000.0,
@@ -705,3 +728,145 @@ func _measure_speed() -> void:
 	print("[shots] speed at this view: %.2f ms per frame (%.0f fps) over %d frames"
 		% [ms, 1000.0 / maxf(ms, 0.01), SPEED_FRAMES])
 	await get_tree().process_frame
+
+
+# ------------------------------------------------------- speed (--shots-perf)
+
+static func measure(viewport: Viewport, frames: int = 30) -> Dictionary:
+	# Draw `frames` frames back to back and average: wall time, the renderer's own
+	# CPU and GPU time, and how many draw calls, triangles and objects a frame has.
+	var vp := viewport.get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp, true)
+	for n: int in 8:
+		RenderingServer.force_draw(false)
+	var cpu := 0.0
+	var gpu := 0.0
+	var start := Time.get_ticks_usec()
+	for n: int in frames:
+		RenderingServer.force_draw(false)
+		cpu += RenderingServer.viewport_get_measured_render_time_cpu(vp) + RenderingServer.get_frame_setup_time_cpu()
+		gpu += RenderingServer.viewport_get_measured_render_time_gpu(vp)
+	var wall := (Time.get_ticks_usec() - start) / 1000.0 / frames
+	return {"wall": wall, "cpu": cpu / frames, "gpu": gpu / frames,
+		"draws": int(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)),
+		"prims": int(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)),
+		"objects": int(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))}
+
+
+static func perf_line(label: String, m: Dictionary, base: Dictionary = {}) -> String:
+	var saved := ""
+	if not base.is_empty():
+		saved = "  (%+.1f ms)" % (float(m["wall"]) - float(base["wall"]))
+	return "%-22s wall %6.1f ms  cpu %5.1f  gpu %6.1f  draws %5d  tris %9d  objects %6d%s" % [label,
+		float(m["wall"]), float(m["cpu"]), float(m["gpu"]), int(m["draws"]), int(m["prims"]), int(m["objects"]), saved]
+
+
+static func perf_parts(w: WorldView, h: Hud, t: Traffic) -> Array:
+	# [label, nodes to hide] for the cost table.
+	var models: Array = []
+	for key: String in w.get("_model_nodes"):
+		models.append(w.get("_model_nodes")[key])
+	var sea: Array = []
+	for child: Node in w.get_children():
+		var mi := child as MeshInstance3D
+		if mi and mi.mesh is PlaneMesh:
+			sea.append(mi)
+	return [
+		["terrain + far land", [w.terrain_root]],
+		["sea", sea],
+		["woods", [w.woods]],
+		["city trees", [w.city_trunks, w.city_crowns, w.city_cones]],
+		["props + parked cars", [w.props, w.parked_bodies, w.parked_cabins]],
+		["paving", [w.paving]],
+		["models", models],
+		["box buildings", [w.walls, w.roofs, w.chimneys]],
+		["roads", [w.road_instance]],
+		["pylons + cables", [w.pylons, w.cables]],
+		["alerts + smoke", [w.alerts, w.smoke]],
+		["traffic", [t]],
+		["HUD", [h]],
+	]
+
+
+func _perf_report() -> void:
+	print("[perf] window %s, %d frames each" % [get_window().size, 30])
+	for view: Array in [["04_cbd", Vector2(46, 64), -40.0, 24.0, 1050.0], ["02_suburb", Vector2(47, 37), -40.0, 34.0, 520.0],
+			["01_overview", Vector2(60, 66), -40.0, 40.0, 3500.0]]:
+		if not _included(String(view[0])):
+			continue
+		var at: Vector2 = view[1]
+		var wx: float = (at.x + 0.5) * world.cell
+		var wz: float = (at.y + 0.5) * world.cell
+		rig.target = Vector3(wx, maxf(world.height_at(wx, wz), 0.0), wz)
+		rig.yaw = deg_to_rad(float(view[2]))
+		rig.pitch = deg_to_rad(float(view[3]))
+		rig.distance = float(view[4])
+		rig.snap()
+		game.set("time_of_day", DAY)
+		hud.visible = true
+		for n: int in SETTLE_FRAMES:
+			await get_tree().process_frame
+			RenderingServer.force_draw(false)
+		await perf_table(self, String(view[0]), world, hud, traffic)
+
+
+static func perf_table(node: Node, title: String, w: WorldView, h: Hud, t: Traffic) -> void:
+	var vp := node.get_viewport()
+	print("[perf] --- %s (window %s, 3D drawn at %d%%) ---" % [title, vp.get_visible_rect().size, roundi(vp.scaling_3d_scale * 100.0)])
+	var base := measure(vp)
+	print("[perf] " + perf_line("everything", base))
+	for part: Array in perf_parts(w, h, t):
+		var nodes: Array = part[1]
+		var was: Array[bool] = []
+		for n: Node in nodes:
+			was.append(n.get("visible"))
+			n.set("visible", false)
+		print("[perf] " + perf_line("- " + String(part[0]), measure(vp), base))
+		for k: int in nodes.size():
+			nodes[k].set("visible", was[k])
+	var models: Array = perf_parts(w, h, t)[6][1]
+	for m: GeometryInstance3D in models:
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	print("[perf] " + perf_line("- models' shadows", measure(vp), base))
+	var plain := StandardMaterial3D.new()
+	for m: GeometryInstance3D in models:
+		m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		m.material_override = plain
+	print("[perf] " + perf_line("models plain material", measure(vp), base))
+	for m: GeometryInstance3D in models:
+		m.material_override = null
+	RenderingServer.directional_shadow_atlas_set_size(4096, true)
+	print("[perf] " + perf_line("shadow map 4096", measure(vp), base))
+	RenderingServer.directional_shadow_atlas_set_size(
+		int(ProjectSettings.get_setting("rendering/lights_and_shadows/directional_shadow/size")), true)
+	w.sun.shadow_enabled = false
+	print("[perf] " + perf_line("- sun shadows", measure(vp), base))
+	w.sun.shadow_enabled = true
+	w.env.ssao_enabled = false
+	print("[perf] " + perf_line("- SSAO", measure(vp), base))
+	w.env.ssao_enabled = true
+	w.env.glow_enabled = false
+	print("[perf] " + perf_line("- glow", measure(vp), base))
+	w.env.glow_enabled = true
+	var msaa := vp.msaa_3d
+	vp.msaa_3d = Viewport.MSAA_DISABLED
+	print("[perf] " + perf_line("- MSAA", measure(vp), base))
+	vp.msaa_3d = msaa
+	var scaled := vp.scaling_3d_scale
+	if scaled < 1.0:
+		vp.scaling_3d_scale = 1.0
+		print("[perf] " + perf_line("3D at every pixel", measure(vp), base))
+	vp.scaling_3d_scale = 0.5
+	print("[perf] " + perf_line("3D at half size", measure(vp), base))
+	vp.scaling_3d_scale = scaled
+	var hidden: Array[Node3D] = []
+	for child: Node in w.get_children():
+		if child is Node3D and (child as Node3D).visible and not child is DirectionalLight3D:
+			hidden.append(child)
+			(child as Node3D).visible = false
+	t.visible = false
+	print("[perf] " + perf_line("only sky + HUD", measure(vp), base))
+	for n: Node3D in hidden:
+		n.visible = true
+	t.visible = t.enabled
+	await node.get_tree().process_frame
