@@ -1049,11 +1049,14 @@ func _update_info() -> void:
 	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
 	var problem := _why_cant_build(hover)
 	var action := "%s here costs %s" % [_tool_label(), Hud.money_text(_tool_cost(hover))]
+	var state := 0                     # (for the HUD: 0 can build, 1 can't, 2 nothing to do)
 	if problem == "-":
 		action = "Nothing to clear" if current_tool == Tool.BULLDOZE else "Already built"
+		state = 2
 	elif problem != "":
 		action = problem
-	hud.show_info("%s   ·   %s\n%s" % [_tile_text(i), ground, action])
+		state = 1
+	hud.show_query(_tile_text(i), ground, action, state)
 
 
 func _tile_text(i: int) -> String:

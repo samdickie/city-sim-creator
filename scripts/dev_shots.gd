@@ -464,26 +464,116 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_overlay},
 		{"name": "13_hud_plain", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
 			"hud": true, "prep": _prep_plain},
+		# More of the interface: the drop-downs, at night, a small window, help,
+		# and the card for whatever is under the mouse.
+		{"name": "14_hud_panels", "at": Vector2(52, 60), "yaw": -40.0, "pitch": 40.0, "dist": 1500.0,
+			"hud": true, "prep": _prep_panels},
+		{"name": "15_hud_night", "at": Vector2(48, 64), "yaw": -40.0, "pitch": 28.0, "dist": 1500.0,
+			"time": NIGHT, "hud": true, "prep": _prep_night},
+		{"name": "16_hud_small", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_small, "size": SMALL_SIZE},
+		{"name": "17_hud_help", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_help},
+		{"name": "18_hud_query", "at": Vector2(52, 50), "yaw": -35.0, "pitch": 32.0, "dist": 480.0,
+			"hud": true, "prep": _prep_query, "hover": true},
 	]
 
 
+const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
+
+
+func _hud_reset() -> void:
+	# Every HUD shot starts from the same state: drop-downs shut, Build menu open.
+	hud.help_panel.visible = false
+	hud.city_panel.visible = false
+	hud.get("_city_button").set_pressed_no_signal(false)
+	hud.get("_advice_list").visible = false
+	hud.get("_advice_count").set_pressed_no_signal(false)
+	hud.get("_menu_panel").visible = false
+	hud.get("_menu_button").set_pressed_no_signal(false)
+	hud.set_build_open(true)
+	hud.message_label.text = ""
+
+
 func _prep_build_menu() -> void:
+	_hud_reset()
 	game.call("_set_overlay", WorldView.Overlay.NONE)
-	hud.build_toggle.button_pressed = true
 	game.call("_choose_item", "shops_2")
 
 
 func _prep_overlay() -> void:
-	hud.build_toggle.button_pressed = false
+	_hud_reset()
+	hud.set_build_open(false)
 	game.call("_select_tool", 0)
 	game.call("_set_overlay", WorldView.Overlay.LAND_VALUE)
 
 
 func _prep_plain() -> void:
+	_hud_reset()
 	game.call("_set_overlay", WorldView.Overlay.NONE)
-	hud.build_toggle.button_pressed = false
+	hud.set_build_open(false)
 	game.call("_select_tool", 0)
-	hud.message_label.text = ""
+
+
+func _prep_panels() -> void:
+	_hud_reset()
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	hud.set_build_open(false)
+	game.call("_select_tool", 0)
+	hud.get("_city_button").button_pressed = true
+	hud.get("_advice_count").button_pressed = true
+	hud.get("_menu_button").button_pressed = true
+
+
+func _prep_night() -> void:
+	_hud_reset()
+	game.call("_set_overlay", WorldView.Overlay.GROWTH)
+	game.call("_choose_item", "police")
+	hud.call("_show_category", "services")
+	hud.flash("Advisor: a message, to see how it looks")
+	hud.set("_message_time", 60.0)      # (still showing when the picture is taken)
+
+
+func _prep_small() -> void:
+	_hud_reset()
+	get_window().size = SMALL_SIZE
+	game.call("_set_overlay", WorldView.Overlay.GROWTH)
+	game.call("_choose_item", "road")
+	hud.call("_show_category", "all")
+	hud.get("_city_button").button_pressed = true
+
+
+func _prep_help() -> void:
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	hud.help_panel.visible = true
+
+
+func _prep_query() -> void:
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_choose_item", "bulldoze")
+
+
+func _show_hover(at: Vector2) -> void:
+	# Point the mouse (as far as the game knows) at the nearest built-up home plot.
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for i: int in sim.w * sim.h:
+		if sim.tiles[i] == Simulation.Tile.HOMES and sim.levels[i] >= 2:
+			var p := Vector2i(i % sim.w, floori(float(i) / sim.w))
+			var d := Vector2(p).distance_to(at)
+			if d < best_d:
+				best_d = d
+				best = p
+	game.set("hover", best)
+	world.set_hover(best, true)
+	game.call("_update_info")
+	for n: int in 3:
+		await get_tree().process_frame
+		RenderingServer.force_draw(false)
 
 
 func _shoot(shot: Dictionary) -> void:
@@ -516,10 +606,15 @@ func _shoot(shot: Dictionary) -> void:
 	for n: int in 3:
 		await get_tree().process_frame
 		RenderingServer.force_draw(false)
+	if shot.get("hover", false):
+		await _show_hover(at)
+	var want: Vector2i = shot.get("size", SHOT_SIZE)
 	var image := get_viewport().get_texture().get_image()
-	if image.get_size() != SHOT_SIZE:
-		print("[shots]   window is %s, not %s: scaling the picture" % [image.get_size(), SHOT_SIZE])
-		image.resize(SHOT_SIZE.x, SHOT_SIZE.y, Image.INTERPOLATE_LANCZOS)
+	if want != SHOT_SIZE:
+		get_window().size = SHOT_SIZE          # (back to normal for the next shot)
+	if image.get_size() != want:
+		print("[shots]   window is %s, not %s: scaling the picture" % [image.get_size(), want])
+		image.resize(want.x, want.y, Image.INTERPOLATE_LANCZOS)
 	var path := out_dir.path_join(shot_name + ".png")
 	var err := image.save_png(path)
 	if err != OK:

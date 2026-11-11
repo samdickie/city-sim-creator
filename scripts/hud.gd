@@ -1,12 +1,19 @@
 extends CanvasLayer
-## The on-screen interface: a clean, modern look with rounded translucent panels.
-##   Top left:      city name, date, game speed
-##   Top right:     money, budget, people, happiness, power, tax, demand
-##   Bottom left:   the Build menu (categories down the side, items with
-##                  pictures, descriptions and prices) and the Build / Bulldoze buttons
-##   Bottom centre: what's under the mouse, and messages
-##   Bottom right:  map overlays (land value, power, roads, growth, pollution...) and their key
-##   Top centre:    advisors' tips when something needs attention (see advisors.gd)
+## The on-screen interface, built in code: small frosted-glass pieces that hug
+## the edges of the window, so the town in the middle stays in view.
+##   Top left:      the game menu (New city, Save, Load, How to play, Day and
+##                  night), city name, date and clock, speed (pause, play, fast)
+##   Top centre:    advisors' ticker: the most urgent tip and a count; click the
+##                  count for the full list
+##   Top right:     the status strip: money (and last month), people, happiness,
+##                  four small meters (power, water, services, rubbish) and demand
+##                  (homes, shops, industry). Click it for the City panel: budget,
+##                  tax rate, happiness, services, housing and growth in full
+##   Bottom left:   the Build dock: a rail of categories (Bulldoze at its foot) and
+##                  a flyout of items with pictures, names and prices (M hides it)
+##   Bottom centre: the tool in use, what's under the mouse and what building
+##                  there costs; messages pop up above it
+##   Bottom right:  map views as a row of icons, with the colour key above them
 ## It only displays things and reports button presses; the game decides what they do.
 
 signal tool_chosen(tool_id: int)            # (the Bulldoze button)
@@ -25,16 +32,25 @@ const Icons = preload("res://scripts/icons.gd")
 const GLASS_SHADER = preload("res://shaders/glass.gdshader")
 const BULLDOZE_TOOL := 4                   # (game3d.gd's Tool.BULLDOZE)
 const ADVICE_URGENT := 3                   # (advisors.gd's URGENT; WARNING is 2, ADVICE 1)
-const ADVICE_SHOWN := 3                    # tips on the card; the rest behind "N more"
-const ADVICE_ROWS := 8                     # most tips the card can list
+const ADVICE_ROWS := 8                     # most tips the list can show
 const ADVICE_REFLASH_MONTHS := 12          # an urgent tip flashes at most once a year
 
-const ACCENT := Color(0.24, 0.56, 0.98)
-const TEXT := Color(0.93, 0.95, 0.98)
-const TEXT_DIM := Color(0.66, 0.70, 0.76)
-const GOOD := Color(0.45, 0.88, 0.58)
-const BAD := Color(1.0, 0.45, 0.42)
-const WARN := Color(1.0, 0.82, 0.4)
+# Layout, on a 4-pixel grid.
+const EDGE := 12.0                         # gap between the window edge and the glass
+const GAP := 8.0                           # gap between pieces of glass
+const ISLAND_H := 56.0                     # height of the pieces along the top
+const SHADOW_PAD := 14.0                   # room round each panel for its shadow
+const ROW_H := 60.0                        # a Build menu row
+const FLYOUT_W := 336.0
+const TICKER_MAX := 520.0
+
+const ACCENT := Color(0.29, 0.58, 0.98)
+const TEXT := Color(0.95, 0.96, 0.98)
+const TEXT_DIM := Color(0.72, 0.76, 0.82)
+const TEXT_FAINT := Color(0.58, 0.62, 0.69)
+const GOOD := Color(0.47, 0.88, 0.60)
+const BAD := Color(1.0, 0.48, 0.45)
+const WARN := Color(1.0, 0.80, 0.38)
 const HINT := Color(0.55, 0.75, 1.0)
 const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts", "Pollution"]
 const OVERLAY_TIPS := ["The normal view",
@@ -46,284 +62,611 @@ const OVERLAY_TIPS := ["The normal view",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
 	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
 	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks help"]
+const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution"]
 
+var _root: Control
+var _bold: Font
+var _icon_cache := {}
+var _tweens := {}                          # Control -> Tween (fading in or out)
+var _sim                                   # read for the demand bars
+var _demand_colours := {}
+
+# Top left: menu, date, speed.
+var _left_island: PanelContainer
+var _menu_button: Button
+var _menu_panel: PanelContainer
+var _day_button: Button
 var speed_buttons := {}
+var date_label: Label
+var clock_label: Label
+
+# Top right: the status strip, and the City panel behind it.
+var _status_island: PanelContainer
+var _city_button: Button
+var city_panel: PanelContainer
+var _city_scroll: ScrollContainer
+var money_label: Label
+var _net_label: Label
+var _people_big: Label
+var _jobs_small: Label
+var _happy_big: Label
+var _happy_small: Label
+var _happy_icon: TextureRect
+var _meters: Array[Control] = []           # power, water, services, rubbish
+var _meter_value: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var _meter_colour: Array[Color] = [TEXT_DIM, TEXT_DIM, TEXT_DIM, TEXT_DIM]
+var demand_box: Control
+var budget_label: Label                    # (City panel from here down)
+var _income_label: Label
+var _upkeep_label: Label
+var _net_full_label: Label
+var tax_label: Label
+var happiness_label: Label
+var _happy_bar: Control
+var _happy_value := 0.0
+var people_label: Label
+var housing_label: Label
+var power_label: Label
+var utility_label: Label                   # water
+var services_label: Label
+var rubbish_label: Label
+var growth_label: Label
+
+# Top centre: advisors.
+var advice_panel: PanelContainer           # the ticker
+var _ticker: Button
+var _advice_count: Button
+var _advice_list: PanelContainer
+var _advice_title: Label
+var _advice_rows: Array[Button] = []
+var _advice_more: Label
+var _advice_tips: Array[Dictionary] = []
+var _advice_flashed := {}                  # tip id -> month it last flashed
+
+# Bottom left: the Build dock.
 var build_panel: PanelContainer
-var build_toggle: Button
+var _flyout: VBoxContainer
+var _build_open := true
 var bulldoze_button: Button
 var _rail_buttons := {}                    # category id -> Button
-var _rows := {}                            # item id -> {button, name, desc, price, price_icon, cat}
+var _rail_marks := {}                      # category id -> the little bar showing the tool in use
+var _rows := {}                            # item id -> {button, name, desc, price, price_icon, pic, cat}
 var _category := "all"
 var _category_names := {}
 var _selected_id := ""
 var _list_title: Label
 var _list_box: VBoxContainer
 var _scroll: ScrollContainer
-var _icon_cache := {}
-var date_label: Label
-var clock_label: Label
-var money_label: Label
-var budget_label: Label
-var people_label: Label
-var happiness_label: Label
-var housing_label: Label
-var power_label: Label
-var growth_label: Label
-var services_label: Label
-var tax_label: Label
-var info_label: Label
-var message_label: Label
-var help_panel: PanelContainer
-var demand_box: Control
-var overlay_buttons := {}
 var funding_row: HBoxContainer
-var utility_label: Label      # water
-var rubbish_label: Label
 var funding_label: Label
-var legend_box: VBoxContainer
-var confirm_new: ConfirmationDialog
+
+# Bottom centre: what's under the mouse, and messages.
+var _info_panel: PanelContainer
+var _tool_pic: TextureRect
+var _info_title: Label
+var _info_ground: Label
+var info_label: Label
+var _info_action_row: HBoxContainer
+var _info_action_icon: TextureRect
+var _info_action: Label
+var _toast: PanelContainer
+var message_label: Label
 var _message_time := 0.0
-var _sim                         # read for the demand bars
-var advice_panel: PanelContainer
-var _advice_title: Label
-var _advice_hide: Button
-var _advice_rows: Array[Button] = []
-var _advice_more: Button
-var _advice_tips: Array[Dictionary] = []
-var _advice_all := false                   # showing every tip, not just the top few
-var _advice_collapsed := false
-var _advice_flashed := {}                  # tip id -> month it last flashed
+
+# Bottom right: map views.
+var _overlay_panel: PanelContainer
+var overlay_buttons := {}
+var _overlay_caption: Label
+var _legend_section: VBoxContainer
+var _legend_title: Label
+var _legend_tip: Label
+var legend_box: VBoxContainer
 var _overlay_kind := 0                     # the map view that's on
-var _demand_colours := {}
+
+var help_panel: PanelContainer
+var _help_scroll: ScrollContainer
+var _help_columns: HBoxContainer
+var confirm_new: ConfirmationDialog
 
 
 func build(categories: Array, demand_colours: Dictionary, sim) -> void:
 	# categories: [[id, name], ...] for the Build menu's side rail.
 	_sim = sim
 	_demand_colours = demand_colours
-	var root := Control.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	root.theme = _make_theme()
-	add_child(root)
-	_build_top_left(root)
-	_build_top_right(root)
-	_build_advice(root)
-	_build_build_menu(root, categories)
-	_build_info(root)
-	_build_overlays(root)
-	_build_help(root)
+	_root = Control.new()
+	_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.theme = _make_theme()
+	add_child(_root)
+	_build_top_left()
+	_build_status()
+	_build_city_panel()
+	_build_advice()
+	_build_build_menu(categories)
+	_build_info()
+	_build_overlays()
+	_build_help()
+	_build_game_menu()
 
 	confirm_new = ConfirmationDialog.new()
 	confirm_new.title = "New city"
 	confirm_new.dialog_text = "Clear everything you've built and start again?"
 	confirm_new.confirmed.connect(func(): new_city_pressed.emit())
-	root.add_child(confirm_new)
+	_root.add_child(confirm_new)
 
 
 func _process(delta: float) -> void:
+	if _root == null:
+		return
 	if _message_time > 0.0:
 		_message_time -= delta
 		if _message_time <= 0.0:
 			message_label.text = ""
+	_toast.visible = message_label.text != ""
+	_toast.modulate.a = clampf(_message_time / 0.35, 0.0, 1.0) if _message_time > 0.0 else 1.0
+	_layout()
+
+
+func _input(event: InputEvent) -> void:
+	# A click anywhere outside the game menu closes it (the click still goes through).
+	var mb := event as InputEventMouseButton
+	if mb == null or not mb.pressed or _menu_panel == null or not _menu_panel.visible:
+		return
+	if not _menu_panel.get_global_rect().has_point(mb.position) \
+			and not _menu_button.get_global_rect().has_point(mb.position):
+		_close_menu()
 
 
 # ------------------------------------------------------------------ layout
 
-func _build_top_left(root: Control) -> void:
-	var panel := _panel(root)
-	panel.position = Vector2(20, 20)
-	var box := _vbox(panel)
+func _layout() -> void:
+	# Place the pieces whose position depends on the others. Cheap, so it runs
+	# every frame: it follows window resizes and panels changing size.
+	var view := _root.size
+	# Top centre: the ticker sits in the space between the two top pieces.
+	var left_end := _left_island.position.x + _left_island.size.x
+	var room := _status_island.position.x - left_end - GAP * 2.0
+	advice_panel.visible = not _advice_tips.is_empty() and room >= 64.0
+	if advice_panel.visible:
+		_ticker.visible = room >= 150.0
+		var w := minf(room, TICKER_MAX) if _ticker.visible else 0.0
+		advice_panel.custom_minimum_size.x = w
+		advice_panel.size = Vector2(w, ISLAND_H)
+		advice_panel.position = Vector2(left_end + GAP + (room - advice_panel.size.x) * 0.5, EDGE)
+	elif _advice_list.visible:
+		_advice_count.button_pressed = false
+	if _advice_list.visible:
+		var lw := minf(maxf(advice_panel.size.x, 460.0), view.x - EDGE * 2.0)
+		_advice_list.custom_minimum_size.x = lw
+		_advice_list.size = Vector2(lw, 0.0)
+		var cx := advice_panel.position.x + advice_panel.size.x * 0.5
+		_advice_list.position = Vector2(clampf(cx - lw * 0.5, EDGE, view.x - EDGE - lw), EDGE + ISLAND_H + GAP)
+	# Drop-downs under their buttons.
+	if _menu_panel.visible:
+		_menu_panel.position = Vector2(EDGE, EDGE + ISLAND_H + GAP)
+	if city_panel.visible:
+		# (It scrolls if the window is too short for it to clear the map views.)
+		var overhead := city_panel.get_combined_minimum_size().y - _city_scroll.custom_minimum_size.y
+		var room_h := _overlay_panel.position.y - GAP - (EDGE + ISLAND_H + GAP) - overhead
+		var want_h := (_city_scroll.get_child(0) as Control).get_combined_minimum_size().y
+		var h := minf(want_h, maxf(room_h, 120.0))
+		if absf(_city_scroll.custom_minimum_size.y - h) > 0.5:
+			_city_scroll.custom_minimum_size = Vector2(312.0, h)
+		city_panel.size = Vector2(city_panel.custom_minimum_size.x, 0.0)
+		city_panel.position = Vector2(view.x - EDGE - city_panel.size.x, EDGE + ISLAND_H + GAP)
+	# Bottom centre: the info card fills the space between the Build dock and the
+	# map views, up to a comfortable reading width.
+	var dock_end := build_panel.position.x + build_panel.size.x
+	var gap_w := _overlay_panel.position.x - dock_end - GAP * 2.0
+	var card_w := clampf(gap_w, 260.0, 600.0)
+	if _info_panel.custom_minimum_size.x != card_w:
+		_info_panel.custom_minimum_size.x = card_w
+		info_label.custom_minimum_size.x = card_w - 92.0
+	_info_panel.size = Vector2(card_w, 0.0)
+	_info_panel.position = Vector2(dock_end + GAP + (gap_w - card_w) * 0.5, view.y - EDGE - _info_panel.size.y)
+	if _toast.visible:
+		_toast.size = Vector2.ZERO
+		_toast.position = Vector2(_info_panel.position.x + (card_w - _toast.size.x) * 0.5,
+			_info_panel.position.y - GAP - _toast.size.y)
+	# Help: centred, and never taller than the window.
+	if help_panel.visible:
+		var want := _help_columns.get_combined_minimum_size()
+		_help_scroll.custom_minimum_size = Vector2(minf(want.x + 16.0, view.x - EDGE * 2.0 - 28.0),
+			minf(want.y, view.y - 220.0))
+		help_panel.size = Vector2.ZERO
+		help_panel.position = ((view - help_panel.size) * 0.5).floor()
 
-	var title := _label("Troon", 26, TEXT)
-	box.add_child(title)
 
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 6)
-	box.add_child(row)
-	date_label = _label("", 17, TEXT_DIM)
-	date_label.custom_minimum_size = Vector2(96, 0)
-	row.add_child(date_label)
-	clock_label = _label("", 17, TEXT_DIM)
-	clock_label.custom_minimum_size = Vector2(56, 0)
-	row.add_child(clock_label)
-	for s in [0, 1, Settings.FAST_SPEED]:
-		var b := _button({0: "Pause", 1: "Play", Settings.FAST_SPEED: "Fast"}[s], true)
+func _build_top_left() -> void:
+	_left_island = _panel(_root)
+	_left_island.theme_type_variation = "Island"
+	_left_island.position = Vector2(EDGE, EDGE)
+	_left_island.custom_minimum_size.y = ISLAND_H
+	var row := _hbox(_left_island, 10)
+
+	_menu_button = _icon_button("menu", "Game menu: new city, save, load, help, day and night", true)
+	_menu_button.toggled.connect(func(on: bool): _open(_menu_panel, on))
+	row.add_child(_menu_button)
+
+	var words := _stack(row)
+	words.add_child(_label("Troon", 16, TEXT, true))
+	var when := _hbox(words, 6)
+	date_label = _label("", 12, TEXT_DIM)
+	when.add_child(date_label)
+	clock_label = _label("", 12, TEXT_FAINT)
+	clock_label.custom_minimum_size = Vector2(36, 0)
+	when.add_child(clock_label)
+
+	row.add_child(_vline())
+	var speeds := _hbox(row, 2)
+	for s: int in [0, 1, Settings.FAST_SPEED]:
+		var icon_id: String = {0: "pause", 1: "play", Settings.FAST_SPEED: "fast"}[s]
+		var tip: String = {0: "Pause (Space)", 1: "Play (Space)", Settings.FAST_SPEED: "Fast (F)"}[s]
+		var b := _icon_button(icon_id, tip, true)
+		b.theme_type_variation = "Pause" if s == 0 else "Segment"
 		b.pressed.connect(func(): speed_chosen.emit(s))
-		row.add_child(b)
+		speeds.add_child(b)
 		speed_buttons[s] = b
 
-	var files := HBoxContainer.new()
-	files.add_theme_constant_override("separation", 6)
-	box.add_child(files)
-	for item in [["New", func(): confirm_new.popup_centered()],
-			["Save", func(): save_pressed.emit()],
-			["Load", func(): load_pressed.emit()],
-			["Help", func(): help_panel.visible = not help_panel.visible]]:
-		var b := _button(item[0], false)
-		b.pressed.connect(item[1])
-		files.add_child(b)
-	var cycle := _button("Day & night", true)
-	cycle.button_pressed = true
-	cycle.tooltip_text = "Turn off to keep it daytime"
-	cycle.toggled.connect(func(on: bool): day_cycle_toggled.emit(on))
-	files.add_child(cycle)
 
-
-func _build_top_right(root: Control) -> void:
-	var panel := _panel(root)
-	panel.anchor_left = 1.0
-	panel.anchor_right = 1.0
-	panel.offset_left = -20.0
-	panel.offset_right = -20.0
-	panel.offset_top = 20.0
-	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	panel.custom_minimum_size = Vector2(290, 0)
-	var box := _vbox(panel)
-
-	money_label = _label("", 30, GOOD)
-	box.add_child(money_label)
-	budget_label = _label("", 13, TEXT_DIM)
-	box.add_child(budget_label)
+func _build_game_menu() -> void:
+	# The drop-down under the menu button.
+	_menu_panel = _panel(_root)
+	_menu_panel.theme_type_variation = "Card"
+	_menu_panel.visible = false
+	var box := _vbox(_menu_panel, 2)
+	for item: Array in [["new", "New city", "Clear the map and start again"],
+			["save", "Save", "Save the city (Ctrl or Cmd + S)"],
+			["load", "Load", "Load the saved city (Ctrl or Cmd + L)"],
+			["help", "How to play", "Controls and how the town works (H)"]]:
+		var id: String = item[0]
+		var b := _menu_row(id, item[1])
+		b.tooltip_text = item[2]
+		b.pressed.connect(func(): _menu_chosen(id))
+		box.add_child(b)
 	box.add_child(_divider())
-	people_label = _label("", 16, TEXT)
-	box.add_child(people_label)
-	happiness_label = _label("", 15, TEXT)
-	box.add_child(happiness_label)
-	housing_label = _label("", 14, TEXT_DIM)
-	box.add_child(housing_label)
-	power_label = _label("", 14, TEXT_DIM)
-	box.add_child(power_label)
-	services_label = _label("", 14, TEXT_DIM)
-	box.add_child(services_label)
-	utility_label = _label("", 14, TEXT_DIM)
-	box.add_child(utility_label)
-	rubbish_label = _label("", 14, TEXT_DIM)
-	box.add_child(rubbish_label)
-	growth_label = _label("", 14, TEXT_DIM)
-	box.add_child(growth_label)
-	box.add_child(_divider())
+	_day_button = _menu_row("sun", "Day and night: on")
+	_day_button.toggle_mode = true
+	_day_button.button_pressed = true
+	_day_button.tooltip_text = "Turn off to keep it daytime"
+	_day_button.toggled.connect(func(on: bool):
+		_day_button.text = "Day and night: %s" % ("on" if on else "off")
+		day_cycle_toggled.emit(on))
+	box.add_child(_day_button)
 
-	var tax_row := HBoxContainer.new()
-	box.add_child(tax_row)
-	tax_label = _label("", 15, TEXT)
-	tax_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	tax_row.add_child(tax_label)
-	var minus := _button("–", false)
-	minus.pressed.connect(func(): tax_changed.emit(-0.01))
-	tax_row.add_child(minus)
-	var plus := _button("+", false)
-	plus.pressed.connect(func(): tax_changed.emit(0.01))
-	tax_row.add_child(plus)
 
-	box.add_child(_label("Demand", 13, TEXT_DIM))
+func _menu_chosen(id: String) -> void:
+	_close_menu()
+	match id:
+		"new":
+			confirm_new.popup_centered()
+		"save":
+			save_pressed.emit()
+		"load":
+			load_pressed.emit()
+		"help":
+			help_panel.visible = not help_panel.visible
+
+
+func _close_menu() -> void:
+	_open(_menu_panel, false)
+	_menu_button.set_pressed_no_signal(false)
+
+
+func _menu_row(icon_id: String, text: String) -> Button:
+	var b := Button.new()
+	b.theme_type_variation = "MenuRow"
+	b.text = text
+	b.icon = _line_icon(icon_id, 18)
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(200, 0)
+	return b
+
+
+# ------------------------------------------------------------ status strip
+
+func _build_status() -> void:
+	_status_island = _panel(_root)
+	_status_island.theme_type_variation = "Island"
+	_status_island.anchor_left = 1.0
+	_status_island.anchor_right = 1.0
+	_status_island.offset_left = -EDGE
+	_status_island.offset_right = -EDGE
+	_status_island.offset_top = EDGE
+	_status_island.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_status_island.custom_minimum_size.y = ISLAND_H
+	_status_island.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_status_island.tooltip_text = "Click for the City panel: budget, taxes, happiness and services"
+	_status_island.gui_input.connect(func(e: InputEvent):
+		var mb := e as InputEventMouseButton
+		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			_city_button.button_pressed = not _city_button.button_pressed)
+	var row := _hbox(_status_island, 14)
+
+	# Money, and how it went last month.
+	var money := _stack(row)
+	money_label = _label("", 19, TEXT, true)
+	money.add_child(money_label)
+	_net_label = _label("", 12, TEXT_DIM)
+	money.add_child(_net_label)
+	row.add_child(_vline())
+
+	# People and jobs.
+	var people := _hbox(row, 7)
+	people.add_child(_icon_rect("people", 20, TEXT_DIM))
+	var pstack := _stack(people)
+	_people_big = _label("", 16, TEXT, true)
+	pstack.add_child(_people_big)
+	_jobs_small = _label("", 12, TEXT_DIM)
+	pstack.add_child(_jobs_small)
+
+	# Happiness.
+	var happy := _hbox(row, 7)
+	_happy_icon = _icon_rect("smile", 20, GOOD)
+	happy.add_child(_happy_icon)
+	var hstack := _stack(happy)
+	_happy_big = _label("", 16, TEXT, true)
+	hstack.add_child(_happy_big)
+	_happy_small = _label("", 12, TEXT_DIM)
+	hstack.add_child(_happy_small)
+	row.add_child(_vline())
+
+	# Power, water, services, rubbish: an icon each with a little bar.
+	var meters := _hbox(row, 2)
+	for n: int in 4:
+		var m := Control.new()
+		m.custom_minimum_size = Vector2(28, 34)
+		m.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		m.mouse_filter = Control.MOUSE_FILTER_PASS
+		var icon_id: String = ["power", "utilities", "services", "bin"][n]
+		m.draw.connect(func(): _draw_meter(m, n, icon_id))
+		meters.add_child(m)
+		_meters.append(m)
+	row.add_child(_vline())
+
+	# Demand for homes, shops and industry.
 	demand_box = Control.new()
-	demand_box.custom_minimum_size = Vector2(260, 84)
+	demand_box.custom_minimum_size = Vector2(66, 38)
+	demand_box.mouse_filter = Control.MOUSE_FILTER_PASS
+	demand_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	demand_box.draw.connect(_draw_demand)
-	box.add_child(demand_box)
+	row.add_child(demand_box)
+
+	_city_button = _icon_button("chevron", "City panel: budget, taxes, happiness and services", true)
+	_city_button.theme_type_variation = "Flat"
+	_city_button.custom_minimum_size = Vector2(28, 34)
+	_city_button.toggled.connect(func(on: bool): _open(city_panel, on))
+	row.add_child(_city_button)
 
 
-func _build_build_menu(root: Control, categories: Array) -> void:
-	# A frosted panel: categories down the left, the items in the chosen category
-	# on the right (picture, name, one-line description, price).
-	build_panel = _panel(root)
+func _build_city_panel() -> void:
+	# Everything behind the status strip, one click away.
+	city_panel = _panel(_root)
+	city_panel.custom_minimum_size.x = 340
+	city_panel.visible = false
+	var outer := _vbox(city_panel, 6)
+	var head := _hbox(outer, 8)
+	var title := _label("City", 16, TEXT, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var close := _icon_button("close", "Close", false)
+	close.theme_type_variation = "Flat"
+	close.custom_minimum_size = Vector2(28, 28)
+	close.pressed.connect(func(): _city_button.button_pressed = false)
+	head.add_child(close)
+	_city_scroll = ScrollContainer.new()
+	_city_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	outer.add_child(_city_scroll)
+	var box := _vbox(_city_scroll, 6)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	box.add_child(_caption("Budget"))
+	_income_label = _pair(box, "Taxes last month")
+	_upkeep_label = _pair(box, "Upkeep last month")
+	_net_full_label = _pair(box, "Balance last month")
+	budget_label = _label("", 12, TEXT_FAINT)       # (the old one-line summary, kept but not shown)
+	budget_label.visible = false
+	box.add_child(budget_label)
+	var tax_row := _hbox(box, 6)
+	tax_label = _label("", 14, TEXT)
+	tax_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tax_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tax_row.add_child(tax_label)
+	tax_row.add_child(_small_button("–", "Lower taxes by 1%", func(): tax_changed.emit(-0.01)))
+	tax_row.add_child(_small_button("+", "Raise taxes by 1%", func(): tax_changed.emit(0.01)))
+
+	box.add_child(_divider())
+	box.add_child(_caption("Happiness"))
+	_happy_bar = Control.new()
+	_happy_bar.custom_minimum_size = Vector2(0, 8)
+	_happy_bar.tooltip_text = "Below 50% nobody moves in; below 33% people leave"
+	_happy_bar.draw.connect(_draw_happy_bar)
+	box.add_child(_happy_bar)
+	happiness_label = _label("", 13, TEXT)
+	happiness_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(happiness_label)
+
+	box.add_child(_divider())
+	box.add_child(_caption("Services"))
+	power_label = _service_row(box, "power")
+	utility_label = _service_row(box, "utilities")
+	services_label = _service_row(box, "services")
+	rubbish_label = _service_row(box, "bin")
+
+	box.add_child(_divider())
+	box.add_child(_caption("Town"))
+	people_label = _service_row(box, "people")
+	housing_label = _service_row(box, "zones")
+	growth_label = _service_row(box, "growth")
+
+
+func _pair(box: VBoxContainer, key: String) -> Label:
+	# "Key ........ value" on one line; returns the value label.
+	var row := _hbox(box, 8)
+	var k := _label(key, 13, TEXT_DIM)
+	k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(k)
+	var v := _label("", 14, TEXT, true)
+	row.add_child(v)
+	return v
+
+
+func _service_row(box: VBoxContainer, icon_id: String) -> Label:
+	# An icon and a line of text; the icon takes the row's colour (see _set_row_colour).
+	var row := _hbox(box, 8)
+	var icon := _icon_rect(icon_id, 16, TEXT_DIM)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(icon)
+	var text := _label("", 13, TEXT_DIM)
+	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(text)
+	return text
+
+
+func _small_button(text: String, tip: String, action: Callable) -> Button:
+	var b := _button(text, false)
+	b.tooltip_text = tip
+	b.custom_minimum_size = Vector2(32, 30)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	b.pressed.connect(action)
+	return b
+
+
+# ------------------------------------------------------------------ Build dock
+
+func _build_build_menu(categories: Array) -> void:
+	# A frosted dock, bottom left: a rail of category icons, and beside it a
+	# flyout with the chosen category's items (picture, name, one line, price).
+	build_panel = _panel(_root)
+	build_panel.theme_type_variation = "Dock"
 	build_panel.anchor_top = 1.0
 	build_panel.anchor_bottom = 1.0
-	build_panel.offset_left = 20.0
-	build_panel.offset_top = -86.0
-	build_panel.offset_bottom = -86.0
+	build_panel.offset_left = EDGE
+	build_panel.offset_top = -EDGE
+	build_panel.offset_bottom = -EDGE
 	build_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 14)
-	build_panel.add_child(row)
+	var row := _hbox(build_panel, 8)
 
-	var rail := PanelContainer.new()
-	rail.theme_type_variation = "Rail"
-	row.add_child(rail)
-	var rail_box := VBoxContainer.new()
-	rail_box.add_theme_constant_override("separation", 4)
-	rail.add_child(rail_box)
-	for c in categories:
+	var rail := _vbox(row, 2)
+	rail.size_flags_vertical = Control.SIZE_SHRINK_END
+	for c: Array in categories:
 		var id: String = c[0]
-		_category_names[id] = c[1]
-		var b := Button.new()
-		b.theme_type_variation = "RailButton"
-		b.text = c[1]
-		b.icon = _line_icon(id, 26)
-		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
-		b.toggle_mode = true
-		b.focus_mode = Control.FOCUS_NONE
-		b.custom_minimum_size = Vector2(80, 58)
-		b.pressed.connect(func(): _show_category(id))
-		rail_box.add_child(b)
+		var cat_name: String = c[1]
+		_category_names[id] = cat_name
+		var b := _rail_button(cat_name, id)
+		b.tooltip_text = "Everything you can build" if id == "all" else "%s: what you can build" % cat_name
+		b.pressed.connect(func(): _category_clicked(id))
+		rail.add_child(b)
 		_rail_buttons[id] = b
+		_rail_marks[id] = b.get_child(0)
+	rail.add_child(_divider())
+	bulldoze_button = _rail_button("Bulldoze", "bulldoze")
+	bulldoze_button.theme_type_variation = "Bulldoze"
+	bulldoze_button.tooltip_text = "Bulldoze: clear anything you drag over (5 or B)"
+	bulldoze_button.pressed.connect(func(): tool_chosen.emit(BULLDOZE_TOOL))
+	rail.add_child(bulldoze_button)
 
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 8)
-	column.custom_minimum_size = Vector2(390, 0)
-	row.add_child(column)
-	_list_title = _label("", 13, TEXT_DIM)
-	column.add_child(_list_title)
+	_flyout = _vbox(row, 6)
+	_flyout.custom_minimum_size = Vector2(FLYOUT_W, 0)
+	_flyout.size_flags_vertical = Control.SIZE_FILL    # as tall as the rail
+	var head := _hbox(_flyout, 6)
+	_list_title = _label("", 11, TEXT_DIM, true)
+	_list_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_list_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_list_title)
+	var close := _icon_button("close", "Hide the Build menu (M)", false)
+	close.theme_type_variation = "Flat"
+	close.custom_minimum_size = Vector2(28, 28)
+	close.pressed.connect(func(): set_build_open(false))
+	head.add_child(close)
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.custom_minimum_size = Vector2(390, 470)
+	_scroll.custom_minimum_size = Vector2(FLYOUT_W, ROW_H * 2)
 	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(_scroll)
-	_list_box = VBoxContainer.new()
-	_list_box.add_theme_constant_override("separation", 4)
+	_flyout.add_child(_scroll)
+	_list_box = _vbox(null, 2)
 	_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.add_child(_list_box)
 
 	# Funding for the chosen service, under the list.
-	funding_row = HBoxContainer.new()
-	funding_row.add_theme_constant_override("separation", 6)
-	column.add_child(funding_row)
-	funding_label = _label("", 13, TEXT)
+	funding_row = _hbox(_flyout, 6)
+	funding_label = _label("", 12, TEXT)
 	funding_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	funding_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	funding_row.add_child(funding_label)
-	var less := _button("–", false)
-	less.tooltip_text = "Less funding: cheaper, but reaches less far (0% closes it)"
-	less.pressed.connect(func(): funding_changed.emit(-0.1))
-	funding_row.add_child(less)
-	var more := _button("+", false)
-	more.tooltip_text = "More funding: costs more, reaches further (up to 150%)"
-	more.pressed.connect(func(): funding_changed.emit(0.1))
-	funding_row.add_child(more)
+	funding_row.add_child(_small_button("–", "Less funding: cheaper, but reaches less far (0% closes it)",
+		func(): funding_changed.emit(-0.1)))
+	funding_row.add_child(_small_button("+", "More funding: costs more, reaches further (up to 150%)",
+		func(): funding_changed.emit(0.1)))
 	funding_row.visible = false
-
-	# Build and Bulldoze, bottom left.
-	var pills := HBoxContainer.new()
-	pills.add_theme_constant_override("separation", 10)
-	pills.anchor_top = 1.0
-	pills.anchor_bottom = 1.0
-	pills.offset_left = 20.0
-	pills.offset_top = -20.0
-	pills.offset_bottom = -20.0
-	pills.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	root.add_child(pills)
-	build_toggle = _pill("Build", "build")
-	build_toggle.button_pressed = true
-	build_toggle.tooltip_text = "Show or hide the Build menu"
-	build_toggle.toggled.connect(func(on: bool): build_panel.visible = on)
-	pills.add_child(build_toggle)
-	bulldoze_button = _pill("Bulldoze", "bulldoze")
-	bulldoze_button.tooltip_text = "Clear anything you drag over (key 5)"
-	bulldoze_button.pressed.connect(func(): tool_chosen.emit(BULLDOZE_TOOL))
-	pills.add_child(bulldoze_button)
 	_show_category("all")
 
 
-func _pill(text: String, icon_id: String) -> Button:
+func _rail_button(text: String, icon_id: String) -> Button:
+	# An icon with a small name under it. (Drawn by hand rather than with the
+	# button's own icon and text, which pads them far apart.)
 	var b := Button.new()
-	b.theme_type_variation = "PillButton"
-	b.text = text
-	b.icon = _line_icon(icon_id, 20)
+	b.theme_type_variation = "RailButton"
 	b.toggle_mode = true
 	b.focus_mode = Control.FOCUS_NONE
-	b.add_theme_constant_override("h_separation", 8)
+	b.custom_minimum_size = Vector2(60, 44)
+	# A small accent bar on the left marks the category of the tool in use.
+	var mark := Panel.new()
+	mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mark.add_theme_stylebox_override("panel", _soft_box(ACCENT, 2))
+	mark.position = Vector2(0, 12)
+	mark.size = Vector2(3, 20)
+	mark.visible = false
+	b.add_child(mark)
+	var box := _vbox(b, 1)
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	var icon := _icon_rect(icon_id, 20, Color(1, 1, 1, 0.75))
+	icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	box.add_child(icon)
+	var label := _label(text, 11, TEXT_DIM)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(label)
+	b.toggled.connect(func(_on: bool): _rail_look(b))
+	b.mouse_entered.connect(func(): _rail_look(b, true))
+	b.mouse_exited.connect(func(): _rail_look(b))
 	return b
+
+
+func _rail_look(b: Button, hovered: bool = false) -> void:
+	# Brighter icon and name when it's open (or hovered).
+	var box := b.get_child(1)
+	var lit := b.button_pressed or hovered
+	(box.get_child(0) as CanvasItem).modulate = Color.WHITE if lit else Color(1, 1, 1, 0.75)
+	(box.get_child(1) as Label).add_theme_color_override("font_color", Color.WHITE if lit else TEXT_DIM)
+
+
+func _rail_pressed(b: Button, on: bool) -> void:
+	b.set_pressed_no_signal(on)
+	_rail_look(b)
+
+
+func _category_clicked(id: String) -> void:
+	# Click a category to open it; click it again to fold the menu away.
+	if _build_open and _category == id:
+		set_build_open(false)
+		return
+	_show_category(id)
+	set_build_open(true)
+
+
+func set_build_open(on: bool) -> void:
+	# The rail always shows; this opens or folds away the list of items.
+	_build_open = on
+	_open(_flyout, on)
+	for k: String in _rail_buttons:
+		_rail_pressed(_rail_buttons[k], on and k == _category)
+
+
+func toggle_build_menu() -> void:
+	set_build_open(not _build_open)
 
 
 func set_items(items: Array) -> void:
@@ -338,12 +681,14 @@ func set_items(items: Array) -> void:
 		var r: Dictionary = _rows[id]
 		var locked: bool = item["locked"]
 		(r["name"] as Label).text = item["name"]
+		(r["name"] as Label).add_theme_color_override("font_color", TEXT_DIM if locked else TEXT)
 		(r["desc"] as Label).text = item["desc"]
+		(r["desc"] as Label).add_theme_color_override("font_color", WARN if locked else TEXT_DIM)
 		(r["price"] as Label).text = item["price"]
-		(r["price_icon"] as TextureRect).texture = _line_icon("lock" if locked else "price", 16)
-		var b: Button = r["button"]
-		b.tooltip_text = item["about"]
-		b.modulate = Color(1, 1, 1, 0.5 if locked else 1.0)
+		(r["price"] as Label).add_theme_color_override("font_color", TEXT_DIM if locked else TEXT)
+		(r["price_icon"] as TextureRect).visible = locked
+		(r["pic"] as Control).modulate = Color(1, 1, 1, 0.45 if locked else 1.0)
+		(r["button"] as Button).tooltip_text = item["about"]
 	if first_time:
 		_show_category(_category)
 
@@ -354,77 +699,65 @@ func _make_row(item: Dictionary) -> Dictionary:
 	b.theme_type_variation = "ItemRow"
 	b.toggle_mode = true
 	b.focus_mode = Control.FOCUS_NONE
-	b.custom_minimum_size = Vector2(380, 70)
+	b.custom_minimum_size = Vector2(FLYOUT_W - 12, ROW_H)
 	b.pressed.connect(func(): build_item_chosen.emit(id))
 	_list_box.add_child(b)
 	var margin := MarginContainer.new()
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 8 if side != "right" else 14)
+	margin.add_theme_constant_override("margin_left", 6)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_top", 5)
+	margin.add_theme_constant_override("margin_bottom", 5)
 	b.add_child(margin)
-	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 14)
-	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_child(line)
+	var line := _hbox(margin, 12)
 	# The picture, on a dark rounded tile.
 	var tile := PanelContainer.new()
 	tile.theme_type_variation = "IconTile"
 	tile.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	tile.custom_minimum_size = Vector2(54, 54)
+	tile.custom_minimum_size = Vector2(48, 48)
 	tile.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(tile)
 	var pic := TextureRect.new()
 	pic.texture = _item_icon(id)
 	pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	pic.custom_minimum_size = Vector2(52, 52)
+	pic.custom_minimum_size = Vector2(46, 46)
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	tile.add_child(pic)
 	# Name and one-line description.
-	var words := VBoxContainer.new()
-	words.add_theme_constant_override("separation", 1)
-	words.alignment = BoxContainer.ALIGNMENT_CENTER
+	var words := _stack(line)
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	line.add_child(words)
-	var name_label := _label("", 16, TEXT)
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var name_label := _label("", 14, TEXT)
 	words.add_child(name_label)
-	var desc := _label("", 13, TEXT_DIM)
+	var desc := _label("", 12, TEXT_DIM)
 	desc.clip_text = true
 	desc.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	desc.custom_minimum_size = Vector2(150, 0)
-	desc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	desc.custom_minimum_size = Vector2(120, 0)
 	words.add_child(desc)
-	# Price, with a little tag (or a padlock while it's locked).
-	var price_icon := TextureRect.new()
-	price_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	price_icon.modulate = Color(1, 1, 1, 0.65)
-	price_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	price_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	line.add_child(price_icon)
-	var price := _label("", 15, TEXT)
+	# Price (with a padlock while it's locked).
+	var lock := _icon_rect("lock", 14, WARN)
+	line.add_child(lock)
+	var price := _label("", 14, TEXT, true)
 	price.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	price.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	line.add_child(price)
-	return {"button": b, "name": name_label, "desc": desc, "price": price, "price_icon": price_icon,
-		"cat": String(item["cat"])}
+	return {"button": b, "name": name_label, "desc": desc, "price": price, "price_icon": lock,
+		"pic": tile, "cat": String(item["cat"])}
 
 
 func _show_category(cat: String) -> void:
 	_category = cat
-	for k in _rail_buttons:
-		(_rail_buttons[k] as Button).set_pressed_no_signal(k == cat)
+	for k: String in _rail_buttons:
+		_rail_pressed(_rail_buttons[k], _build_open and k == cat)
 	var shown := 0
-	for id in _rows:
+	for id: String in _rows:
 		var r: Dictionary = _rows[id]
 		var on: bool = cat == "all" or r["cat"] == cat
 		(r["button"] as Button).visible = on
 		if on:
 			shown += 1
 	var title: String = _category_names.get(cat, "")
-	_list_title.text = ("Everything" if cat == "all" else title).to_upper() + "   ·   %d" % shown
+	_list_title.text = ("Everything" if cat == "all" else title).to_upper() + "  ·  %d" % shown
 	_scroll.scroll_vertical = 0
 
 
@@ -434,9 +767,17 @@ func set_selected(id: String) -> void:
 	# every month, and that mustn't pull you away from a category you're browsing.
 	var changed := id != _selected_id
 	_selected_id = id
-	for k in _rows:
+	for k: String in _rows:
 		(_rows[k]["button"] as Button).set_pressed_no_signal(k == id)
-	bulldoze_button.set_pressed_no_signal(id == "bulldoze")
+	_rail_pressed(bulldoze_button, id == "bulldoze")
+	var cat := ""
+	if _rows.has(id) and id != "bulldoze":
+		cat = _rows[id]["cat"]
+	for k: String in _rail_marks:
+		(_rail_marks[k] as Control).visible = k == cat
+	_tool_pic.texture = _item_icon(id) if id != "" else null
+	if _rows.has(id):
+		_tool_pic.tooltip_text = "Building: %s" % (_rows[id]["name"] as Label).text
 	if changed and _rows.has(id):
 		var r: Dictionary = _rows[id]
 		if _category != "all" and r["cat"] != _category:
@@ -447,10 +788,6 @@ func set_selected(id: String) -> void:
 func set_funding(text: String) -> void:
 	funding_row.visible = text != ""
 	funding_label.text = text
-
-
-func toggle_build_menu() -> void:
-	build_toggle.button_pressed = not build_toggle.button_pressed
 
 
 func _item_icon(id: String) -> Texture2D:
@@ -477,179 +814,328 @@ func _svg(text: String, scale: float) -> Texture2D:
 	return ImageTexture.create_from_image(img)
 
 
-func _build_info(root: Control) -> void:
-	var panel := _panel(root)
-	panel.anchor_left = 0.5
-	panel.anchor_right = 0.5
-	panel.anchor_top = 1.0
-	panel.anchor_bottom = 1.0
-	panel.offset_bottom = -20.0
-	panel.offset_top = -20.0
-	panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	panel.custom_minimum_size = Vector2(380, 0)
-	var box := _vbox(panel)
-	info_label = _label("", 14, TEXT)
+# ------------------------------------------------------------ info card
+
+func _build_info() -> void:
+	# Bottom centre: the tool in use (its picture), then what's under the mouse
+	# and what building there would cost. Placed by _layout().
+	_info_panel = _panel(_root)
+	_info_panel.theme_type_variation = "Card"
+	var row := _hbox(_info_panel, 12)
+	var tile := PanelContainer.new()
+	tile.theme_type_variation = "IconTile"
+	tile.custom_minimum_size = Vector2(52, 52)
+	tile.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(tile)
+	_tool_pic = TextureRect.new()
+	_tool_pic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_tool_pic.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_tool_pic.custom_minimum_size = Vector2(50, 50)
+	tile.add_child(_tool_pic)
+
+	var box := _stack(row)
+	box.add_theme_constant_override("separation", 3)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var head := _hbox(box, 10)
+	_info_title = _label("", 14, TEXT, true)
+	_info_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(_info_title)
+	_info_ground = _label("", 12, TEXT_FAINT)
+	_info_ground.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	head.add_child(_info_ground)
+	info_label = _label("", 13, TEXT_DIM)
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info_label.custom_minimum_size = Vector2(330, 0)
+	info_label.custom_minimum_size = Vector2(300, 0)
 	box.add_child(info_label)
-	message_label = _label("", 14, Color(1.0, 0.82, 0.4))
-	box.add_child(message_label)
+	_info_action_row = _hbox(box, 6)
+	_info_action_icon = _icon_rect("value", 14, TEXT)
+	_info_action_row.add_child(_info_action_icon)
+	_info_action = _label("", 13, TEXT, true)
+	_info_action.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_info_action.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_info_action_row.add_child(_info_action)
+
+	# Messages pop up just above the card, then fade.
+	_toast = _panel(_root)
+	_toast.theme_type_variation = "Toast"
+	_toast.visible = false
+	message_label = _label("", 14, WARN, true)
+	_toast.add_child(message_label)
 
 
-func _build_overlays(root: Control) -> void:
-	var panel := _panel(root)
-	panel.anchor_left = 1.0
-	panel.anchor_right = 1.0
-	panel.anchor_top = 1.0
-	panel.anchor_bottom = 1.0
-	panel.offset_left = -20.0
-	panel.offset_right = -20.0
-	panel.offset_top = -20.0
-	panel.offset_bottom = -20.0
-	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	var box := _vbox(panel)
-	box.add_child(_label("Map view (O)", 13, TEXT_DIM))
-	for kind in OVERLAY_NAMES.size():
-		var b := _button(OVERLAY_NAMES[kind], true)
-		b.custom_minimum_size = Vector2(150, 0)
-		b.tooltip_text = OVERLAY_TIPS[kind]
+func show_info(text: String) -> void:
+	# A plain line: the drag preview with its cost, or "point at the map".
+	_info_title.visible = false
+	_info_ground.text = ""
+	info_label.text = text
+	info_label.visible = true
+	info_label.add_theme_color_override("font_color", TEXT)
+	_info_action_row.visible = false
+
+
+func show_query(text: String, ground: String, action: String, state: int) -> void:
+	# What's under the mouse. text: its first line is the title, the rest the
+	# details; ground: the height (or "Sea"); action: what the tool would do there.
+	# state: 0 = it can be built (and costs this), 1 = it can't (the reason), 2 = nothing to do.
+	var lines := text.split("\n")
+	_info_title.visible = true
+	_info_title.text = lines[0]
+	_info_ground.text = ground
+	lines.remove_at(0)
+	info_label.text = "\n".join(lines)
+	info_label.visible = not lines.is_empty()
+	info_label.add_theme_color_override("font_color", TEXT_DIM)
+	_info_action_row.visible = action != ""
+	_info_action.text = action
+	var colour: Color = [GOOD, BAD, TEXT_DIM][clampi(state, 0, 2)]
+	_info_action.add_theme_color_override("font_color", colour)
+	_info_action_icon.visible = state != 2
+	_info_action_icon.texture = _line_icon("value" if state == 0 else "alert", 28)
+	_info_action_icon.modulate = colour
+
+
+func flash(text: String) -> void:
+	message_label.text = text
+	_message_time = 3.0
+
+
+# ------------------------------------------------------------ map views
+
+func _build_overlays() -> void:
+	_overlay_panel = _panel(_root)
+	_overlay_panel.theme_type_variation = "Card"
+	_overlay_panel.anchor_left = 1.0
+	_overlay_panel.anchor_right = 1.0
+	_overlay_panel.anchor_top = 1.0
+	_overlay_panel.anchor_bottom = 1.0
+	_overlay_panel.offset_left = -EDGE
+	_overlay_panel.offset_right = -EDGE
+	_overlay_panel.offset_top = -EDGE
+	_overlay_panel.offset_bottom = -EDGE
+	_overlay_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_overlay_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	var box := _vbox(_overlay_panel, 6)
+
+	# The colour key for the view that's on (hidden for the normal view).
+	_legend_section = _vbox(box, 4)
+	_legend_section.visible = false
+	_legend_title = _label("", 14, TEXT, true)
+	_legend_section.add_child(_legend_title)
+	_legend_tip = _label("", 12, TEXT_DIM)
+	_legend_tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_legend_tip.custom_minimum_size = Vector2(300, 0)
+	_legend_section.add_child(_legend_tip)
+	legend_box = _vbox(_legend_section, 3)
+	_legend_section.add_child(_divider())
+
+	_overlay_caption = _label("", 11, TEXT_DIM, true)
+	_overlay_caption.mouse_filter = Control.MOUSE_FILTER_PASS
+	_overlay_caption.tooltip_text = "Map views: O switches to the next one"
+	box.add_child(_overlay_caption)
+	var chips := _hbox(box, 2)
+	for kind: int in OVERLAY_NAMES.size():
+		var b := _icon_button(OVERLAY_ICONS[kind], "%s: %s" % [OVERLAY_NAMES[kind], OVERLAY_TIPS[kind]], true)
+		b.theme_type_variation = "Segment"
 		b.pressed.connect(func(): overlay_chosen.emit(kind))
-		box.add_child(b)
+		chips.add_child(b)
 		overlay_buttons[kind] = b
-	legend_box = VBoxContainer.new()
-	legend_box.add_theme_constant_override("separation", 4)
-	box.add_child(legend_box)
 
 
 func set_overlay(kind: int, legend: Array) -> void:
 	# Highlight the chosen view and show its colour key.
 	_overlay_kind = kind
-	for k in overlay_buttons:
+	for k: int in overlay_buttons:
 		(overlay_buttons[k] as Button).set_pressed_no_signal(k == kind)
-	for child in legend_box.get_children():
+	var view: String = OVERLAY_NAMES[kind]
+	_overlay_caption.text = "MAP VIEW  ·  %s" % view.to_upper()
+	_legend_title.text = view
+	_legend_tip.text = OVERLAY_TIPS[kind]
+	for child: Node in legend_box.get_children():
 		child.queue_free()
-	for entry in legend:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
-		var swatch := ColorRect.new()
-		swatch.color = entry[0]
-		swatch.custom_minimum_size = Vector2(14, 14)
+	for entry: Array in legend:
+		var row := _hbox(legend_box, 8)
+		var swatch := Panel.new()
+		swatch.add_theme_stylebox_override("panel", _soft_box(entry[0], 3))
+		swatch.custom_minimum_size = Vector2(12, 12)
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(swatch)
 		var text := _label(entry[1], 13, TEXT)
-		text.custom_minimum_size = Vector2(130, 0)
 		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-		legend_box.add_child(row)
+	var on := kind != 0 and not legend.is_empty()
+	if on != _legend_section.visible:
+		_open(_legend_section, on)
 
 
-func _build_help(root: Control) -> void:
-	help_panel = _panel(root)
-	help_panel.anchor_left = 0.5
-	help_panel.anchor_right = 0.5
-	help_panel.anchor_top = 0.5
-	help_panel.anchor_bottom = 0.5
-	help_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	help_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
-	var box := _vbox(help_panel)
-	box.add_child(_label("How to play", 20, TEXT))
-	var text := _label(
-		"Build: press, drag to see a preview and the cost, release to build (Esc cancels)\n" +
-		"  Roads and power lines run straight and can turn one corner\n" +
-		"  Zones and parks: drag a box. Start the drag ON a road to zone both sides\n" +
-		"  of every road in the box, two plots deep\n" +
-		"  Street grid (9): drag a box to lay streets with 100 m blocks\n" +
-		"Pick what to build in the Build menu (bottom left; categories down its side).\n" +
-		"Homes and shops come in low, medium and high density (Tab switches)\n" +
-		"Move: two-finger scroll, middle-drag, or WASD\n" +
-		"Rotate and tilt: right-drag, or Q / E\n" +
-		"Zoom: pinch or scroll wheel\n" +
-		"Cars and people on the streets: T turns them off and on\n" +
-		"Tools: keys 1-0, - and =     Pause: Space     Fast: F     Help: H\n" +
-		"Map views: O, or the buttons bottom right (land value, power, roads, growth, services, water, pollution)\n" +
-		"Services (0): police, fire stations, schools and hospitals cover the area around them.\n" +
-		"They need a road and power. Bigger towns grow slowly without them; fires break out\n" +
-		"where there's no fire station. Funding (- / +) changes how far they reach.\n" +
-		"Taxes: people accept higher taxes when they get good services for them. High taxes\n" +
-		"with poor services stop growth, and eventually people leave (worst-served areas first).\n" +
-		"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power,\n" +
-		"water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.\n" +
-		"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings:\n" +
-		"pick one with Tab. Anything bigger than a first-level plot needs water (pumps and\n" +
-		"towers; it travels like power). Towns over 400 people need rubbish collected.\n" +
-		"Some buildings unlock as the town grows.\n" +
-		"Advisors (top centre) point out what needs attention, most urgent first. Click a tip\n" +
-		"to see the problem on the map (click again to go back to the normal view).\n" +
-		"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000\n" +
-		"people and a station or bus depot nearby), or a conservation area kept low-rise.\n\n" +
-		"Zones grow when a road is within %d tiles and they have power.\n" % Settings.ROAD_REACH +
-		"Red icon = no road nearby.   Yellow lightning icon = no power.\n" +
-		"Power travels through roads, buildings and power lines that share an edge.\n\n" +
-		"Low density grows villas and terraces; medium up to tenements, and mansion flats\n" +
-		"when space runs short; high density builds upwards to towers on valuable land.\n" +
-		"Land is worth more by the sea, near parks and shops, and less near industry\n" +
-		"and power plants. Scarce homes push prices up.", 15, TEXT_DIM)
-	box.add_child(text)
-	var close := _button("Got it", false)
+# ------------------------------------------------------------------ help
+
+func _build_help() -> void:
+	help_panel = _panel(_root)
+	help_panel.visible = false
+	var box := _vbox(help_panel, 10)
+	var head := _hbox(box, 8)
+	var title := _label("How to play", 20, TEXT, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var close := _icon_button("close", "Close (H)", false)
+	close.theme_type_variation = "Flat"
 	close.pressed.connect(func(): help_panel.visible = false)
-	box.add_child(close)
+	head.add_child(close)
+
+	_help_scroll = ScrollContainer.new()
+	_help_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(_help_scroll)
+	_help_columns = _hbox(null, 28)
+	_help_scroll.add_child(_help_columns)
+
+	# Left: the controls, as a key / what-it-does table.
+	var left := _vbox(_help_columns, 6)
+	left.add_child(_caption("Controls"))
+	var keys := GridContainer.new()
+	keys.columns = 2
+	keys.add_theme_constant_override("h_separation", 14)
+	keys.add_theme_constant_override("v_separation", 5)
+	left.add_child(keys)
+	for pair: Array in [
+			["Build", "Press, drag to see a preview and the cost, release to build (Esc cancels)"],
+			["Roads", "Roads and power lines run straight and can turn one corner"],
+			["Zones", "Zones and parks: drag a box. Start the drag ON a road to zone both sides of every road in the box, two plots deep"],
+			["9", "Street grid: drag a box to lay streets with 100 m blocks"],
+			["Tab", "Low, medium or high density for homes and shops; the next building in Power, Utilities, Leisure and Transport"],
+			["1-0, -, =", "Tools (5 or B bulldozes, Z paints districts)"],
+			["M", "Show or hide the Build menu"],
+			["Space, F", "Pause or play; fast"],
+			["O", "Next map view"],
+			["T", "Cars and people on the streets on or off"],
+			["H", "This help"],
+			["Ctrl/Cmd S, L", "Save, load"],
+			["Move", "Two-finger scroll, middle-drag, or WASD"],
+			["Turn", "Right-drag, or Q / E (rotate and tilt)"],
+			["Zoom", "Pinch or scroll wheel"]]:
+		var k := _label(pair[0], 13, TEXT, true)
+		k.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+		keys.add_child(k)
+		var v := _label(pair[1], 13, TEXT_DIM)
+		v.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.custom_minimum_size = Vector2(290, 0)
+		keys.add_child(v)
+
+	# Right: how the town works.
+	var right := _vbox(_help_columns, 8)
+	right.add_child(_caption("How the town works"))
+	for para: String in [
+			"Pick what to build in the Build menu, bottom left: categories down its side, the items beside them. Homes and shops come in low, medium and high density.",
+			"Zones grow when a road is within %d tiles and they have power. Red icon = no road nearby; yellow lightning = no power. Power travels through roads, buildings and power lines that share an edge." % Settings.ROAD_REACH,
+			"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings: pick one with Tab. Anything bigger than a first-level plot needs water (pumps and towers; it travels like power). Towns over 400 people need rubbish collected. Some buildings unlock as the town grows.",
+			"Services (0): police, fire stations, schools and hospitals cover the area around them. They need a road and power. Bigger towns grow slowly without them; fires break out where there's no fire station. Funding (- / + under the Services list) changes how far they reach.",
+			"Taxes: people accept higher taxes when they get good services for them. High taxes with poor services stop growth, and eventually people leave (worst-served areas first). Change them in the City panel: click the strip, top right.",
+			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
+			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
+			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts and pollution, each with a colour key.",
+			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), or a conservation area kept low-rise.",
+			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
+		var p := _label(para, 13, TEXT_DIM)
+		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		p.custom_minimum_size = Vector2(400, 0)
+		right.add_child(p)
+
+	var ok := _button("Got it", false)
+	ok.size_flags_horizontal = Control.SIZE_SHRINK_END
+	ok.pressed.connect(func(): help_panel.visible = false)
+	box.add_child(ok)
 
 
 # ----------------------------------------------------------------- updates
 
 func set_speed(speed: int) -> void:
-	for k in speed_buttons:
+	for k: int in speed_buttons:
 		(speed_buttons[k] as Button).set_pressed_no_signal(k == speed)
+	clock_label.add_theme_color_override("font_color", WARN if speed == 0 else TEXT_FAINT)
+
+
+func set_clock(text: String) -> void:
+	clock_label.text = text
 
 
 func show_city(sim, money_str: String, net_text: String, income_text: String, upkeep_text: String) -> void:
 	date_label.text = sim.date_text()
+	var low: bool = sim.money * 10 < Settings.START_MONEY
 	money_label.text = money_str
-	money_label.add_theme_color_override("font_color", BAD if sim.money * 10 < Settings.START_MONEY else GOOD)
+	money_label.add_theme_color_override("font_color", BAD if low else TEXT)
+	var net: int = sim.last_income - sim.last_upkeep
+	var net_colour := GOOD if net > 0 else (BAD if net < 0 else TEXT_DIM)
+	_net_label.text = "%s last month" % net_text
+	_net_label.add_theme_color_override("font_color", net_colour)
 	budget_label.text = "%s last month   ·   taxes %s, upkeep %s" % [net_text, income_text, upkeep_text]
-	people_label.text = "%s people   ·   %s jobs" % [thousands(sim.population), thousands(sim.jobs())]
-	# Happiness sums everything up; when it slips, say what residents mind most.
+	_income_label.text = income_text
+	_upkeep_label.text = upkeep_text
+	_net_full_label.text = net_text
+	_net_full_label.add_theme_color_override("font_color", net_colour)
+
+	var pop: int = sim.population
+	var jobs: int = sim.jobs()
+	_people_big.text = thousands(pop)
+	_jobs_small.text = "%s jobs" % thousands(jobs)
+	people_label.text = "%s people   ·   %s jobs" % [thousands(pop), thousands(jobs)]
+
+	# Happiness sums everything up; when it slips, say what residents mind most
+	# and what would help.
 	var happy: float = sim.happiness
-	happiness_label.text = "Happiness %d%%: %s" % [roundi(happy * 100.0), sim.happiness_word()]
-	if happy < 0.6:
-		var complaints: Array = sim.unhappy_reasons(1)
-		if not complaints.is_empty():
-			var worst: String = complaints[0]
-			happiness_label.text += "\nMain complaint: %s" % worst
-	happiness_label.add_theme_color_override("font_color",
-		BAD if happy < 0.5 else (GOOD if happy >= 0.8 else TEXT))
+	_happy_value = happy
+	var word: String = sim.happiness_word()
+	var happy_colour := BAD if happy < 0.5 else (GOOD if happy >= 0.6 else WARN)
+	_happy_big.text = "%d%%" % roundi(happy * 100.0)
+	_happy_small.text = word.get_slice(",", 0)
+	_happy_small.add_theme_color_override("font_color", happy_colour)
+	_happy_icon.modulate = happy_colour
+	happiness_label.text = "%d%%: %s" % [roundi(happy * 100.0), word]
+	var keys: Array[String] = sim.complaint_keys(2)
+	if not keys.is_empty() and happy < 0.8:
+		var lines: Array[String] = []
+		for key: String in keys:
+			var what: String = sim.complaint_text(key)
+			var fix: String = sim.complaint_fix(key)
+			lines.append("%s%s: %s" % [what.left(1).to_upper(), what.substr(1), fix])
+		happiness_label.text += "\nMain complaint%s:\n%s" % ["s" if lines.size() > 1 else "", "\n".join(lines)]
+	happiness_label.add_theme_color_override("font_color", BAD if happy < 0.5 else TEXT)
+	_happy_bar.queue_redraw()
+
 	var short: float = sim.housing_shortage()
-	var word := "none" if short <= 0.0 else ("some" if short < 0.4 else ("serious" if short < 0.8 else "severe"))
+	var shortage := "none" if short <= 0.0 else ("some" if short < 0.4 else ("serious" if short < 0.8 else "severe"))
 	if sim.average_home_price > 0:
-		housing_label.text = "Average home £%s   ·   housing shortage: %s" % [thousands(sim.average_home_price), word]
+		housing_label.text = "Average home £%s   ·   housing shortage: %s" % [thousands(sim.average_home_price), shortage]
 	else:
-		housing_label.text = "Housing shortage: %s" % word
-	housing_label.add_theme_color_override("font_color", BAD if short >= 0.4 else TEXT_DIM)
+		housing_label.text = "Housing shortage: %s" % shortage
+	_set_row_colour(housing_label, BAD if short >= 0.4 else TEXT_DIM)
+	_set_row_colour(people_label, TEXT_DIM)
+
+	# Power.
+	var power_frac := 0.0
+	var power_colour := BAD
 	if sim.plants == 0:
 		power_label.text = "No power plant yet: build one to start growing"
-		power_label.add_theme_color_override("font_color", BAD)
 	else:
-		power_label.text = "Power %d of %d used" % [sim.power_used, sim.power_supply]
-		var tight: bool = sim.power_used > sim.power_supply * 0.9
-		power_label.add_theme_color_override("font_color", BAD if tight else TEXT_DIM)
-	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
-	if sim.abandoned_count > 0:
-		growth_label.text += "   ·   %d abandoned" % sim.abandoned_count
-	if sim.run_down_count > 0:
-		growth_label.text += "   ·   %d run down" % sim.run_down_count
-	growth_label.add_theme_color_override("font_color", BAD if sim.abandoned_count > 0 else TEXT_DIM)
-	var water_text := "no water supply yet" if sim.water_supply == 0 \
-		else "%d of %d used" % [sim.water_used, sim.water_supply]
-	# Water and rubbish on their own lines, so each is only red when it's the problem.
-	utility_label.text = "Water %s" % water_text
+		power_label.text = "Power: %s of %s used" % [thousands(sim.power_used), thousands(sim.power_supply)]
+		power_frac = clampf(float(sim.power_used) / maxf(sim.power_supply, 1.0), 0.0, 1.0)
+		power_colour = BAD if sim.power_used > sim.power_supply * 0.9 else GOOD
+	_set_row_colour(power_label, power_colour)
+	_set_meter(0, power_frac, power_colour, power_label.text)
+
+	# Water.
+	var water_frac := 0.0
 	var dry: bool = (sim.water_supply == 0 and sim.population > 0) or sim.water_used > sim.water_supply * 0.9
-	utility_label.add_theme_color_override("font_color", BAD if dry else TEXT_DIM)
-	rubbish_label.text = "Rubbish: %s" % sim.rubbish_word()
-	if sim.rubbish_shortfall() > 0.3:
-		rubbish_label.text += " (build a landfill or recycling)"
-	rubbish_label.add_theme_color_override("font_color", BAD if sim.rubbish_shortfall() > 0.3 else TEXT_DIM)
+	if sim.water_supply == 0:
+		utility_label.text = "Water: no water supply yet"
+	else:
+		utility_label.text = "Water: %s of %s used" % [thousands(sim.water_used), thousands(sim.water_supply)]
+		water_frac = clampf(float(sim.water_used) / maxf(sim.water_supply, 1.0), 0.0, 1.0)
+	var water_colour := BAD if dry else (GOOD if sim.water_supply > 0 else TEXT_DIM)
+	_set_row_colour(utility_label, water_colour)
+	_set_meter(1, water_frac, water_colour, utility_label.text)
+
+	# Services.
 	var service_word: String = sim.services_word()
 	if service_word == "none yet":
 		services_label.text = "Services: none yet (build a police or fire station)"
@@ -657,89 +1143,144 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		services_label.text = "Services: not needed yet"
 	else:
 		services_label.text = "Services: %s (%d%% cover)" % [service_word, roundi(sim.service_score * 100.0)]
-	var services_bad: bool = service_word in ["poor", "none yet", "not reaching homes"]
-	services_label.add_theme_color_override("font_color",
-		BAD if services_bad else (GOOD if service_word == "excellent" else TEXT_DIM))
+	var service_colour := TEXT_DIM
+	if service_word in ["poor", "none yet", "not reaching homes"]:
+		service_colour = BAD
+	elif service_word == "patchy":
+		service_colour = WARN
+	elif service_word in ["good", "excellent"]:
+		service_colour = GOOD
+	_set_row_colour(services_label, service_colour)
+	_set_meter(2, sim.service_score, service_colour, services_label.text)
+
+	# Rubbish.
+	var piling: float = sim.rubbish_shortfall()
+	rubbish_label.text = "Rubbish: %s" % sim.rubbish_word()
+	if piling > 0.3:
+		rubbish_label.text += " (build a landfill or recycling)"
+	var collecting: bool = sim.population >= Settings.RUBBISH_START_POP
+	var rubbish_colour := TEXT_DIM
+	if collecting:
+		rubbish_colour = BAD if piling > 0.3 else (WARN if piling > 0.0 else GOOD)
+	_set_row_colour(rubbish_label, rubbish_colour)
+	_set_meter(3, 1.0 - piling if collecting else 0.0, rubbish_colour, rubbish_label.text)
+
+	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
+	if sim.abandoned_count > 0:
+		growth_label.text += "   ·   %d abandoned" % sim.abandoned_count
+	if sim.run_down_count > 0:
+		growth_label.text += "   ·   %d run down" % sim.run_down_count
+	_set_row_colour(growth_label, BAD if sim.abandoned_count > 0 else TEXT_DIM)
+
 	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
 	tax_label.add_theme_color_override("font_color", BAD if sim.business_appeal() < 0.3 else TEXT)
+
+	# Demand, in words for the tooltip.
+	var parts: Array[String] = []
+	for t: int in _demand_colours:
+		var v: float = sim.demand_bar(t)
+		var label: String = _demand_colours[t][1]
+		parts.append("%s: %s" % [label, "wanted" if v > 0.1 else ("too many" if v < -0.1 else "steady")])
+	demand_box.tooltip_text = "Demand (bars up: wanted; down: too many)\n" + "\n".join(parts)
 	demand_box.queue_redraw()
 
 
-func set_clock(text: String) -> void:
-	clock_label.text = text
+func _set_row_colour(label: Label, colour: Color) -> void:
+	# A City panel row: the text stays quiet when all is well; the icon shows the colour.
+	label.add_theme_color_override("font_color", TEXT_DIM if colour == GOOD else colour)
+	var icon := label.get_parent().get_child(0) as TextureRect
+	if icon:
+		icon.modulate = colour
 
 
-func show_info(text: String) -> void:
-	info_label.text = text
+func _set_meter(n: int, value: float, colour: Color, tip: String) -> void:
+	_meter_value[n] = value
+	_meter_colour[n] = colour
+	_meters[n].tooltip_text = tip
+	_meters[n].queue_redraw()
 
 
-func flash(text: String) -> void:
-	message_label.text = text
-	_message_time = 2.5
+func _draw_meter(m: Control, n: int, icon_id: String) -> void:
+	# An icon, and a little bar under it: how full, coloured red, amber or green.
+	var colour := _meter_colour[n]
+	var s := 18.0
+	m.draw_texture_rect(_line_icon(icon_id, 40), Rect2((m.size.x - s) * 0.5, 4, s, s), false, colour)
+	var bar := Rect2(5, 27, m.size.x - 10, 3)
+	m.draw_rect(bar, Color(1, 1, 1, 0.16))
+	m.draw_rect(Rect2(bar.position, Vector2(bar.size.x * clampf(_meter_value[n], 0.0, 1.0), bar.size.y)), colour)
+
+
+func _draw_happy_bar() -> void:
+	var size := _happy_bar.size
+	var r := Rect2(0, 1, size.x, 6)
+	_happy_bar.draw_rect(r, Color(1, 1, 1, 0.12))
+	var colour := BAD if _happy_value < 0.5 else (GOOD if _happy_value >= 0.6 else WARN)
+	_happy_bar.draw_rect(Rect2(r.position, Vector2(size.x * clampf(_happy_value, 0.0, 1.0), 6)), colour)
+	for mark: float in [1.0 / 3.0, 0.5]:      # people leave below a third; stop coming below half
+		_happy_bar.draw_rect(Rect2(floorf(size.x * mark), 0, 1, 8), Color(1, 1, 1, 0.55))
 
 
 func _draw_demand() -> void:
+	# Three bars round a zero line (up: wanted, down: too many), labelled H S I.
 	if _sim == null:
 		return
 	var size := demand_box.size
-	var mid := size.y * 0.42
-	var font := demand_box.get_theme_default_font()
-	demand_box.draw_line(Vector2(0, mid), Vector2(size.x, mid), Color(1, 1, 1, 0.25), 1.0)
+	var mid := 15.0
+	demand_box.draw_line(Vector2(0, mid), Vector2(size.x, mid), Color(1, 1, 1, 0.3), 1.0)
 	var keys := _demand_colours.keys()
 	var col_w := size.x / keys.size()
-	for n in keys.size():
+	for n: int in keys.size():
 		var t: int = keys[n]
 		var value: float = _sim.demand_bar(t)
-		var bar_h := absf(value) * (mid - 4.0)
-		var x := n * col_w + col_w * 0.3
-		var top := mid - bar_h if value > 0 else mid
-		var rect := Rect2(x, top, col_w * 0.4, maxf(bar_h, 2.0))
-		demand_box.draw_rect(rect, _demand_colours[t][0])
-		demand_box.draw_string(font, Vector2(n * col_w, size.y - 4), _demand_colours[t][1],
-			HORIZONTAL_ALIGNMENT_CENTER, col_w, 13, TEXT_DIM)
+		var reach := 13.0 if value > 0.0 else 10.0
+		var bar_h := maxf(absf(value) * reach, 1.5)
+		var x := n * col_w + (col_w - 10.0) * 0.5
+		var top := mid - bar_h if value > 0.0 else mid
+		var colour: Color = _demand_colours[t][0]
+		demand_box.draw_rect(Rect2(x, top, 10.0, bar_h), colour)
+		var letter: String = String(_demand_colours[t][1]).left(1)
+		demand_box.draw_string(_bold, Vector2(n * col_w, size.y - 1), letter,
+			HORIZONTAL_ALIGNMENT_CENTER, col_w, 11, TEXT_DIM)
 
 
 # ---------------------------------------------------------------- advisors
 
-func _build_advice(root: Control) -> void:
-	# A small card, top centre: the most urgent tips, each with a coloured dot.
-	# Hidden when there's nothing to say.
-	advice_panel = _panel(root)
-	advice_panel.anchor_left = 0.5
-	advice_panel.anchor_right = 0.5
-	advice_panel.offset_top = 20.0
-	advice_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	advice_panel.custom_minimum_size = Vector2(460, 0)
+func _build_advice() -> void:
+	# A ticker, top centre: the most urgent tip and a count. Click the tip to see
+	# it on the map; click the count for the full list. Hidden when there's
+	# nothing to say.
+	advice_panel = _panel(_root)
+	advice_panel.theme_type_variation = "Island"
 	advice_panel.visible = false
-	var box := _vbox(advice_panel)
-	box.add_theme_constant_override("separation", 2)
+	var row := _hbox(advice_panel, 4)
+	_ticker = _advice_row()
+	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_ticker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_ticker.custom_minimum_size = Vector2.ZERO
+	_ticker.pressed.connect(func(): _advice_clicked(0))
+	row.add_child(_ticker)
+	_advice_count = Button.new()
+	_advice_count.theme_type_variation = "Count"
+	_advice_count.focus_mode = Control.FOCUS_NONE
+	_advice_count.toggle_mode = true
+	_advice_count.icon = _line_icon("chevron", 16)
+	_advice_count.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_advice_count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_advice_count.toggled.connect(func(on: bool): _open(_advice_list, on))
+	row.add_child(_advice_count)
 
-	var head := HBoxContainer.new()
-	box.add_child(head)
-	_advice_title = _label("", 13, TEXT_DIM)
-	_advice_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_advice_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	head.add_child(_advice_title)
-	_advice_hide = _button("Hide", false)
-	_advice_hide.add_theme_font_size_override("font_size", 12)
-	_advice_hide.tooltip_text = "Fold the advisors away (the count stays)"
-	_advice_hide.pressed.connect(func():
-		_advice_collapsed = not _advice_collapsed
-		_show_advice()
-	)
-	head.add_child(_advice_hide)
-
+	_advice_list = _panel(_root)
+	_advice_list.theme_type_variation = "Card"
+	_advice_list.visible = false
+	var box := _vbox(_advice_list, 2)
+	_advice_title = _label("", 11, TEXT_DIM, true)
+	box.add_child(_advice_title)
 	for n: int in ADVICE_ROWS:
 		var b := _advice_row()
 		b.pressed.connect(func(): _advice_clicked(n))
 		box.add_child(b)
 		_advice_rows.append(b)
-	_advice_more = _advice_row()
-	_advice_more.add_theme_color_override("font_color", TEXT_DIM)
-	_advice_more.pressed.connect(func():
-		_advice_all = not _advice_all
-		_show_advice()
-	)
+	_advice_more = _label("", 12, TEXT_DIM)
 	box.add_child(_advice_more)
 
 
@@ -747,31 +1288,18 @@ func _advice_row() -> Button:
 	# A flat, left-aligned row that lights up on hover. One line; the full
 	# explanation is in its tooltip.
 	var b := Button.new()
+	b.theme_type_variation = "AdviceRow"
 	b.focus_mode = Control.FOCUS_NONE
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	b.clip_text = true
 	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	b.custom_minimum_size = Vector2(428, 0)
-	b.add_theme_font_size_override("font_size", 14)
-	b.add_theme_constant_override("h_separation", 10)
-	var flat := StyleBoxEmpty.new()
-	var lit := _soft_box(Color(1, 1, 1, 0.08), 10)
-	for style: StyleBox in [flat, lit]:
-		style.content_margin_left = 6
-		style.content_margin_right = 8
-		style.content_margin_top = 5
-		style.content_margin_bottom = 5
-	b.add_theme_stylebox_override("normal", flat)
-	b.add_theme_stylebox_override("pressed", lit)
-	b.add_theme_stylebox_override("hover", lit)
-	b.add_theme_stylebox_override("hover_pressed", lit)
-	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	b.custom_minimum_size = Vector2(300, 0)
 	return b
 
 
 func set_advice(tips: Array[Dictionary], month: int) -> void:
-	# tips: from advisors.gd, most urgent first. The card always shows the current
-	# ones; an urgent tip also flashes once, then not again for a year, so it
+	# tips: from advisors.gd, most urgent first. The ticker always shows the top
+	# tip; an urgent tip also flashes once, then not again for a year, so it
 	# doesn't nag. (It waits if another message is showing.)
 	_advice_tips = tips
 	if _message_time <= 0.0:
@@ -790,41 +1318,44 @@ func set_advice(tips: Array[Dictionary], month: int) -> void:
 
 func _show_advice() -> void:
 	var total := _advice_tips.size()
-	advice_panel.visible = total > 0
 	if total == 0:
-		_advice_all = false
+		advice_panel.visible = false
+		_advice_count.button_pressed = false
 		return
 	var urgent := 0
 	for tip: Dictionary in _advice_tips:
 		var severity: int = tip["severity"]
 		if severity >= ADVICE_URGENT:
 			urgent += 1
-	_advice_title.text = "ADVISORS   ·   %d %s" % [total, "tip" if total == 1 else "tips"]
+	_fill_advice_row(_ticker, _advice_tips[0])
+	_advice_count.text = str(total)
+	_advice_count.tooltip_text = "All %d of the advisors' tips%s" % [total,
+		", %d urgent" % urgent if urgent > 0 else ""]
+	_advice_count.add_theme_color_override("font_color", BAD if urgent > 0 else TEXT)
+	_advice_title.text = "ADVISORS  ·  %d %s" % [total, "tip" if total == 1 else "tips"]
 	if urgent > 0:
 		_advice_title.text += ", %d urgent" % urgent
 	_advice_title.add_theme_color_override("font_color", BAD if urgent > 0 else TEXT_DIM)
-	_advice_hide.text = "Show" if _advice_collapsed else "Hide"
-	var shown := mini(total if _advice_all else ADVICE_SHOWN, ADVICE_ROWS)
 	for n: int in _advice_rows.size():
 		var b := _advice_rows[n]
-		b.visible = not _advice_collapsed and n < mini(shown, total)
-		if not b.visible:
-			continue
-		var tip := _advice_tips[n]
-		var severity: int = tip["severity"]
-		var overlay: int = tip["overlay"]
-		var colour := BAD if severity >= ADVICE_URGENT else (WARN if severity == ADVICE_URGENT - 1 else HINT)
-		b.text = tip["text"]
-		b.icon = _dot_icon(colour)
-		b.tooltip_text = String(tip["detail"])
-		if overlay >= 0:
-			var view: String = OVERLAY_NAMES[overlay]
-			b.tooltip_text += "\nClick to see it on the %s map view." % view.to_lower()
-		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if overlay >= 0 \
-			else Control.CURSOR_ARROW
-	var extra := mini(total, ADVICE_ROWS) - mini(ADVICE_SHOWN, total)
-	_advice_more.visible = not _advice_collapsed and extra > 0
-	_advice_more.text = "Show fewer" if _advice_all else "%d more" % extra
+		b.visible = n < total
+		if b.visible:
+			_fill_advice_row(b, _advice_tips[n])
+	_advice_more.visible = total > ADVICE_ROWS
+	_advice_more.text = "and %d more" % (total - ADVICE_ROWS)
+
+
+func _fill_advice_row(b: Button, tip: Dictionary) -> void:
+	var severity: int = tip["severity"]
+	var overlay: int = tip["overlay"]
+	var colour := BAD if severity >= ADVICE_URGENT else (WARN if severity == ADVICE_URGENT - 1 else HINT)
+	b.text = tip["text"]
+	b.icon = _dot_icon(colour)
+	b.tooltip_text = String(tip["detail"])
+	if overlay >= 0:
+		var view: String = OVERLAY_NAMES[overlay]
+		b.tooltip_text += "\nClick to see it on the %s map view." % view.to_lower()
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if overlay >= 0 else Control.CURSOR_ARROW
 
 
 func _advice_clicked(n: int) -> void:
@@ -841,44 +1372,95 @@ func _dot_icon(colour: Color) -> Texture2D:
 	var key := "dot:" + colour.to_html(false)
 	if not _icon_cache.has(key):
 		_icon_cache[key] = _svg("<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12'>"
-			+ "<circle cx='6' cy='6' r='4.5' fill='#%s'/></svg>" % colour.to_html(false), 1.0)
+			+ "<circle cx='6' cy='6' r='4' fill='#%s'/></svg>" % colour.to_html(false), 1.0)
 	return _icon_cache[key]
 
 
 # ----------------------------------------------------------------- pieces
 
-func _panel(root: Control) -> PanelContainer:
+func _panel(parent: Control, radius: float = 14.0) -> PanelContainer:
 	# A frosted glass panel. The glass is drawn by a ColorRect behind the
-	# contents, stretched over the whole panel whenever it's laid out.
+	# contents, stretched over the whole panel (plus room for its shadow)
+	# whenever it's laid out.
 	var panel := PanelContainer.new()
 	var glass := ColorRect.new()
 	glass.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mat := ShaderMaterial.new()
 	mat.shader = GLASS_SHADER
+	mat.set_shader_parameter("radius", radius)
+	mat.set_shader_parameter("pad", SHADOW_PAD)
 	glass.material = mat
 	panel.add_child(glass)
 	panel.sort_children.connect(func():
-		glass.position = Vector2.ZERO
-		glass.size = panel.size
-		mat.set_shader_parameter("size", panel.size)
-	)
-	root.add_child(panel)
+		glass.position = -Vector2(SHADOW_PAD, SHADOW_PAD)
+		glass.size = panel.size + Vector2(SHADOW_PAD, SHADOW_PAD) * 2.0
+		mat.set_shader_parameter("size", panel.size))
+	parent.add_child(panel)
 	return panel
 
 
-func _vbox(panel: PanelContainer) -> VBoxContainer:
+func _open(c: Control, on: bool) -> void:
+	# Show or hide with a quick fade.
+	if _tweens.has(c):
+		(_tweens[c] as Tween).kill()
+		_tweens.erase(c)
+	if on:
+		if not c.visible:
+			c.modulate.a = 0.0
+		c.visible = true
+		if c.get_parent() == _root:
+			c.move_to_front()      # a drop-down goes over everything else
+		var t := create_tween()
+		t.tween_property(c, "modulate:a", 1.0, 0.12)
+		_tweens[c] = t
+	elif c.visible:
+		var t := create_tween()
+		t.tween_property(c, "modulate:a", 0.0, 0.09)
+		t.tween_callback(func():
+			c.visible = false
+			c.modulate.a = 1.0
+			_tweens.erase(c))
+		_tweens[c] = t
+
+
+func _vbox(parent: Control, separation: int = 8) -> VBoxContainer:
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 8)
-	panel.add_child(box)
+	box.add_theme_constant_override("separation", separation)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if parent:
+		parent.add_child(box)
 	return box
 
 
-func _label(text: String, size: int, colour: Color) -> Label:
+func _hbox(parent: Control, separation: int = 8) -> HBoxContainer:
+	var box := HBoxContainer.new()
+	box.add_theme_constant_override("separation", separation)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if parent:
+		parent.add_child(box)
+	return box
+
+
+func _stack(parent: Control) -> VBoxContainer:
+	# A big number with a small line under it, centred vertically.
+	var box := _vbox(parent, 0)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	return box
+
+
+func _label(text: String, size: int, colour: Color, bold: bool = false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", colour)
+	if bold:
+		l.add_theme_font_override("font", _bold)
 	return l
+
+
+func _caption(text: String) -> Label:
+	# A small heading in capitals inside a panel.
+	return _label(text.to_upper(), 11, TEXT_FAINT, true)
 
 
 func _button(text: String, toggle: bool) -> Button:
@@ -889,12 +1471,52 @@ func _button(text: String, toggle: bool) -> Button:
 	return b
 
 
+func _icon_button(icon_id: String, tip: String, toggle: bool) -> Button:
+	var b := Button.new()
+	b.theme_type_variation = "IconButton"
+	b.icon = _line_icon(icon_id, 40)
+	b.expand_icon = true
+	b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	b.tooltip_text = tip
+	b.toggle_mode = toggle
+	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(34, 34)
+	b.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return b
+
+
+func _icon_rect(icon_id: String, px: int, colour: Color) -> TextureRect:
+	var r := TextureRect.new()
+	r.texture = _line_icon(icon_id, px * 2)
+	r.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	r.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	r.custom_minimum_size = Vector2(px, px)
+	r.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	r.modulate = colour
+	r.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return r
+
+
 func _divider() -> HSeparator:
 	var sep := HSeparator.new()
 	var line := StyleBoxLine.new()
 	line.color = Color(1, 1, 1, 0.1)
 	line.thickness = 1
 	sep.add_theme_stylebox_override("separator", line)
+	sep.add_theme_constant_override("separation", 6)
+	return sep
+
+
+func _vline() -> VSeparator:
+	var sep := VSeparator.new()
+	var line := StyleBoxLine.new()
+	line.color = Color(1, 1, 1, 0.12)
+	line.thickness = 1
+	line.vertical = true
+	line.grow_begin = -8
+	line.grow_end = -8
+	sep.add_theme_stylebox_override("separator", line)
+	sep.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return sep
 
 
@@ -913,97 +1535,174 @@ static func money_text(amount: int) -> String:
 	return ("-£" if amount < 0 else "£") + thousands(absi(amount))
 
 
+# ----------------------------------------------------------------- theme
+
 func _make_theme() -> Theme:
+	# Type scale: 11 captions (capitals), 12-13 details, 14 body, 16-19 numbers,
+	# 20 titles. Spacing on a 4-pixel grid.
 	var theme := Theme.new()
+	var names := PackedStringArray(["SF Pro Text", "SF Pro Display", "Helvetica Neue", "Inter", "Segoe UI", "Arial"])
 	var font := SystemFont.new()
-	font.font_names = PackedStringArray(["SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", "Segoe UI", "Arial"])
+	font.font_names = names
 	font.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
 	theme.default_font = font
-	theme.default_font_size = 15
+	theme.default_font_size = 14
+	var bold := SystemFont.new()
+	bold.font_names = names
+	bold.font_weight = 600
+	bold.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+	_bold = bold
 
 	# Panels: the frosted glass is drawn separately (see _panel), so the panel
 	# style itself is just spacing.
-	var panel := StyleBoxEmpty.new()
-	panel.set_content_margin_all(16)
-	theme.set_stylebox("panel", "PanelContainer", panel)
+	_panel_style(theme, "PanelContainer", 16, 14)
+	_panel_style(theme, "Island", 12, 8)
+	_panel_style(theme, "Card", 12, 10)
+	_panel_style(theme, "Dock", 8, 8)
+	_panel_style(theme, "Toast", 14, 8)
 
-	# Buttons: soft translucent white, brighter when chosen.
-	var normal := _soft_box(Color(1, 1, 1, 0.08), 12)
+	# Buttons: soft translucent white, brighter when hovered or chosen.
+	var normal := _soft_box(Color(1, 1, 1, 0.08), 9)
 	normal.content_margin_left = 12
 	normal.content_margin_right = 12
-	normal.content_margin_top = 7
-	normal.content_margin_bottom = 8
+	normal.content_margin_top = 6
+	normal.content_margin_bottom = 7
 	var hover := normal.duplicate() as StyleBoxFlat
-	hover.bg_color = Color(1, 1, 1, 0.15)
+	hover.bg_color = Color(1, 1, 1, 0.16)
 	var pressed := normal.duplicate() as StyleBoxFlat
-	pressed.bg_color = Color(1, 1, 1, 0.24)
+	pressed.bg_color = Color(1, 1, 1, 0.26)
 	pressed.border_color = Color(1, 1, 1, 0.28)
 	pressed.set_border_width_all(1)
-	var hover_pressed := pressed.duplicate() as StyleBoxFlat
-	hover_pressed.bg_color = Color(1, 1, 1, 0.3)
-	_button_styles(theme, "Button", normal, hover, pressed, hover_pressed)
-
-	# Build menu: the dark rail of categories and its buttons.
-	var rail := _soft_box(Color(0, 0, 0, 0.22), 20)
-	rail.set_content_margin_all(6)
-	theme.set_type_variation("Rail", "PanelContainer")
-	theme.set_stylebox("panel", "Rail", rail)
-	theme.set_type_variation("RailButton", "Button")
-	var rail_normal := StyleBoxEmpty.new()
-	rail_normal.set_content_margin_all(6)
-	var rail_hover := _soft_box(Color(1, 1, 1, 0.07), 16)
-	rail_hover.set_content_margin_all(6)
-	var rail_on := _soft_box(Color(1, 1, 1, 0.17), 16)
-	rail_on.set_content_margin_all(6)
-	_button_styles(theme, "RailButton", rail_normal, rail_hover, rail_on, rail_on)
-	theme.set_font_size("font_size", "RailButton", 13)
-	theme.set_color("font_color", "RailButton", TEXT_DIM)
-	theme.set_color("icon_normal_color", "RailButton", Color(1, 1, 1, 0.7))
-
-	# Build menu rows: invisible until hovered; the chosen one is lit with a hairline.
-	theme.set_type_variation("ItemRow", "Button")
-	var row_hover := _soft_box(Color(1, 1, 1, 0.07), 18)
-	var row_on := _soft_box(Color(1, 1, 1, 0.14), 18)
-	row_on.border_color = Color(1, 1, 1, 0.22)
-	row_on.set_border_width_all(1)
-	_button_styles(theme, "ItemRow", StyleBoxEmpty.new(), row_hover, row_on, row_on)
-	theme.set_type_variation("IconTile", "PanelContainer")
-	var tile := _soft_box(Color(0, 0, 0, 0.28), 14)
-	tile.set_content_margin_all(1)
-	theme.set_stylebox("panel", "IconTile", tile)
-
-	# Build and Bulldoze pills.
-	theme.set_type_variation("PillButton", "Button")
-	var pill := _soft_box(Color(0.10, 0.12, 0.11, 0.78), 24)
-	pill.border_color = Color(1, 1, 1, 0.14)
-	pill.set_border_width_all(1)
-	pill.content_margin_left = 18
-	pill.content_margin_right = 20
-	pill.content_margin_top = 10
-	pill.content_margin_bottom = 10
-	var pill_hover := pill.duplicate() as StyleBoxFlat
-	pill_hover.bg_color = Color(0.18, 0.21, 0.19, 0.85)
-	var pill_on := pill.duplicate() as StyleBoxFlat
-	pill_on.bg_color = Color(0.30, 0.34, 0.31, 0.9)
-	pill_on.border_color = Color(1, 1, 1, 0.3)
-	_button_styles(theme, "PillButton", pill, pill_hover, pill_on, pill_on)
-	theme.set_font_size("font_size", "PillButton", 16)
+	_button_styles(theme, "Button", normal, hover, pressed, pressed)
 	theme.set_color("font_color", "Button", TEXT)
 	theme.set_color("font_hover_color", "Button", Color.WHITE)
 	theme.set_color("font_pressed_color", "Button", Color.WHITE)
 	theme.set_color("font_hover_pressed_color", "Button", Color.WHITE)
+	theme.set_color("icon_normal_color", "Button", Color(1, 1, 1, 0.85))
+	theme.set_color("icon_hover_color", "Button", Color.WHITE)
+	theme.set_color("icon_pressed_color", "Button", Color.WHITE)
+	theme.set_color("icon_hover_pressed_color", "Button", Color.WHITE)
 	theme.set_color("font_color", "Label", TEXT)
 
+	# Square icon buttons (the menu), and the same without a background until hovered.
+	var icon_normal := _pad(_soft_box(Color(1, 1, 1, 0.07), 9), 8)
+	var icon_hover := _pad(_soft_box(Color(1, 1, 1, 0.16), 9), 8)
+	var icon_on := _pad(_soft_box(Color(1, 1, 1, 0.26), 9), 8)
+	theme.set_type_variation("IconButton", "Button")
+	_button_styles(theme, "IconButton", icon_normal, icon_hover, icon_on, icon_on)
+	theme.set_type_variation("Flat", "Button")
+	_button_styles(theme, "Flat", _pad(StyleBoxEmpty.new(), 6), _pad(_soft_box(Color(1, 1, 1, 0.14), 9), 6),
+		_pad(_soft_box(Color(1, 1, 1, 0.22), 9), 6), _pad(_soft_box(Color(1, 1, 1, 0.22), 9), 6))
+	theme.set_color("icon_normal_color", "Flat", Color(1, 1, 1, 0.6))
+
+	# Segments: a speed or a map view; the chosen one is lit in the accent colour
+	# (pause in amber, so a stopped clock is obvious).
+	var seg := _pad(StyleBoxEmpty.new(), 8)
+	theme.set_type_variation("Segment", "Button")
+	_button_styles(theme, "Segment", seg, icon_hover, _pad(_soft_box(ACCENT, 9), 8),
+		_pad(_soft_box(ACCENT.lightened(0.12), 9), 8))
+	theme.set_color("icon_normal_color", "Segment", Color(1, 1, 1, 0.62))
+	theme.set_type_variation("Pause", "Button")
+	var amber := Color(0.93, 0.62, 0.18)
+	_button_styles(theme, "Pause", seg, icon_hover, _pad(_soft_box(amber, 9), 8),
+		_pad(_soft_box(amber.lightened(0.12), 9), 8))
+	theme.set_color("icon_normal_color", "Pause", Color(1, 1, 1, 0.62))
+
+	# Menu rows: flat, left-aligned, with an icon.
+	theme.set_type_variation("MenuRow", "Button")
+	var row_flat := _pad(StyleBoxEmpty.new(), 7)
+	var row_lit := _pad(_soft_box(Color(1, 1, 1, 0.12), 8), 7)
+	_button_styles(theme, "MenuRow", row_flat, row_lit, row_flat, row_lit)
+	theme.set_constant("h_separation", "MenuRow", 10)
+	theme.set_color("icon_pressed_color", "MenuRow", WARN)
+	theme.set_color("icon_hover_pressed_color", "MenuRow", WARN)
+
+	# Advisors: flat rows, and the count badge.
+	theme.set_type_variation("AdviceRow", "Button")
+	_button_styles(theme, "AdviceRow", _pad(StyleBoxEmpty.new(), 6), _pad(_soft_box(Color(1, 1, 1, 0.09), 8), 6),
+		_pad(_soft_box(Color(1, 1, 1, 0.09), 8), 6), _pad(_soft_box(Color(1, 1, 1, 0.09), 8), 6))
+	theme.set_font_size("font_size", "AdviceRow", 13)
+	theme.set_constant("h_separation", "AdviceRow", 8)
+	theme.set_type_variation("Count", "Button")
+	var count := _soft_box(Color(1, 1, 1, 0.10), 9)
+	count.content_margin_left = 10
+	count.content_margin_right = 6
+	count.content_margin_top = 6
+	count.content_margin_bottom = 6
+	var count_hover := count.duplicate() as StyleBoxFlat
+	count_hover.bg_color = Color(1, 1, 1, 0.18)
+	var count_on := count.duplicate() as StyleBoxFlat
+	count_on.bg_color = Color(1, 1, 1, 0.26)
+	_button_styles(theme, "Count", count, count_hover, count_on, count_on)
+	theme.set_font("font", "Count", bold)
+	theme.set_font_size("font_size", "Count", 13)
+	theme.set_constant("h_separation", "Count", 2)
+
+	# Build dock: the category rail and its buttons.
+	theme.set_type_variation("RailButton", "Button")
+	var rail_normal := _pad(StyleBoxEmpty.new(), 5)
+	var rail_hover := _pad(_soft_box(Color(1, 1, 1, 0.08), 10), 5)
+	var rail_on := _pad(_soft_box(Color(1, 1, 1, 0.18), 10), 5)
+	_button_styles(theme, "RailButton", rail_normal, rail_hover, rail_on, rail_on)
+	theme.set_font_size("font_size", "RailButton", 11)
 	theme.set_color("font_color", "RailButton", TEXT_DIM)
 	theme.set_color("font_pressed_color", "RailButton", Color.WHITE)
 	theme.set_color("font_hover_pressed_color", "RailButton", Color.WHITE)
+	theme.set_color("icon_normal_color", "RailButton", Color(1, 1, 1, 0.72))
+	theme.set_constant("h_separation", "RailButton", 2)
+	theme.set_type_variation("Bulldoze", "RailButton")
+	var doze_on := _pad(_soft_box(Color(0.86, 0.30, 0.28, 0.85), 10), 5)
+	_button_styles(theme, "Bulldoze", rail_normal, rail_hover, doze_on, doze_on)
+
+	# Build menu rows: invisible until hovered; the chosen one is lit in the accent colour.
+	theme.set_type_variation("ItemRow", "Button")
+	var item_hover := _soft_box(Color(1, 1, 1, 0.08), 12)
+	var item_on := _soft_box(Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.28), 12)
+	item_on.border_color = Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.85)
+	item_on.set_border_width_all(1)
+	_button_styles(theme, "ItemRow", StyleBoxEmpty.new(), item_hover, item_on, item_on)
+	theme.set_type_variation("IconTile", "PanelContainer")
+	var tile := _pad(_soft_box(Color(0, 0, 0, 0.30), 10), 1)
+	theme.set_stylebox("panel", "IconTile", tile)
+
+	# Scroll bar: thin and quiet.
+	var grabber := _soft_box(Color(1, 1, 1, 0.22), 3)
+	grabber.content_margin_left = 3
+	grabber.content_margin_right = 3
+	var grabber_hi := _soft_box(Color(1, 1, 1, 0.38), 3)
+	var track := StyleBoxEmpty.new()
+	track.content_margin_left = 4
+	theme.set_stylebox("grabber", "VScrollBar", grabber)
+	theme.set_stylebox("grabber_highlight", "VScrollBar", grabber_hi)
+	theme.set_stylebox("grabber_pressed", "VScrollBar", grabber_hi)
+	theme.set_stylebox("scroll", "VScrollBar", track)
 
 	var tip := StyleBoxFlat.new()
-	tip.bg_color = Color(0.07, 0.09, 0.12, 0.95)
+	tip.bg_color = Color(0.06, 0.07, 0.09, 0.96)
+	tip.border_color = Color(1, 1, 1, 0.12)
+	tip.set_border_width_all(1)
 	tip.set_corner_radius_all(8)
 	tip.set_content_margin_all(8)
 	theme.set_stylebox("panel", "TooltipPanel", tip)
+	theme.set_color("font_color", "TooltipLabel", TEXT)
+	theme.set_font_size("font_size", "TooltipLabel", 13)
 	return theme
+
+
+func _panel_style(theme: Theme, type: String, h: int, v: int) -> void:
+	var s := StyleBoxEmpty.new()
+	s.content_margin_left = h
+	s.content_margin_right = h
+	s.content_margin_top = v
+	s.content_margin_bottom = v
+	if type != "PanelContainer":
+		theme.set_type_variation(type, "PanelContainer")
+	theme.set_stylebox("panel", type, s)
+
+
+func _pad(box: StyleBox, margin: int) -> StyleBox:
+	box.set_content_margin_all(margin)
+	return box
 
 
 func _soft_box(colour: Color, radius: int) -> StyleBoxFlat:

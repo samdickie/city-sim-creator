@@ -38,7 +38,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - One number, 0-100%, sums up how residents feel, and it is what draws people in: demand for homes = (100 + 4% of the population) x appeal, where appeal = 3 x happiness - 1, plus the pull of spare jobs. 67% is a normal town; below 50% people stop moving in; below 33% they leave.
 - Made of parts in appeal points, added to 1: taxes against services (as above), services against what people expect, leisure (up to +0.3), uncollected rubbish (up to -0.5), unemployment above 5% (x2, from 400 people), housing shortage (up to -0.15), share of homes without power (up to -0.8) or water (up to -0.6). Pollution is one more part: the share of residents in polluted air (up to -0.15).
 - Businesses weigh only the town-wide parts (taxes, services, leisure, rubbish), so jobs, housing, power and water problems don't stop shops and industry coming to fix them. The tax line uses the same.
-- HUD: "Happiness 72%: happy" under the population; below 60% it shows the main complaint, red below 50%. Zone hover text names the top complaint and its fix. Words: delighted (80+), happy (60+), content (50+), unhappy (33+), angry.
+- HUD: the status strip shows "72% happy" (green, amber below 60%, red below 50%); the City panel has a bar and the main complaints with their fixes. Zone hover text names the top complaint and its fix. Words: delighted (80+), happy (60+), content (50+), unhappy (33+), angry.
 - Worked out from the town each month (and when taxes change), so nothing extra is saved. Numbers in `Settings` under Happiness; complaint wording in `COMPLAINTS` in `simulation.gd`.
 
 ## Abandoned buildings
@@ -46,7 +46,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Decline still trims plots back a level at a time, but never removes the last building. After 36 months in decline (each good month counts 3 back off) there's a 10% chance a month the building is abandoned: it houses nobody, has no jobs, pays no tax, uses no power or water and takes a little land value off the plots round about (0.04 on its own plot, fading out over 2 tiles).
 - Abandoned buildings look run down: faded, grimy walls, mossy roofs, boarded-up windows and doors, no lights at night and no cars outside. The hover text says "Abandoned — why"; plots in decline for 18 months or more warn that they're run down.
 - Once nothing's wrong and the town wants what it held again, it's done up (10% a month) and fills up again. Or bulldoze it.
-- The HUD shows how many are abandoned and run down, a message pops up when buildings are abandoned, and the Growth map shows them in brown. Rules and numbers are in `scripts/settings.gd`; it should be rare in a healthy town.
+- The City panel shows how many are abandoned and run down, a message pops up when buildings are abandoned, and the Growth map shows them in brown. Rules and numbers are in `scripts/settings.gd`; it should be rare in a healthy town.
 
 ## Zoning density
 - Homes and shops are zoned low, medium or high density (Tab or the buttons above the toolbar). Industry has one density.
@@ -92,10 +92,18 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Power spreads through any touching built tiles: roads, zones, power lines (£5) and other plants.
 - When a network runs short, plots furthest from the plant lose power first.
 
+## Interface
+- The town is the hero: small frosted-glass pieces hug the edges, nothing sits over the middle. Glass: the game behind blurred, drained of most colour and darkened to a cool slate (so text reads the same over grass, sea, overlays and night), rounded corners, hairline edge, soft shadow. Pieces fade in and out.
+- Top left: game menu (New city, Save, Load, How to play, Day and night), city name, date and clock, and speed as pause / play / fast icons (the chosen one lit; pause in amber).
+- Top centre: advisors ticker (see Advisors).
+- Top right: status strip: money and last month's change (green or red), people and jobs, happiness, four small meters (power, water, services, rubbish: icon and bar, red/amber/green, details on hover) and the demand meter (homes, shops, industry bars round a zero line). Clicking the strip opens the City panel: budget, tax rate with - / +, happiness with its complaints and fixes, services, housing and last month's growth.
+- Bottom centre: a card with the picture of the tool in use, what's under the mouse (name, stage, land value, services, problems) and what building there costs (green) or why it can't (red). Messages pop up just above it.
+- Bottom right: map views (see Map views).
+- Works from 1280 x 720 up; the City panel scrolls if the window is too short.
+
 ## Build menu
-- A frosted-glass panel, bottom left: categories down the side (All, Zones, Roads, Power, Utilities, Services, Leisure, Transport, Districts); each item has a small isometric picture, a name, a one-line description and its price (padlock and "Needs N people" while locked; the full explanation on hover).
-- Build button shows or hides it (M); Bulldoze button beside it. Number keys and Tab still pick tools, and the menu follows.
-- All the interface panels use the same frosted glass (blurred game behind, rounded corners, hairline edge).
+- A dock, bottom left: a rail of category icons (All, Zones, Roads, Power, Utilities, Services, Leisure, Transport, Districts) with Bulldoze at its foot, and a flyout beside it listing the category: each item has its picture, a name, a one-line description and its price (padlock and "Needs N people" while locked; the full explanation on hover). Service funding (- / +) sits under the Services list.
+- Click a category to open it, click it again (or the cross, or M) to fold the list away; the rail stays. A small blue mark on the rail shows the category of the tool in use. Number keys and Tab still pick tools, and the menu follows.
 - Item pictures are rendered in Blender by `tools/make_menu_pictures.py` (into `assets/icons/`): a small diorama of each plot built from the same models, colours and photo textures the game uses, so the picture matches what gets built. The drawn icons in `scripts/icons.gd` (from `tools/make_icons.py`) are only a fallback.
 
 ## Building tools
@@ -126,7 +134,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A Services map view shows how many of the four cover each area.
 
 ## Map views (overlays)
-- O or the buttons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution. Each has a colour key.
+- O or the row of icons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution (names on hover). The chosen view's name, a line about it and its colour key show above the icons.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built, brown abandoned.
 
@@ -139,7 +147,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - For a happiness score or advisors: `pollution_at(i)`, `pollution_band(i)`, `polluted_homes_share()`, `pollution_feeling()` (already in appeal), `air_word()` in `scripts/simulation.gd`. Numbers in the Pollution section of `scripts/settings.gd`.
 
 ## Advisors
-- A small glass card, top centre, shows the most important 1-3 tips when something needs attention, most urgent first (red dot urgent, amber warning, blue advice). "N more" lists the rest; Hide folds the card to its count. Hidden when all is well.
+- A ticker, top centre, shows the most urgent tip and a count when something needs attention (red dot urgent, amber warning, blue advice). The count opens the full list, most urgent first. Hidden when all is well.
 - Every tip comes from real simulation state: why zone plots aren't growing (the same reasons as the hover text and Growth view), power and water used vs supplied, rubbish collected, buildings with no road or power, money trend, taxes vs services, missing fire station or school, skyscrapers waiting for transport.
 - Tips appear and disappear as the town changes. Only urgent ones also flash a message, once, and not again for a year.
 - Clicking a tip switches on the map view that shows the problem (Power, Water, Roads, Services, Growth, Land value); clicking again goes back to normal. Hover for a longer explanation.
@@ -150,7 +158,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Natural woods and lone trees cover open land and are cleared where you build; parks (£100, £1/month) keep their trees and gain more.
 - Every straight street gets trees on both sides (one kind per street, like an avenue), except beside industry and power plants. Gardens, tenement courts, landscaped courts and shop car parks get trees too.
 - Cars, buses and people fill the streets (see People and traffic).
-- A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. A "Day & night" button turns it off.
+- A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. "Day and night" in the game menu turns it off.
 
 ## People and traffic
 - Cars, buses and people walking bring the streets to life. Looks only: they don't affect the simulation. T turns them off and on (`TRAFFIC_ON` in settings to start with them off).
