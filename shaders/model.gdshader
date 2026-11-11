@@ -1,6 +1,7 @@
-// The detailed building models (assets/models/*.glb). Each material of a model
-// gets this shader with its own "part": stone walls, slate roof, glass, painted
-// frames, doors and shopfronts, metal, chimney pots and so on.
+// The detailed building models (assets/models/*.glb). Each part of a model (its
+// .glb material: stone walls, slate roof, glass, painted frames, doors and
+// shopfronts, metal, chimney pots and so on) is drawn its own way; the part's
+// number comes with each vertex (world3d.gd joins all the parts into one surface).
 // Per building (from the MultiMesh):
 //   COLOR            rgb = wall colour (or, with a map overlay on, the plot's overlay colour);
 //                    a below 0.75 = abandoned (grimy walls, boarded windows, no lights)
@@ -11,7 +12,7 @@
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
-uniform int part = 0;   // 0 stone, 1 roof, 2 glass, 3 frame, 4 door, 5 metal, 6 pot,
+varying flat int part;  // from UV2.x (world3d.gd joins a model's parts into one surface): 0 stone, 1 roof, 2 glass, 3 frame, 4 door, 5 metal, 6 pot,
 						// 7 fascia, 8 render, 9 awning, 10 lead, 11 cladding, 12 sheet, 13 accent,
 						// 14 curtain (glass in the wall colour), 15 display (shop windows),
 						// 16 beacon (red aviation light), 17 lamp (floodlit trim), 18 office (office glass),
@@ -64,6 +65,7 @@ vec3 pick(float r, vec3 a, vec3 b, vec3 c, vec3 d, vec3 e, vec3 f) {
 }
 
 void vertex() {
+	part = int(UV2.x + 0.5);
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	tint = overlay_on ? COLOR.rgb : to_linear(COLOR.rgb);   // (map overlay colours arrive linear)

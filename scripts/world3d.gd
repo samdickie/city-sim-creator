@@ -325,7 +325,7 @@ func setup(simulation, width: int, height: int, cell_metres: float,
 # strong shadows, rich but natural colour, a properly dark night. ---
 const LOOK_WHITE := 6.0                 # tone mapping: brightness that turns pure white
 const LOOK_EXPOSURE_DAY := 0.6
-const LOOK_EXPOSURE_NIGHT := 1.15
+const LOOK_EXPOSURE_NIGHT := 1.25
 const LOOK_CONTRAST := 1.12             # colour grade on top of the tone mapping
 const LOOK_SATURATION := 1.0
 const SUN_ENERGY := 2.0                 # the warm key light
@@ -333,14 +333,14 @@ const SUN_DAY_COLOUR := Color(1.0, 0.94, 0.84)
 const SUN_LOW_COLOUR := Color(1.0, 0.52, 0.26)   # at sunrise and sunset
 const SUN_MAX_ELEVATION := 46.0         # degrees, at noon
 const AMBIENT_DAY := 0.38               # cool fill from the sky (lower = deeper shadows)
-const AMBIENT_NIGHT := 0.5
-const MOON_ENERGY := 0.22
+const AMBIENT_NIGHT := 0.85              # night: lifted so roads, roofs and the coast still read
+const MOON_ENERGY := 0.45
 const MOON_COLOUR := Color(0.48, 0.60, 1.0)
 const MOON_ANGLE := Vector3(-50.0, 150.0, 0.0)
 const SUN_FOLLOWS_VIEW := true          # light from a fixed side of the screen (see _view_yaw)
 const SUN_VIEW_ANGLE := -70.0           # degrees round from behind the camera (minus = from the left)
 const MOON_VIEW_ANGLE := -35.0
-const SKY_ENERGY_NIGHT := 0.22
+const SKY_ENERGY_NIGHT := 0.3
 const SHADOW_REACH := 3.4               # shadows drawn out to this many camera distances
 const SHADOW_SPLITS := Vector3(0.06, 0.18, 0.45)   # where the 4 shadow cascades end
 const SSAO_RADIUS := 5.0                # metres: contact shading where walls meet the ground
@@ -1372,15 +1372,15 @@ func refresh_buildings() -> void:
 	_fill(chimneys.multimesh, chimney_list, false)
 	_place_smoke()
 	_plan_street_furniture(tiles)
-	_fill(paving.multimesh, _paving_items, false)
-	_fill(props.multimesh, _prop_items, false)
+	_fill_chunked(paving, _paving_items)
+	_fill_chunked(props, _prop_items)
 	var bodies: Array = []
 	var cabins: Array = []
 	for car in _parked_items:
 		bodies.append([car[0], car[1]])
 		cabins.append([car[2], Color.WHITE])
-	_fill(parked_bodies.multimesh, bodies, false)
-	_fill(parked_cabins.multimesh, cabins, false)
+	_fill_chunked(parked_bodies, bodies)
+	_fill_chunked(parked_cabins, cabins)
 	_build_city_trees(tiles)
 	_write_lots()
 
@@ -1821,6 +1821,51 @@ func _fill(mm: MultiMesh, items: Array, custom: bool) -> void:
 		mm.set_instance_color(n, item[1])
 		if custom:
 			mm.set_instance_custom_data(n, item[2])
+
+
+# The town's small things (paving, props, parked cars, planted trees) run to tens
+# of thousands each, so they're drawn in DETAIL_CHUNK squares: one MultiMesh per
+# square, as children of the node that names them. Squares off screen are
+# skipped, and each shadow cascade only draws the squares it covers. (One
+# MultiMesh for the whole town was drawn in full by the main pass and by all four
+# shadow cascades: tens of millions of triangles a frame.)
+const DETAIL_CHUNK := 400.0
+var _pieces := {}          # node -> {Vector2i square -> MultiMeshInstance3D}
+var _piece_totals := {}    # node -> instances in all its squares
+
+
+func _fill_chunked(node: MultiMeshInstance3D, items: Array) -> void:
+	var groups := {}
+	for item: Array in items:
+		var xf: Transform3D = item[0]
+		var key := Vector2i(floori(xf.origin.x / DETAIL_CHUNK), floori(xf.origin.z / DETAIL_CHUNK))
+		if not groups.has(key):
+			groups[key] = []
+		var list: Array = groups[key]
+		list.append(item)
+	if not _pieces.has(node):
+		_pieces[node] = {}
+		node.multimesh.instance_count = 0        # (the node itself draws nothing)
+	var pieces: Dictionary = _pieces[node]
+	for key: Vector2i in pieces:
+		if not groups.has(key):
+			(pieces[key] as MultiMeshInstance3D).multimesh.instance_count = 0
+	for key: Vector2i in groups:
+		if not pieces.has(key):
+			var piece := MultiMeshInstance3D.new()
+			piece.multimesh = _new_multimesh(node.multimesh.mesh, false)
+			piece.material_override = node.material_override
+			piece.cast_shadow = node.cast_shadow
+			node.add_child(piece)
+			pieces[key] = piece
+		_fill((pieces[key] as MultiMeshInstance3D).multimesh, groups[key], false)
+	_piece_totals[node] = items.size()
+
+
+func instance_total(node: MultiMeshInstance3D) -> int:
+	# How many things a node draws, in all its squares (for the dev tools' report).
+	var total: int = _piece_totals.get(node, node.multimesh.instance_count)
+	return total
 
 
 # ------------------------------------------------------------------ overlays
@@ -2348,22 +2393,20 @@ func _add_block(spot: Dictionary, w: float, d: float, h: float, colour: Color, s
 # --- Detailed building models ---
 
 func _load_models(stone: Texture2D, slate: Texture2D) -> void:
-	# Load each .glb and give its materials our shader (one material per part).
-	var materials := {}
-	for n in MODEL_PARTS.size():
-		var mat := ShaderMaterial.new()
-		mat.shader = MODEL_SHADER
-		mat.set_shader_parameter("part", n)
-		if stone:
-			mat.set_shader_parameter("use_wall_tex", true)
-			mat.set_shader_parameter("wall_tex", stone)
-			mat.set_shader_parameter("wall_average", _average_colour(stone))
-		if slate:
-			mat.set_shader_parameter("use_roof_tex", true)
-			mat.set_shader_parameter("roof_tex", slate)
-			mat.set_shader_parameter("roof_average", _average_colour(slate))
-		materials[MODEL_PARTS[n]] = mat
-		_model_materials.append(mat)
+	# Load each .glb and give it our shader. The model's parts (its materials:
+	# stone, roof, glass...) are joined into one surface that tells the shader
+	# each vertex's part, so a model is one draw, not one per part.
+	var mat := ShaderMaterial.new()
+	mat.shader = MODEL_SHADER
+	if stone:
+		mat.set_shader_parameter("use_wall_tex", true)
+		mat.set_shader_parameter("wall_tex", stone)
+		mat.set_shader_parameter("wall_average", _average_colour(stone))
+	if slate:
+		mat.set_shader_parameter("use_roof_tex", true)
+		mat.set_shader_parameter("roof_tex", slate)
+		mat.set_shader_parameter("roof_average", _average_colour(slate))
+	_model_materials.append(mat)
 	for model_name: String in _all_model_names():
 		var path := MODEL_DIR + model_name + ".glb"
 		if not ResourceLoader.exists(path):
@@ -2376,13 +2419,58 @@ func _load_models(stone: Texture2D, slate: Texture2D) -> void:
 		root.free()
 		if mesh == null:
 			continue
-		for s in mesh.get_surface_count():
-			var old := mesh.surface_get_material(s)
-			var part := old.resource_name if old else ""
-			mesh.surface_set_material(s, materials.get(part, materials["stone"]))
-		_models[model_name] = mesh
+		_models[model_name] = _one_surface(mesh, mat)
 	if _models.is_empty():
 		push_warning("No building models found in %s: using simple blocks." % MODEL_DIR)
+
+
+func _one_surface(mesh: ArrayMesh, mat: Material) -> Mesh:
+	# All of a model's surfaces joined into one, each vertex carrying its part's
+	# number in UV2.x (model.gdshader reads it; see MODEL_PARTS). With a surface
+	# per part, the town's models came to thousands of draws a frame, and those,
+	# not triangles, were the slowest thing on screen. Its detail levels (fewer
+	# triangles far away) are made again for the joined mesh.
+	var with_colour := true
+	for s in mesh.get_surface_count():
+		with_colour = with_colour and mesh.surface_get_arrays(s)[Mesh.ARRAY_COLOR] != null
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var colours := PackedColorArray()
+	var parts := PackedVector2Array()
+	var indices := PackedInt32Array()
+	for s in mesh.get_surface_count():
+		var arrays := mesh.surface_get_arrays(s)
+		var old := mesh.surface_get_material(s)
+		var part := maxi(MODEL_PARTS.find(old.resource_name if old else ""), 0)   # (unknown: stone)
+		var base := verts.size()
+		var v: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		var nrm: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		verts.append_array(v)
+		normals.append_array(nrm)
+		if with_colour:
+			var col: PackedColorArray = arrays[Mesh.ARRAY_COLOR]
+			colours.append_array(col)
+		for n in v.size():
+			parts.append(Vector2(part, 0.0))
+		if arrays[Mesh.ARRAY_INDEX] == null:
+			for n in v.size():
+				indices.append(base + n)
+		else:
+			var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+			for n: int in idx:
+				indices.append(base + n)
+	var joined := []
+	joined.resize(Mesh.ARRAY_MAX)
+	joined[Mesh.ARRAY_VERTEX] = verts
+	joined[Mesh.ARRAY_NORMAL] = normals
+	if with_colour:
+		joined[Mesh.ARRAY_COLOR] = colours
+	joined[Mesh.ARRAY_TEX_UV2] = parts
+	joined[Mesh.ARRAY_INDEX] = indices
+	var im := ImporterMesh.new()
+	im.add_surface(Mesh.PRIMITIVE_TRIANGLES, joined, [], {}, mat)
+	im.generate_lods(25.0, 60.0, [])
+	return im.get_mesh()
 
 
 func _all_model_names() -> Array[String]:
@@ -3007,7 +3095,7 @@ func set_preview(items: Array, colour: Color) -> void:
 	var list: Array = []
 	for item in items:
 		var p: Vector3 = ground_point(item[0])
-		var c: Color = Color(colour, 0.38) if item[1] else Color(1.0, 0.25, 0.2, 0.45)
+		var c: Color = Color(colour.lightened(0.15), 0.6) if item[1] else Color(1.0, 0.25, 0.2, 0.6)
 		list.append([Transform3D(Basis(), p + Vector3.UP * 1.5), c])
 	_fill(preview.multimesh, list, false)
 	hover_box.visible = items.is_empty() and hover_box.visible
@@ -4887,11 +4975,14 @@ func _build_city_trees(tiles: PackedByteArray) -> void:
 		var at: Vector2 = tree[0]
 		var tall: float = tree[1]
 		var kind: int = tree[2]
+		# Each tree's shape from its own spot, so planting one more doesn't reshape
+		# every tree after it in the list (they all changed whenever a plot grew).
+		plot_rng.seed = hash(Vector2i(roundi(at.x * 4.0), roundi(at.y * 4.0))) + 7
 		_add_tree(lists, _tree(at, tall, kind, plot_rng))
 	_plant_street_trees(tiles, lists)
-	_fill(city_trunks.multimesh, lists[0], false)
-	_fill(city_crowns.multimesh, lists[1], false)
-	_fill(city_cones.multimesh, lists[2], false)
+	_fill_chunked(city_trunks, lists[0])
+	_fill_chunked(city_crowns, lists[1])
+	_fill_chunked(city_cones, lists[2])
 
 
 func _add_tree(lists: Array, tree: Array) -> void:
