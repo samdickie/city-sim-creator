@@ -7,6 +7,14 @@ const MAX_DISTANCE := 6500.0
 const MIN_PITCH := 0.384          # 22 degrees
 const MAX_PITCH := 1.484          # 85 degrees
 const SMOOTHING := 9.0          # higher = snappier
+# A narrow, telephoto-like lens, close to SimCity 4's near-flat oblique view:
+# less stretching at the screen edges, buildings stay upright. The camera is
+# moved back so a "distance" frames the same patch of ground as the old 45 degree
+# lens did (so zoom limits, panning and everything else using distance still fit).
+const FOV := 30.0
+const REFERENCE_FOV := 45.0
+const NEAR := 2.0
+const FAR := 60000.0
 
 var camera := Camera3D.new()
 var bounds := Rect2()           # the map area the camera may look at (x, z)
@@ -25,15 +33,10 @@ var _distance := 0.0
 
 
 func _ready() -> void:
-	camera.fov = 45.0
-	camera.near = 1.0
-	camera.far = 40000.0
-	# Depth of field: blur what's well behind or in front of the point you're
-	# looking at. From above, that gives the "tilt-shift" miniature-model look.
-	var dof := CameraAttributesPractical.new()
-	dof.dof_blur_far_enabled = true
-	dof.dof_blur_near_enabled = true
-	camera.attributes = dof
+	camera.fov = FOV
+	camera.near = NEAR
+	camera.far = FAR
+	# No depth-of-field blur: the whole view stays sharp, edge to edge.
 	add_child(camera)
 	camera.make_current()
 	snap()
@@ -60,16 +63,13 @@ func _process(delta: float) -> void:
 
 func _apply() -> void:
 	var offset := Vector3(sin(_yaw) * cos(_pitch), sin(_pitch), cos(_yaw) * cos(_pitch)) * _distance
-	camera.global_position = _target + offset
+	camera.global_position = _target + offset * lens_factor()
 	camera.look_at(_target, Vector3.UP)
-	var dof := camera.attributes as CameraAttributesPractical
-	if dof:
-		dof.dof_blur_far_distance = _distance * 1.15
-		dof.dof_blur_far_transition = _distance * 0.9
-		dof.dof_blur_near_distance = _distance * 0.65
-		dof.dof_blur_near_transition = _distance * 0.35
-		# Gentle when zoomed in close, off when looking over the whole map.
-		dof.dof_blur_amount = lerpf(0.09, 0.0, smoothstep(2500.0, 5000.0, _distance))
+
+
+static func lens_factor() -> float:
+	# How much further back the narrow lens sits to frame the same ground.
+	return tan(deg_to_rad(REFERENCE_FOV * 0.5)) / tan(deg_to_rad(FOV * 0.5))
 
 
 # ------------------------------------------------------------- controls

@@ -599,6 +599,8 @@ func _shoot(shot: Dictionary) -> void:
 	for n: int in SETTLE_FRAMES:
 		await get_tree().process_frame
 		RenderingServer.force_draw(false)
+	if shot_name.begins_with("04"):
+		await _measure_speed()
 	# No hover box or hover text from wherever the mouse happens to be.
 	game.set("hover", Vector2i(-1, -1))
 	world.set_hover(Vector2i(-1, -1), true)
@@ -622,3 +624,22 @@ func _shoot(shot: Dictionary) -> void:
 		printerr("[shots] couldn't save %s (error %d)" % [path, err])
 	else:
 		print("[shots] saved %s (%dx%d)" % [path, image.get_width(), image.get_height()])
+
+
+const SPEED_FRAMES := 60
+const SPEED_WARM_UP := 90
+
+func _measure_speed() -> void:
+	# Average drawing time over SPEED_FRAMES frames at this view, drawn back to
+	# back by hand (so neither vsync nor macOS throttling a hidden window counts).
+	# The GPU keeps at most a couple of frames queued, so this is roughly the
+	# real cost of a frame: CPU and GPU together.
+	for n: int in SPEED_WARM_UP:
+		RenderingServer.force_draw(false)   # lets the GPU reach full speed first
+	var start := Time.get_ticks_usec()
+	for n: int in SPEED_FRAMES:
+		RenderingServer.force_draw(false)
+	var ms := (Time.get_ticks_usec() - start) / 1000.0 / SPEED_FRAMES
+	print("[shots] speed at this view: %.2f ms per frame (%.0f fps) over %d frames"
+		% [ms, 1000.0 / maxf(ms, 0.01), SPEED_FRAMES])
+	await get_tree().process_frame

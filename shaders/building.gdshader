@@ -16,6 +16,8 @@ uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, rep
 uniform float wall_texture_metres = 3.0;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);   // the stone photo's average colour (linear)
 uniform float night = 0.0;                                // 0 = day, 1 = night: lights come on
+uniform float lit_share = 0.25;                           // share of windows lit at night
+uniform float lamp_strength = 1.0;                        // how bright a lit window is
 uniform bool overlay_on = false;   // map overlay: COLOR is the plot's overlay colour
 
 varying vec3 local_pos;
@@ -185,14 +187,14 @@ void fragment() {
 				rough = 0.6;
 				metal = 0.0;
 			}
-			// At night, about half the windows are lit, in slightly different warm tones.
-			float lit = step(0.45, hash(window_id + vec2(3.7, 1.3)));
-			vec3 lamp = mix(vec3(1.0, 0.72, 0.38), vec3(1.0, 0.86, 0.62), hash(window_id + 9.1));
+			// At night about a third of the windows are lit, in slightly different warm tones.
+			float lit = step(1.0 - lit_share, hash(window_id + vec2(3.7, 1.3)));
+			vec3 lamp = mix(vec3(1.0, 0.42, 0.11), vec3(1.0, 0.58, 0.22), hash(window_id + 9.1));
 			if (style == 1 && storey < 0.5) {
 				lit = 1.0;   // shop windows stay lit
 				lamp = vec3(1.0, 0.92, 0.78);
 			}
-			glow = lamp * lit * night * 2.2 * (1.0 - sash_bar);
+			glow = lamp * lit * night * lamp_strength * (1.0 - sash_bar);
 			if (derelict > 0.5) {
 				// Boarded up with weathered plywood; the odd one just broken and dark.
 				float board = hash(window_id + vec2(5.3, 8.1));

@@ -55,6 +55,6 @@ void fragment() {
 		float d = min(d_left, d_right);
 		float pool = 1.0 - smoothstep(0.0, 8.0, d);
 		float bulb = 1.0 - smoothstep(0.35, 0.6, d);
-		EMISSION = vec3(1.0, 0.78, 0.45) * (pool * pool * 0.35 + bulb * 6.0) * night;
+		EMISSION = vec3(1.0, 0.62, 0.28) * (pool * pool * 0.5 + bulb * 1.8) * night;
 	}
 }

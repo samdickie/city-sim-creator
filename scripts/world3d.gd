@@ -273,6 +273,44 @@ func setup(simulation, width: int, height: int, cell_metres: float,
 	refresh_all()
 
 
+# --- Light, colour and air (the "look"), aiming for SimCity 4: crisp, sunny,
+# strong shadows, rich but natural colour, a properly dark night. ---
+const LOOK_WHITE := 6.0                 # tone mapping: brightness that turns pure white
+const LOOK_EXPOSURE_DAY := 0.6
+const LOOK_EXPOSURE_NIGHT := 1.15
+const LOOK_CONTRAST := 1.12             # colour grade on top of the tone mapping
+const LOOK_SATURATION := 1.0
+const SUN_ENERGY := 2.0                 # the warm key light
+const SUN_DAY_COLOUR := Color(1.0, 0.94, 0.84)
+const SUN_LOW_COLOUR := Color(1.0, 0.52, 0.26)   # at sunrise and sunset
+const SUN_MAX_ELEVATION := 46.0         # degrees, at noon
+const AMBIENT_DAY := 0.38               # cool fill from the sky (lower = deeper shadows)
+const AMBIENT_NIGHT := 0.5
+const MOON_ENERGY := 0.22
+const MOON_COLOUR := Color(0.48, 0.60, 1.0)
+const MOON_ANGLE := Vector3(-50.0, 150.0, 0.0)
+const SUN_FOLLOWS_VIEW := true          # light from a fixed side of the screen (see _view_yaw)
+const SUN_VIEW_ANGLE := -70.0           # degrees round from behind the camera (minus = from the left)
+const MOON_VIEW_ANGLE := -35.0
+const SKY_ENERGY_NIGHT := 0.22
+const SHADOW_REACH := 3.4               # shadows drawn out to this many camera distances
+const SHADOW_SPLITS := Vector3(0.06, 0.18, 0.45)   # where the 4 shadow cascades end
+const SSAO_RADIUS := 5.0                # metres: contact shading where walls meet the ground
+const SSAO_INTENSITY := 2.4
+const SSAO_POWER := 1.6
+const SSAO_LIGHT_AFFECT := 0.25         # also darkens sunlit corners a little
+const HAZE_START := 1.6                 # camera distances before the haze begins...
+const HAZE_END := 9.0                   # ...and where it is thickest
+const HAZE_MAX := 0.55                  # how thick the far haze gets (0-1)
+const HAZE_DAY := Color(0.70, 0.78, 0.90)
+const HAZE_DUSK := Color(0.95, 0.62, 0.42)
+const HAZE_NIGHT := Color(0.06, 0.09, 0.17)
+const GLOW_THRESHOLD := 1.1             # only lit windows and lamps bloom
+const GLOW_DAY := 0.15
+const GLOW_NIGHT := 1.0
+var _view_distance := 1400.0
+
+
 func _build_environment() -> void:
 	env = Environment.new()
 	var sky := Sky.new()
@@ -292,33 +330,60 @@ func _build_environment() -> void:
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-	env.tonemap_mode = Environment.TONE_MAPPER_AGX
-	env.tonemap_exposure = 1.0
+	# ACES tone mapping: punchier and more saturated than AgX, which looked milky.
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_white = LOOK_WHITE
+	env.tonemap_exposure = LOOK_EXPOSURE_DAY
+	env.ambient_light_energy = AMBIENT_DAY
+	# Contact shading, so buildings sit on the ground instead of floating.
 	env.ssao_enabled = true
-	env.ssao_radius = 3.0
-	env.ssao_intensity = 1.6
+	env.ssao_radius = SSAO_RADIUS
+	env.ssao_intensity = SSAO_INTENSITY
+	env.ssao_power = SSAO_POWER
+	env.ssao_light_affect = SSAO_LIGHT_AFFECT
+	# Glow only from things brighter than white: lit windows and street lamps.
 	env.glow_enabled = true
-	env.glow_intensity = 0.25
-	# Colour grading: a touch richer and punchier, like a polished city builder.
+	env.glow_intensity = GLOW_DAY
+	env.glow_hdr_threshold = GLOW_THRESHOLD
+	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
+	env.glow_hdr_scale = 1.6
+	for level: int in 7:
+		env.set_glow_level(level, 1.0 if level >= 1 and level <= 4 else 0.0)   # tight halo plus a soft one
+	# Colour grading: a little extra contrast and colour.
 	env.adjustment_enabled = true
-	env.adjustment_saturation = 1.18
-	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = LOOK_SATURATION
+	env.adjustment_contrast = LOOK_CONTRAST
+	# Haze only far away (it starts a couple of camera distances out, see
+	# set_view_distance), taking the sky's colour: aerial perspective.
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.72, 0.78, 0.86)
-	env.fog_density = 0.00008
-	env.fog_aerial_perspective = 0.7
+	env.fog_mode = Environment.FOG_MODE_DEPTH
+	env.fog_light_color = HAZE_DAY
+	env.fog_density = HAZE_MAX
+	env.fog_depth_curve = 1.6
+	env.fog_aerial_perspective = 0.6
 	env.fog_sky_affect = 0.0
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	add_child(world_env)
 
-	# Late-afternoon sun from the south-west, over the Firth of Clyde.
+	# Afternoon sun from the south-west, over the Firth of Clyde (set_time_of_day moves it).
 	sun.rotation_degrees = Vector3(-38.0, 215.0, 0.0)
-	sun.light_energy = 1.2
+	sun.light_energy = SUN_ENERGY
+	sun.light_color = SUN_DAY_COLOUR
 	sun.shadow_enabled = true
-	sun.shadow_blur = 1.0
+	sun.shadow_blur = 0.4
+	sun.shadow_bias = 0.03
+	sun.shadow_normal_bias = 1.2
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_split_1 = SHADOW_SPLITS.x
+	sun.directional_shadow_split_2 = SHADOW_SPLITS.y
+	sun.directional_shadow_split_3 = SHADOW_SPLITS.z
+	sun.directional_shadow_blend_splits = true
+	sun.directional_shadow_fade_start = 0.85
 	sun.directional_shadow_max_distance = 1800.0
 	add_child(sun)
+	env.fog_depth_begin = _view_distance * HAZE_START
+	env.fog_depth_end = _view_distance * HAZE_END
 
 
 func _build_terrain() -> void:
@@ -662,7 +727,11 @@ func _build_alerts() -> void:
 
 func set_view_distance(distance: float) -> void:
 	# Shadows only as far as needed, so they stay crisp when zoomed in.
-	sun.directional_shadow_max_distance = clampf(distance * 2.2, 350.0, 3500.0)
+	_view_distance = distance
+	sun.directional_shadow_max_distance = clampf(distance * SHADOW_REACH, 400.0, 9000.0)
+	# Haze only well beyond what you're looking at.
+	env.fog_depth_begin = distance * HAZE_START
+	env.fog_depth_end = distance * HAZE_END
 	# Keep the warning icons a readable size however far the camera is.
 	var size := clampf(distance * 0.022, 12.0, 120.0)
 	if absf(size - _alert_size) > _alert_size * 0.05:
@@ -3137,28 +3206,31 @@ func set_time_of_day(t: float) -> void:
 	var height := sin(phase)                       # above 0 = sun is up
 	var daylight := smoothstep(-0.08, 0.25, height)
 	night = 1.0 - smoothstep(-0.12, 0.08, height)
+	var low_sun := 1.0 - smoothstep(0.0, 0.35, absf(height))   # 1 around sunrise and sunset
 
 	if height > -0.05:
 		# The sun rises in the east, crosses the south and sets in the west.
-		var elevation := maxf(height, 0.02) * 42.0
+		var elevation := maxf(height, 0.02) * SUN_MAX_ELEVATION
 		var yaw := 90.0 - 180.0 * clampf((t - 0.25) / 0.5, 0.0, 1.0)
-		sun.rotation_degrees = Vector3(-elevation, yaw, 0.0)
-		var warm := Color(1.0, 0.55, 0.30).lerp(Color(1.0, 0.96, 0.90), smoothstep(0.0, 0.4, height))
-		sun.light_color = warm
-		sun.light_energy = lerpf(0.0, 1.25, smoothstep(-0.05, 0.15, height))
+		sun.rotation_degrees = Vector3(-elevation, _view_yaw(yaw, SUN_VIEW_ANGLE), 0.0)
+		sun.light_color = SUN_LOW_COLOUR.lerp(SUN_DAY_COLOUR, smoothstep(0.0, 0.4, height))
+		sun.light_energy = lerpf(0.0, SUN_ENERGY, smoothstep(-0.04, 0.1, height))
 	else:
-		# Bright, cool moonlight from high in the south-east, so you can keep
-		# building at night (as in most city builders).
-		sun.rotation_degrees = Vector3(-50.0, 150.0, 0.0)
-		sun.light_color = Color(0.66, 0.76, 1.0)
-		sun.light_energy = 0.55
+		# Cool, dim moonlight from high up: a dark blue night, but the town's
+		# shapes still read, so you can keep building.
+		sun.rotation_degrees = Vector3(MOON_ANGLE.x, _view_yaw(MOON_ANGLE.y, MOON_VIEW_ANGLE), 0.0)
+		sun.light_color = MOON_COLOUR
+		sun.light_energy = MOON_ENERGY
 
-	env.ambient_light_energy = lerpf(0.65, 1.0, daylight)
-	env.background_energy_multiplier = lerpf(0.35, 1.0, daylight)
-	env.fog_light_color = Color(0.18, 0.23, 0.34).lerp(Color(0.72, 0.78, 0.86), daylight)
-	env.tonemap_exposure = lerpf(1.0, 1.35, night)
+	env.ambient_light_energy = lerpf(AMBIENT_NIGHT, AMBIENT_DAY, daylight)
+	env.background_energy_multiplier = lerpf(SKY_ENERGY_NIGHT, 1.0, daylight)
+	var haze := HAZE_DAY.lerp(HAZE_DUSK, low_sun * (1.0 - night))
+	env.fog_light_color = HAZE_NIGHT.lerp(haze, daylight)
+	# Opened up as the light fades, like an eye (or camera) adjusting at dusk.
+	env.tonemap_exposure = lerpf(LOOK_EXPOSURE_NIGHT, LOOK_EXPOSURE_DAY, daylight)
+	env.glow_intensity = lerpf(GLOW_DAY, GLOW_NIGHT, night)
 	# Dimming the sky itself makes Godot redo its lighting, so only do it in steps.
-	var sky_energy := lerpf(0.35, 1.0, daylight)
+	var sky_energy := lerpf(SKY_ENERGY_NIGHT, 1.0, daylight)
 	if absf(sky_energy - _sky_energy) > 0.04 and sky_material:
 		_sky_energy = sky_energy
 		sky_material.set("energy_multiplier", sky_energy)
@@ -3169,6 +3241,17 @@ func set_time_of_day(t: float) -> void:
 		mat.set_shader_parameter("night", night)
 	if road_material:
 		road_material.set_shader_parameter("night", night)
+
+
+func _view_yaw(world_yaw: float, view_angle: float) -> float:
+	# Like SimCity 4, light always comes from the same side of the screen, so
+	# buildings show one sunlit and one shaded face and their shadows fall the
+	# same way whichever way you turn. (SUN_FOLLOWS_VIEW = false: a real sun path.)
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if not SUN_FOLLOWS_VIEW or cam == null:
+		return world_yaw
+	var back := cam.global_basis.z
+	return rad_to_deg(atan2(back.x, back.z)) + view_angle
 
 
 # ----------------------------------------------------------- simple shapes

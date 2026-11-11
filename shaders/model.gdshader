@@ -19,6 +19,8 @@ uniform bool use_roof_tex = false;
 uniform sampler2D roof_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec3 roof_average = vec3(0.284, 0.243, 0.18);
 uniform float night = 0.0;
+uniform float lit_share = 0.25;      // share of windows lit at night
+uniform float lamp_strength = 1.0;   // how bright a lit window is
 uniform bool overlay_on = false;
 
 varying vec3 world_pos;
@@ -77,15 +79,15 @@ void fragment() {
 		}
 		rough = 0.65;
 	} else if (part == 2) {
-		// Glass: dark and glossy; at night about half the windows light up.
+		// Glass: dark and glossy; at night about a third of the windows light up.
 		vec3 cell = floor(world_pos / vec3(1.6, 2.9, 1.6));
 		float which = hash(cell.xz + vec2(cell.y * 7.1, r * 13.0));
 		c = mix(vec3(0.05, 0.07, 0.09), vec3(0.16, 0.18, 0.2), which * 0.5);
 		rough = 0.06;
 		metal = 0.35;
-		float lit = step(0.45, hash(cell.zx + vec2(r * 5.3, cell.y * 2.3)));
-		vec3 lamp = mix(vec3(1.0, 0.70, 0.36), vec3(1.0, 0.86, 0.62), which);
-		glow = lamp * lit * night * 2.2;
+		float lit = step(1.0 - lit_share, hash(cell.zx + vec2(r * 5.3, cell.y * 2.3)));
+		vec3 lamp = mix(vec3(1.0, 0.42, 0.11), vec3(1.0, 0.58, 0.22), which);
+		glow = lamp * lit * night * lamp_strength;
 	} else if (part == 3) {
 		c = vec3(0.88, 0.87, 0.82);       // white painted timber
 		rough = 0.55;
