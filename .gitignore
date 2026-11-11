@@ -12,3 +12,6 @@ assets/downloads/
 
 # Old files waiting to be deleted
 _to_delete/
+
+# Screenshots from tools/screenshots.sh
+screenshots/

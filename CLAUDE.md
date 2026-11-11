@@ -43,6 +43,12 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - **Pollution** comes from industry, coal, gas, landfill and the harbour. Parks reduce it. It lowers land value and home growth, and has its own Pollution map view.
 - **Rendering.** Box buildings use a MultiMesh with `INSTANCE_CUSTOM = (w, h, d, style)`. Models are stretched to each planned block and grouped into MultiMeshes per (model, 400 m chunk). `model.gdshader` picks its look per part by the .glb material name: stone, roof, glass, frame, door, metal, pot, fascia, render, awning, lead, cladding, sheet, accent. Modern blocks and skyscrapers are stacked storey by storey.
 
+## Screenshots
+- `tools/screenshots.sh [outdir] [--only=04_cbd,09_night]` opens a 1600x1000 Godot window, builds the same demo town every time and saves PNGs to `outdir` (default `screenshots/`, git-ignored), then quits. Takes about 1.5–3 minutes (about 35 s of that is building the town). The Godot output goes to `outdir/godot.log`; the script fails if it contains errors or warnings.
+- Shots: 01_overview, 02_suburb, 03_tenements_shops, 04_cbd, 05_industry_power, 06_civic, 07_coast, 08_countryside, 09_night, 10_street_level (HUD hidden), then 11_hud_build_menu, 12_hud_overlay, 13_hud_plain (HUD shown). `--only` takes names or prefixes (`--only=04,09`).
+- Code: `scripts/dev_shots.gd`, started by `game3d.gd` only when Godot gets `-- --shots=<dir>`. The town is built with the real build tools (`_choose_item` + `_plan_tiles` + `_finish_drag`, as a mouse drag) and fast-forwarded with `sim.tick()`, from a fixed seed (the log prints a town checksum). Afterwards a few plots are pushed to any building stage the run didn't reach, so every model appears ("showcase" lines in the log). Camera framings are in `_shot_list()`.
+- It needs a real window (`--headless` draws nothing); it forces each frame to draw, so it works even behind other windows.
+
 ## Building models and menu pictures
 - Built headless with Blender's Python module (pip `bpy`; 5.1.2 was used with Python 3.13):
   `python tools/make_buildings.py assets/models [preview_dir]`. Set `ONLY=name1,name2` to rebuild just some models; the previews are worth looking at.

@@ -2457,7 +2457,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			var base: Vector3 = centre
 			var hub_h := 62.0
 			_cylinder(chimney_list, base, 1.5, hub_h, TURBINE_WHITE)
-			var into_wind := Vector3(-0.71, 0.0, 0.71)
+			var into_wind := Vector3(-1.0, 0.0, 1.0).normalized()   # (a rotation axis must be exactly unit length)
 			var side := Vector3.UP.cross(into_wind).normalized()
 			var hub: Vector3 = base + Vector3.UP * hub_h
 			_box_item(_prop_items, hub - into_wind * 3.0 + Vector3.DOWN * 1.5, side, into_wind,

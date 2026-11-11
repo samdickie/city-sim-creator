@@ -11,6 +11,7 @@ const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const Advisors = preload("res://scripts/advisors.gd")
+const DevShots = preload("res://scripts/dev_shots.gd")   # dev tool: tools/screenshots.sh
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
@@ -181,6 +182,10 @@ func _ready() -> void:
 	_refresh_hud()
 	if map_credits != "":
 		hud.flash(map_credits)
+	# Dev tool only: `-- --shots=<dir>` builds a demo town and saves screenshots.
+	var user_args := OS.get_cmdline_user_args()
+	if DevShots.wanted(user_args):
+		add_child(DevShots.new(self, user_args))
 
 
 # --------------------------------------------------------------- map loading
