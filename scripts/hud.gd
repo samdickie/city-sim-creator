@@ -1,13 +1,14 @@
 extends CanvasLayer
 ## The on-screen interface, built in code: small frosted-glass pieces that hug
 ## the edges of the window, so the town in the middle stays in view.
+##   Centre:        the New city dialog (pick a difficulty), when a game starts
 ##   Top left:      the game menu (New city, Save, Load, How to play, Day and
 ##                  night), city name, date and clock, speed (pause, play, fast)
 ##   Top centre:    advisors' ticker: the most urgent tip and a count; click the
 ##                  count for the full list
 ##   Top right:     the status strip: money (and last month), people, happiness,
 ##                  four small meters (power, water, services, rubbish) and demand
-##                  (homes, shops, industry). Click it for the City panel: budget,
+##                  (homes, shops, industry). Click it for the City panel: budget, loans,
 ##                  tax rate, happiness, services, housing and growth in full
 ##   Bottom left:   the Build dock: a rail of categories (Bulldoze at its foot) and
 ##                  a flyout of items with pictures, names and prices (M hides it)
@@ -20,7 +21,11 @@ signal tool_chosen(tool_id: int)            # (the Bulldoze button)
 signal build_item_chosen(id: String)       # an item picked in the Build menu
 signal speed_chosen(speed: int)
 signal tax_changed(step: float)
-signal new_city_pressed
+signal new_city_pressed                      # New city in the game menu (the game then opens the dialog)
+signal new_city_chosen(level: int)          # Start in the New city dialog (Settings.DIFFICULTIES index)
+signal new_city_cancelled
+signal borrow_pressed(amount: int)
+signal repay_pressed(amount: int)           # -1 = everything owed
 signal save_pressed
 signal load_pressed
 signal day_cycle_toggled(on: bool)
@@ -97,9 +102,17 @@ var _meter_value: Array[float] = [0.0, 0.0, 0.0, 0.0]
 var _meter_colour: Array[Color] = [TEXT_DIM, TEXT_DIM, TEXT_DIM, TEXT_DIM]
 var demand_box: Control
 var budget_label: Label                    # (City panel from here down)
+var _budget_caption: Label
 var _income_label: Label
 var _upkeep_label: Label
+var _loan_label: Label                     # loan payments last month
 var _net_full_label: Label
+var _debt_label: Label                     # Loans: what's owed...
+var _loan_pay_label: Label                 # ...next month's payment
+var _loan_note: Label
+var borrow_buttons: Array[Button] = []     # one per Settings.BORROW_STEPS
+var repay_button: Button
+var repay_all_button: Button
 var tax_label: Label
 var happiness_label: Label
 var _happy_bar: Control
@@ -166,7 +179,18 @@ var _overlay_kind := 0                     # the map view that's on
 var help_panel: PanelContainer
 var _help_scroll: ScrollContainer
 var _help_columns: HBoxContainer
-var confirm_new: ConfirmationDialog
+
+# The New city dialog: pick a difficulty (centre, over a dimmed town).
+var new_city_panel: PanelContainer
+var _new_dim: ColorRect
+var new_city_cards: Array[PanelContainer] = []
+var _new_radios: Array[TextureRect] = []
+var _new_level := Settings.DEFAULT_DIFFICULTY   # the card picked
+var _new_hover := -1                           # the card under the mouse
+var _new_warning: HBoxContainer
+var new_city_start: Button
+var new_city_cancel: Button
+var _card_styles: Array[StyleBoxFlat] = []    # normal, hover, picked
 
 
 func build(categories: Array, demand_colours: Dictionary, sim) -> void:
@@ -187,12 +211,7 @@ func build(categories: Array, demand_colours: Dictionary, sim) -> void:
 	_build_overlays()
 	_build_help()
 	_build_game_menu()
-
-	confirm_new = ConfirmationDialog.new()
-	confirm_new.title = "New city"
-	confirm_new.dialog_text = "Clear everything you've built and start again?"
-	confirm_new.confirmed.connect(func(): new_city_pressed.emit())
-	_root.add_child(confirm_new)
+	_build_new_city()
 
 
 func _process(delta: float) -> void:
@@ -208,6 +227,14 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# While the New city dialog is open it takes every key: 1-3 or the arrows pick,
+	# Enter starts, Esc cancels. Nothing reaches the game behind it.
+	if is_modal() and event is InputEventKey:
+		get_viewport().set_input_as_handled()
+		var k := event as InputEventKey
+		if k.pressed and not k.echo:
+			_new_city_key(k.keycode)
+		return
 	# A click anywhere outside the game menu closes it (the click still goes through).
 	var mb := event as InputEventMouseButton
 	if mb == null or not mb.pressed or _menu_panel == null or not _menu_panel.visible:
@@ -252,6 +279,10 @@ func _layout() -> void:
 		var h := minf(want_h, maxf(room_h, 120.0))
 		if absf(_city_scroll.custom_minimum_size.y - h) > 0.5:
 			_city_scroll.custom_minimum_size = Vector2(312.0, h)
+		var pad := _city_scroll.get_child(0) as MarginContainer
+		var gap := 10 if want_h > h + 0.5 else 0
+		if pad.get_theme_constant("margin_right") != gap:
+			pad.add_theme_constant_override("margin_right", gap)
 		city_panel.size = Vector2(city_panel.custom_minimum_size.x, 0.0)
 		city_panel.position = Vector2(view.x - EDGE - city_panel.size.x, EDGE + ISLAND_H + GAP)
 	# Bottom centre: the info card fills the space between the Build dock and the
@@ -268,6 +299,10 @@ func _layout() -> void:
 		_toast.size = Vector2.ZERO
 		_toast.position = Vector2(_info_panel.position.x + (card_w - _toast.size.x) * 0.5,
 			_info_panel.position.y - GAP - _toast.size.y)
+	# The New city dialog: centred.
+	if new_city_panel.visible:
+		new_city_panel.size = Vector2.ZERO
+		new_city_panel.position = ((view - new_city_panel.size) * 0.5).floor()
 	# Help: centred, and never taller than the window.
 	if help_panel.visible:
 		var want := _help_columns.get_combined_minimum_size()
@@ -315,7 +350,7 @@ func _build_game_menu() -> void:
 	_menu_panel.theme_type_variation = "Card"
 	_menu_panel.visible = false
 	var box := _vbox(_menu_panel, 2)
-	for item: Array in [["new", "New city", "Clear the map and start again"],
+	for item: Array in [["new", "New city", "Clear the map and start again, picking how much money you start with"],
 			["save", "Save", "Save the city (Ctrl or Cmd + S)"],
 			["load", "Load", "Load the saved city (Ctrl or Cmd + L)"],
 			["help", "How to play", "Controls and how the town works (H)"]]:
@@ -339,7 +374,7 @@ func _menu_chosen(id: String) -> void:
 	_close_menu()
 	match id:
 		"new":
-			confirm_new.popup_centered()
+			new_city_pressed.emit()
 		"save":
 			save_pressed.emit()
 		"load":
@@ -458,12 +493,20 @@ func _build_city_panel() -> void:
 	_city_scroll = ScrollContainer.new()
 	_city_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	outer.add_child(_city_scroll)
-	var box := _vbox(_city_scroll, 6)
+	# (A gap on the right when it scrolls, so the figures don't touch the scroll bar.)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_city_scroll.add_child(pad)
+	var box := _vbox(pad, 6)
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
-	box.add_child(_caption("Budget"))
+	_budget_caption = _caption("Budget")
+	_budget_caption.mouse_filter = Control.MOUSE_FILTER_PASS
+	box.add_child(_budget_caption)
 	_income_label = _pair(box, "Taxes last month")
 	_upkeep_label = _pair(box, "Upkeep last month")
+	_loan_label = _pair(box, "Loan payments last month")
 	_net_full_label = _pair(box, "Balance last month")
 	budget_label = _label("", 12, TEXT_FAINT)       # (the old one-line summary, kept but not shown)
 	budget_label.visible = false
@@ -475,6 +518,26 @@ func _build_city_panel() -> void:
 	tax_row.add_child(tax_label)
 	tax_row.add_child(_small_button("–", "Lower taxes by 1%", func(): tax_changed.emit(-0.01)))
 	tax_row.add_child(_small_button("+", "Raise taxes by 1%", func(): tax_changed.emit(0.01)))
+
+	# Loans: borrow when money is short; paid back a little each month.
+	box.add_child(_divider())
+	box.add_child(_caption("Loans"))
+	_debt_label = _pair(box, "Owed")
+	_loan_pay_label = _pair(box, "Monthly payment")
+	_loan_note = _label("", 12, TEXT_FAINT)
+	_loan_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_loan_note)
+	var borrow_row := _hbox(box, 6)
+	for step: int in Settings.BORROW_STEPS:
+		var b := _wide_button("Borrow %s" % money_text(step), func(): borrow_pressed.emit(step))
+		borrow_row.add_child(b)
+		borrow_buttons.append(b)
+	var repay_row := _hbox(box, 6)
+	repay_button = _wide_button("Repay %s" % money_text(Settings.REPAY_STEP),
+		func(): repay_pressed.emit(Settings.REPAY_STEP))
+	repay_row.add_child(repay_button)
+	repay_all_button = _wide_button("Repay all", func(): repay_pressed.emit(-1))
+	repay_row.add_child(repay_all_button)
 
 	box.add_child(_divider())
 	box.add_child(_caption("Happiness"))
@@ -523,6 +586,16 @@ func _service_row(box: VBoxContainer, icon_id: String) -> Label:
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text)
 	return text
+
+
+func _wide_button(text: String, action: Callable) -> Button:
+	# A button that shares its row equally with the others.
+	var b := _button(text, false)
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.custom_minimum_size = Vector2(0, 32)
+	b.add_theme_font_size_override("font_size", 13)
+	b.pressed.connect(action)
+	return b
 
 
 func _small_button(text: String, tip: String, action: Callable) -> Button:
@@ -1031,6 +1104,9 @@ func _build_help() -> void:
 			"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings: pick one with Tab. Anything bigger than a first-level plot needs water (pumps and towers; it travels like power). Towns over 400 people need rubbish collected. Some buildings unlock as the town grows.",
 			"Services (0): police, fire stations, schools and hospitals cover the area around them. They need a road and power. Bigger towns grow slowly without them; fires break out where there's no fire station. Funding (- / + under the Services list) changes how far they reach.",
 			"Taxes: people accept higher taxes when they get good services for them. High taxes with poor services stop growth, and eventually people leave (worst-served areas first). Change them in the City panel: click the strip, top right.",
+			"Money: a new city starts Easy (%s), Normal (%s) or Hard (%s); harder levels also cost more to run and pay more interest. Short of money? Borrow in the City panel. Loans are paid back a little each month over about %d years, with interest; repay early to save interest. With no money left you can't build until taxes bring some in." % [
+				money_text(_level_money(0)), money_text(_level_money(1)), money_text(_level_money(2)),
+				roundi(Settings.LOAN_MONTHS / 12.0)],
 			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts and pollution, each with a colour key.",
@@ -1047,6 +1123,216 @@ func _build_help() -> void:
 	box.add_child(ok)
 
 
+# ------------------------------------------------------------- New city dialog
+
+func _build_new_city() -> void:
+	# Three cards, one per difficulty (Settings.DIFFICULTIES): its name, a line
+	# about it, the starting money, upkeep and loans. Over a dimmed town.
+	_new_dim = ColorRect.new()
+	_new_dim.color = Color(0.02, 0.03, 0.05, 0.45)
+	_new_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_new_dim.mouse_filter = Control.MOUSE_FILTER_STOP     # (the map behind can't be clicked)
+	_new_dim.visible = false
+	_root.add_child(_new_dim)
+
+	var normal := _soft_box(Color(1, 1, 1, 0.05), 12)
+	normal.border_color = Color(1, 1, 1, 0.12)
+	normal.set_border_width_all(1)
+	normal.set_content_margin_all(14)
+	var hover := normal.duplicate() as StyleBoxFlat
+	hover.bg_color = Color(1, 1, 1, 0.10)
+	hover.border_color = Color(1, 1, 1, 0.22)
+	var picked := normal.duplicate() as StyleBoxFlat
+	picked.bg_color = Color(ACCENT.r, ACCENT.g, ACCENT.b, 0.24)
+	picked.border_color = ACCENT
+	picked.set_border_width_all(2)
+	_card_styles = [normal, hover, picked]
+
+	new_city_panel = _panel(_root, 18.0)
+	new_city_panel.visible = false
+	var box := _vbox(new_city_panel, 14)
+	var head := _vbox(box, 4)
+	head.add_child(_label("New city", 20, TEXT, true))
+	var sub := _label("Pick how much money you start with. Only money changes: the town grows the same way at every level.",
+		13, TEXT_DIM)
+	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	sub.custom_minimum_size = Vector2(560, 0)
+	head.add_child(sub)
+
+	var cards := _hbox(box, 10)
+	for level: int in Settings.DIFFICULTIES.size():
+		cards.add_child(_difficulty_card(level))
+
+	var foot := _hbox(box, 8)
+	var left := _vbox(foot, 2)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.alignment = BoxContainer.ALIGNMENT_CENTER
+	_new_warning = _hbox(left, 6)
+	_new_warning.add_child(_icon_rect("alert", 14, WARN))
+	_new_warning.add_child(_label("This clears everything you've built.", 12, WARN))
+	left.add_child(_label("1, 2, 3 or arrow keys to pick  ·  Enter to start  ·  Esc to cancel", 12, TEXT_FAINT))
+	new_city_cancel = _button("Cancel", false)
+	new_city_cancel.custom_minimum_size = Vector2(96, 36)
+	new_city_cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	new_city_cancel.pressed.connect(func(): _close_new_city(false))
+	foot.add_child(new_city_cancel)
+	new_city_start = _button("Start", false)
+	new_city_start.theme_type_variation = "Primary"
+	new_city_start.custom_minimum_size = Vector2(112, 36)
+	new_city_start.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	new_city_start.pressed.connect(func(): _close_new_city(true))
+	foot.add_child(new_city_start)
+
+
+func _difficulty_card(level: int) -> PanelContainer:
+	var info: Dictionary = Settings.DIFFICULTIES[level]
+	var card := PanelContainer.new()
+	card.custom_minimum_size = Vector2(196, 0)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	card.gui_input.connect(func(e: InputEvent):
+		var mb := e as InputEventMouseButton
+		if mb and mb.pressed and mb.button_index == MOUSE_BUTTON_LEFT:
+			if mb.double_click:
+				_pick_level(level)
+				_close_new_city(true)
+			else:
+				_pick_level(level))
+	card.mouse_entered.connect(func():
+		_new_hover = level
+		_card_looks())
+	card.mouse_exited.connect(func():
+		if _new_hover == level:
+			_new_hover = -1
+		_card_looks())
+	new_city_cards.append(card)
+	var box := _vbox(card, 2)
+
+	var top := _hbox(box, 8)
+	var title := _label(String(info["name"]), 17, TEXT, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(title)
+	var radio := TextureRect.new()
+	radio.custom_minimum_size = Vector2(18, 18)
+	radio.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	radio.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	radio.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	radio.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_child(radio)
+	_new_radios.append(radio)
+	var about := _label(String(info["about"]), 12, TEXT_DIM)
+	about.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	about.custom_minimum_size = Vector2(166, 34)
+	box.add_child(about)
+
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0, 8)
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(gap)
+	box.add_child(_label(money_text(_level_money(level)), 24, TEXT, true))
+	box.add_child(_label("to start with", 12, TEXT_FAINT))
+	box.add_child(_divider())
+	var upkeep: float = info["upkeep"]
+	var rate: float = info["loan_rate"]
+	var limit: int = info["loan_limit"]
+	for pair: Array in [["Upkeep", upkeep_words(upkeep)], ["Loan interest", "%d%% a year" % roundi(rate * 100.0)],
+			["Borrow up to", money_text(limit)]]:
+		var row := _hbox(box, 8)
+		var k := _label(pair[0], 12, TEXT_DIM)
+		k.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(k)
+		row.add_child(_label(pair[1], 13, TEXT, true))
+	return card
+
+
+func _level_money(level: int) -> int:
+	var info: Dictionary = Settings.DIFFICULTIES[level]
+	var amount: int = info["money"]
+	return amount
+
+
+func open_new_city(first: bool) -> void:
+	# first: the game has just opened (Cancel then just starts on Normal), so
+	# there's nothing to clear. The game pauses itself while this is open.
+	_new_level = Settings.DEFAULT_DIFFICULTY
+	_new_hover = -1
+	_new_warning.visible = not first
+	new_city_cancel.tooltip_text = "Start on Normal" if first else "Keep the city you have"
+	_close_menu()
+	help_panel.visible = false
+	_card_looks()
+	_open(_new_dim, true)
+	_open(new_city_panel, true)
+
+
+func is_modal() -> bool:
+	return new_city_panel != null and new_city_panel.visible
+
+
+func new_city_level() -> int:
+	return _new_level
+
+
+func _pick_level(level: int) -> void:
+	_new_level = clampi(level, 0, Settings.DIFFICULTIES.size() - 1)
+	_card_looks()
+
+
+func _card_looks() -> void:
+	for n: int in new_city_cards.size():
+		var style := 2 if n == _new_level else (1 if n == _new_hover else 0)
+		new_city_cards[n].add_theme_stylebox_override("panel", _card_styles[style])
+		_new_radios[n].texture = _radio_icon(n == _new_level)
+	new_city_start.text = "Start on %s" % String(Settings.DIFFICULTIES[_new_level]["name"])
+
+
+func _new_city_key(code: Key) -> void:
+	match code:
+		KEY_1, KEY_KP_1:
+			_pick_level(0)
+		KEY_2, KEY_KP_2:
+			_pick_level(1)
+		KEY_3, KEY_KP_3:
+			_pick_level(2)
+		KEY_LEFT, KEY_UP:
+			_pick_level(_new_level - 1)
+		KEY_RIGHT, KEY_DOWN:
+			_pick_level(_new_level + 1)
+		KEY_TAB:
+			_pick_level((_new_level + 1) % Settings.DIFFICULTIES.size())
+		KEY_ENTER, KEY_KP_ENTER:
+			_close_new_city(true)
+		KEY_ESCAPE:
+			_close_new_city(false)
+
+
+func _close_new_city(start: bool) -> void:
+	if not is_modal():
+		return
+	for c: Control in [_new_dim, new_city_panel]:
+		if _tweens.has(c):
+			(_tweens[c] as Tween).kill()
+			_tweens.erase(c)
+		c.visible = false
+		c.modulate.a = 1.0
+	if start:
+		new_city_chosen.emit(_new_level)
+	else:
+		new_city_cancelled.emit()
+
+
+func _radio_icon(on: bool) -> Texture2D:
+	var key := "radio:%s" % on
+	if not _icon_cache.has(key):
+		var svg := "<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18'>"
+		if on:
+			svg += "<circle cx='9' cy='9' r='8' fill='#%s'/><circle cx='9' cy='9' r='3.5' fill='#ffffff'/>" % ACCENT.to_html(false)
+		else:
+			svg += "<circle cx='9' cy='9' r='7.25' fill='none' stroke='#ffffff' stroke-opacity='0.4' stroke-width='1.5'/>"
+		_icon_cache[key] = _svg(svg + "</svg>", 2.0)
+	return _icon_cache[key]
+
+
 # ----------------------------------------------------------------- updates
 
 func set_speed(speed: int) -> void:
@@ -1061,18 +1347,25 @@ func set_clock(text: String) -> void:
 
 func show_city(sim, money_str: String, net_text: String, income_text: String, upkeep_text: String) -> void:
 	date_label.text = sim.date_text()
-	var low: bool = sim.money * 10 < Settings.START_MONEY
+	var low: bool = sim.money < Settings.LOW_MONEY
 	money_label.text = money_str
 	money_label.add_theme_color_override("font_color", BAD if low else TEXT)
-	var net: int = sim.last_income - sim.last_upkeep
+	var net: int = sim.last_balance()      # taxes - upkeep - loan payments
 	var net_colour := GOOD if net > 0 else (BAD if net < 0 else TEXT_DIM)
 	_net_label.text = "%s last month" % net_text
 	_net_label.add_theme_color_override("font_color", net_colour)
 	budget_label.text = "%s last month   ·   taxes %s, upkeep %s" % [net_text, income_text, upkeep_text]
+	var level: String = sim.difficulty_name()
+	_budget_caption.text = "BUDGET  ·  %s" % level.to_upper()
+	_budget_caption.tooltip_text = "%s: chosen when the city was started. Running costs %s, loans at %d%% a year." % [
+		level, upkeep_words(sim.upkeep_scale()), roundi(sim.loan_rate() * 100.0)]
 	_income_label.text = income_text
 	_upkeep_label.text = upkeep_text
+	var loan_paid: int = sim.last_loan
+	_loan_label.text = money_text(loan_paid)
 	_net_full_label.text = net_text
 	_net_full_label.add_theme_color_override("font_color", net_colour)
+	_show_loans(sim)
 
 	var pop: int = sim.population
 	var jobs: int = sim.jobs()
@@ -1183,6 +1476,59 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		parts.append("%s: %s" % [label, "wanted" if v > 0.1 else ("too many" if v < -0.1 else "steady")])
 	demand_box.tooltip_text = "Demand (bars up: wanted; down: too many)\n" + "\n".join(parts)
 	demand_box.queue_redraw()
+
+
+func _show_loans(sim) -> void:
+	# The Loans block: what's owed, next month's payment, and the buttons (each
+	# greyed out, with the reason on hover, when it can't be used just now).
+	var owed: int = sim.debt
+	var rate := roundi(sim.loan_rate() * 100.0)
+	var limit: int = sim.loan_limit()
+	_debt_label.text = money_text(owed) if owed > 0 else "Nothing"
+	_debt_label.add_theme_color_override("font_color", TEXT if owed > 0 else TEXT_DIM)
+	if owed > 0:
+		var interest: int = sim.loan_interest()
+		_loan_pay_label.text = money_text(sim.loan_payment())
+		_loan_pay_label.tooltip_text = "%s interest and %s paid back" % [money_text(interest),
+			money_text(sim.loan_repayment())]
+	else:
+		_loan_pay_label.text = "None"
+		_loan_pay_label.tooltip_text = ""
+	_loan_pay_label.add_theme_color_override("font_color", TEXT if owed > 0 else TEXT_DIM)
+	_loan_pay_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	var limit_hit := false
+	for n: int in borrow_buttons.size():
+		var step: int = Settings.BORROW_STEPS[n]
+		var why: String = sim.borrow_problem(step)
+		var b := borrow_buttons[n]
+		b.disabled = why != ""
+		b.tooltip_text = "Can't borrow %s: %s" % [money_text(step), why] if why != "" \
+			else "Borrow %s now. Paid back over about %d years, with %d%% interest a year." % [
+				money_text(step), roundi(Settings.LOAN_MONTHS / 12.0), rate]
+		limit_hit = limit_hit or why != ""
+	if limit_hit:
+		var room: int = limit - owed
+		_loan_note.text = "%d%% a year. You can owe at most %s on %s%s." % [rate, money_text(limit),
+			sim.difficulty_name(), "" if room <= 0 else ": %s more can be borrowed" % money_text(room)]
+	else:
+		_loan_note.text = "%d%% a year, paid back a little each month over about %d years. You can owe up to %s." % [
+			rate, roundi(Settings.LOAN_MONTHS / 12.0), money_text(limit)]
+	_loan_note.add_theme_color_override("font_color", WARN if limit_hit else TEXT_FAINT)
+	for pair: Array in [[repay_button, Settings.REPAY_STEP], [repay_all_button, -1]]:
+		var b: Button = pair[0]
+		var amount: int = pair[1]
+		var why: String = sim.repay_problem(amount)
+		b.disabled = why != ""
+		var what := "everything owed" if amount < 0 else money_text(amount)
+		b.tooltip_text = "Can't repay %s: %s" % [what, why] if why != "" \
+			else "Pay back %s now, from the town's money (saves interest)" % what
+
+
+static func upkeep_words(scale: float) -> String:
+	# 0.8 -> "20% less", 1.0 -> "as usual", 1.25 -> "25% more".
+	if is_equal_approx(scale, 1.0):
+		return "as usual"
+	return "%d%% %s" % [roundi(absf(scale - 1.0) * 100.0), "less" if scale < 1.0 else "more"]
 
 
 func _set_row_colour(label: Label, colour: Color) -> void:
@@ -1574,6 +1920,10 @@ func _make_theme() -> Theme:
 	pressed.border_color = Color(1, 1, 1, 0.28)
 	pressed.set_border_width_all(1)
 	_button_styles(theme, "Button", normal, hover, pressed, pressed)
+	var disabled := normal.duplicate() as StyleBoxFlat
+	disabled.bg_color = Color(1, 1, 1, 0.035)
+	theme.set_stylebox("disabled", "Button", disabled)
+	theme.set_color("font_disabled_color", "Button", Color(1, 1, 1, 0.32))
 	theme.set_color("font_color", "Button", TEXT)
 	theme.set_color("font_hover_color", "Button", Color.WHITE)
 	theme.set_color("font_pressed_color", "Button", Color.WHITE)
@@ -1583,6 +1933,18 @@ func _make_theme() -> Theme:
 	theme.set_color("icon_pressed_color", "Button", Color.WHITE)
 	theme.set_color("icon_hover_pressed_color", "Button", Color.WHITE)
 	theme.set_color("font_color", "Label", TEXT)
+
+	# The main action of a dialog (Start): filled in the accent colour.
+	theme.set_type_variation("Primary", "Button")
+	var primary := normal.duplicate() as StyleBoxFlat
+	primary.bg_color = ACCENT
+	var primary_hover := normal.duplicate() as StyleBoxFlat
+	primary_hover.bg_color = ACCENT.lightened(0.12)
+	var primary_down := normal.duplicate() as StyleBoxFlat
+	primary_down.bg_color = ACCENT.darkened(0.12)
+	_button_styles(theme, "Primary", primary, primary_hover, primary_down, primary_down)
+	theme.set_font("font", "Primary", bold)
+	theme.set_color("font_color", "Primary", Color.WHITE)
 
 	# Square icon buttons (the menu), and the same without a background until hovered.
 	var icon_normal := _pad(_soft_box(Color(1, 1, 1, 0.07), 9), 8)

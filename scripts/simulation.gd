@@ -51,6 +51,9 @@ var abandoned := PackedByteArray()    # zones: 1 = the building stands empty (no
 var money := 0
 var month := 0                        # months since the city was founded
 var tax_rate := Settings.DEFAULT_TAX_RATE
+var difficulty := Settings.DEFAULT_DIFFICULTY   # index into Settings.DIFFICULTIES; set when the city starts
+var debt := 0                         # what the town owes on loans (one running balance)
+var debt_peak := 0                    # the most owed since the balance was last clear (sets the monthly slice)
 
 # --- Worked out from the city ---
 var population := 0
@@ -80,6 +83,8 @@ var power_used := 0                   # zone levels currently built
 var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 var last_income := 0
 var last_upkeep := 0
+var last_loan := 0                    # loan payment last month (interest and repayment together)
+var last_interest := 0                # ...of which interest
 var grew := PackedInt32Array()        # plots that grew last month
 var shrank := PackedInt32Array()      # plots that shrank last month (and any abandoned)
 var abandoned_now := PackedInt32Array() # plots abandoned last month (also in shrank)
@@ -140,18 +145,24 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	reset()
 
 
-func reset() -> void:
+func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
+	# A blank map at this difficulty (see Settings.DIFFICULTIES).
 	tiles.fill(Tile.EMPTY)
 	levels.fill(0)
 	density.fill(1)
 	district.fill(0)
 	decline.fill(0)
 	abandoned.fill(0)
-	money = Settings.START_MONEY
+	difficulty = clampi(level, 0, Settings.DIFFICULTIES.size() - 1)
+	money = start_money(difficulty)
+	debt = 0
+	debt_peak = 0
 	month = 0
 	tax_rate = Settings.DEFAULT_TAX_RATE
 	last_income = 0
 	last_upkeep = 0
+	last_loan = 0
+	last_interest = 0
 	grew.clear()
 	shrank.clear()
 	abandoned_now.clear()
@@ -615,9 +626,135 @@ func _collect_taxes() -> void:
 		if is_zone(tiles[i]) and levels[i] > 0:
 			taxable += units(i) * (0.6 + 0.8 * land_value[i])
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
-	last_upkeep = roundi(road_tiles * Settings.ROAD_UPKEEP + park_tiles * Settings.PARK_UPKEEP
-		+ service_upkeep() + building_upkeep())
+	# Every running cost is scaled by the difficulty (x1 on Normal).
+	last_upkeep = roundi((road_tiles * Settings.ROAD_UPKEEP + park_tiles * Settings.PARK_UPKEEP
+		+ service_upkeep() + building_upkeep()) * upkeep_scale())
 	money += last_income - last_upkeep
+	_pay_loan()
+
+
+# ------------------------------------------------------- difficulty and loans
+
+static func level_info(level: int) -> Dictionary:
+	var info: Dictionary = Settings.DIFFICULTIES[clampi(level, 0, Settings.DIFFICULTIES.size() - 1)]
+	return info
+
+
+static func start_money(level: int) -> int:
+	var amount: int = level_info(level)["money"]
+	return amount
+
+
+func difficulty_name() -> String:
+	var n: String = level_info(difficulty)["name"]
+	return n
+
+
+func upkeep_scale() -> float:
+	# Multiplies every monthly running cost: 0.8 on Easy, 1 on Normal, 1.25 on Hard.
+	var scale: float = level_info(difficulty)["upkeep"]
+	return scale
+
+
+func loan_rate() -> float:
+	# Yearly interest on loans, e.g. 0.06 = 6%.
+	var rate: float = level_info(difficulty)["loan_rate"]
+	return rate
+
+
+func loan_limit() -> int:
+	# The most the town can owe at once.
+	var limit: int = level_info(difficulty)["loan_limit"]
+	return limit
+
+
+func last_balance() -> int:
+	# Last month's money in minus money out: taxes - upkeep - loan payments.
+	return last_income - last_upkeep - last_loan
+
+
+func loan_interest() -> int:
+	# Interest charged next month on what's owed now.
+	return roundi(debt * loan_rate() / 12.0)
+
+
+func loan_repayment() -> int:
+	# The slice of the loan paid back next month (on top of the interest).
+	if debt <= 0:
+		return 0
+	var slice := maxi(ceili(debt_peak / float(Settings.LOAN_MONTHS)), Settings.LOAN_MIN_PAYMENT)
+	return mini(slice, debt)
+
+
+func loan_payment() -> int:
+	# Next month's loan payment: interest plus repayment.
+	return loan_interest() + loan_repayment()
+
+
+func borrow_problem(amount: int) -> String:
+	# "" if the town can borrow this much now; otherwise why not, in a few words.
+	if amount <= 0:
+		return "nothing to borrow"
+	if debt + amount > loan_limit():
+		var room := loan_limit() - debt
+		if room <= 0:
+			return "you already owe the most allowed (%s)" % _pounds(loan_limit())
+		return "only %s more can be borrowed" % _pounds(room)
+	return ""
+
+
+func borrow(amount: int) -> bool:
+	if borrow_problem(amount) != "":
+		return false
+	money += amount
+	debt += amount
+	debt_peak = maxi(debt_peak, debt)
+	return true
+
+
+func repay_problem(amount: int) -> String:
+	# "" if the town can pay back this much now (amount < 0: everything owed).
+	if debt <= 0:
+		return "nothing owed"
+	var paying := debt if amount < 0 else mini(amount, debt)
+	if money < paying:
+		return "not enough money (that takes %s)" % _pounds(paying)
+	return ""
+
+
+func repay(amount: int) -> int:
+	# Pay back early, from the town's money (amount < 0: everything owed).
+	# Returns how much was paid.
+	if repay_problem(amount) != "":
+		return 0
+	var paying := debt if amount < 0 else mini(amount, debt)
+	money -= paying
+	debt -= paying
+	if debt == 0:
+		debt_peak = 0
+	return paying
+
+
+func _pay_loan() -> void:
+	# Each month: the interest plus a slice of the loan. It's paid even if the
+	# money has run out (the money just goes further below zero).
+	last_interest = loan_interest()
+	var slice := loan_repayment()
+	last_loan = last_interest + slice
+	debt -= slice
+	money -= last_loan
+	if debt <= 0:
+		debt = 0
+		debt_peak = 0
+
+
+static func _pounds(amount: int) -> String:
+	var digits := str(absi(amount))
+	var out := ""
+	while digits.length() > 3:
+		out = "," + digits.substr(digits.length() - 3) + out
+		digits = digits.substr(0, digits.length() - 3)
+	return ("-£" if amount < 0 else "£") + digits + out
 
 
 # ------------------------------------------------------------- city numbers
@@ -1712,6 +1849,9 @@ func _reach(n: int, d: int, queue: Array[int]) -> void:
 func to_save() -> Dictionary:
 	return {
 		"money": money,
+		"difficulty": difficulty,
+		"debt": debt,
+		"debt_peak": debt_peak,
 		"month": month,
 		"tax_rate": tax_rate,
 		"tiles": Array(tiles),
@@ -1767,7 +1907,14 @@ func from_save(data: Dictionary) -> void:
 		if is_zone(tiles[i]) and levels[i] > 0 and int(saved_abandoned[i]) == 1:
 			abandoned[i] = 1
 			decline[i] = 0
-	money = int(data.get("money", Settings.START_MONEY))
+	# Saves from before difficulty and loans load as Normal (running costs x1, as
+	# they always were) with nothing owed; their money is left exactly as saved.
+	difficulty = clampi(int(data.get("difficulty", Settings.DEFAULT_DIFFICULTY)), 0, Settings.DIFFICULTIES.size() - 1)
+	money = int(data.get("money", start_money(difficulty)))
+	debt = maxi(int(data.get("debt", 0)), 0)
+	debt_peak = maxi(int(data.get("debt_peak", debt)), debt) if debt > 0 else 0
+	last_loan = 0
+	last_interest = 0
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
 	var saved_funding: Array = data.get("funding", [])

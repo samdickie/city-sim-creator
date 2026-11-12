@@ -512,6 +512,14 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_help},
 		{"name": "18_hud_query", "at": Vector2(52, 50), "yaw": -35.0, "pitch": 32.0, "dist": 480.0,
 			"hud": true, "prep": _prep_query, "hover": true},
+		# Money: the New city dialog (from the menu; and on a small window, as when
+		# the game opens) and the City panel's Loans with a loan taken out.
+		{"name": "34_hud_new_city", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_new_city},
+		{"name": "35_hud_new_city_small", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_new_city_small, "size": SMALL_SIZE},
+		{"name": "36_hud_loans", "at": Vector2(52, 60), "yaw": -40.0, "pitch": 40.0, "dist": 1500.0,
+			"hud": true, "prep": _prep_loans},
 		# The natural surroundings: a beach close up, the hills, and the edge of the map.
 		{"name": "19_beach", "at": Vector2(44, 108), "yaw": -70.0, "pitch": 34.0, "dist": 320.0},
 		{"name": "20_hills", "at": Vector2(112, 40), "yaw": -40.0, "pitch": 30.0, "dist": 1500.0},
@@ -578,6 +586,8 @@ func _hud_reset() -> void:
 	hud.get("_menu_button").set_pressed_no_signal(false)
 	hud.set_build_open(true)
 	hud.message_label.text = ""
+	hud.new_city_panel.visible = false
+	hud.get("_new_dim").visible = false
 
 
 func _prep_build_menu() -> void:
@@ -633,6 +643,40 @@ func _prep_help() -> void:
 	hud.set_build_open(false)
 	game.call("_set_overlay", WorldView.Overlay.NONE)
 	hud.help_panel.visible = true
+
+
+func _prep_new_city() -> void:
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_ask_new_city", false)      # (as from the game menu: warns that it clears the city)
+
+
+func _prep_new_city_small() -> void:
+	_hud_reset()
+	get_window().size = SMALL_SIZE
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_ask_new_city", true)       # (as when the game opens)
+	hud.call("_pick_level", 0)
+
+
+func _prep_loans() -> void:
+	# A loan taken out on Normal, with £20,000 more than the limit allows: the
+	# £20,000 button greyed out and the limit explained.
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_select_tool", 0)
+	sim.difficulty = Settings.DEFAULT_DIFFICULTY
+	sim.debt = 0
+	sim.debt_peak = 0
+	for amount: int in [20000, 20000, 5000]:
+		sim.borrow(amount)
+	sim.money = SHOWN_MONEY
+	sim.last_interest = sim.loan_interest()
+	sim.last_loan = sim.loan_payment()
+	game.call("_refresh_hud")
+	hud.get("_city_button").button_pressed = true
 
 
 func _prep_query() -> void:

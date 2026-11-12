@@ -67,18 +67,35 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			% Settings.ROAD_REACH + "Homes also need power to grow.", NO_OVERLAY)
 
 	# --- Money ---
-	var net: int = sim.last_income - sim.last_upkeep
+	var net: int = sim.last_balance()     # taxes - upkeep - loan payments
+	var smallest_loan: int = Settings.BORROW_STEPS[0]
+	var can_borrow: bool = sim.borrow_problem(smallest_loan) == ""
 	if sim.money < 0:
-		_add(out, "debt", URGENT, "The town is in debt: raise taxes or cut costs",
-			"You've spent more than you have. Raise taxes a little, lower service funding, "
-			+ "or bulldoze buildings that cost a lot to run.", NO_OVERLAY)
-	elif sim.month > 0 and net < 0:
-		var months: int = ceili(float(sim.money) / float(-net))
-		if months <= 24:
-			var when := "next month" if months <= 1 else "in about %d months" % months
-			_add(out, "money", URGENT if months <= 6 else WARNING, "Money will run out %s" % when,
-				"The town spends %s a month more than it takes in taxes. Raise taxes, cut " % _pounds(-net)
-				+ "service funding, or grow the town to earn more.", NO_OVERLAY)
+		_add(out, "debt", URGENT, "Out of money: %s" % ("take a loan, or raise taxes" if can_borrow
+				else "raise taxes or cut costs"),
+			"You've spent more than you have, so nothing can be built. "
+			+ ("Borrow in the City panel (click the strip, top right), or raise " if can_borrow else "Raise ")
+			+ "taxes a little, lower service funding, or bulldoze buildings that cost a lot to run.", NO_OVERLAY)
+	else:
+		if sim.money < Settings.LOW_MONEY and can_borrow and (sim.month > 0 or sim.road_tiles > 0):
+			_add(out, "loan", WARNING, "Short of money: take a loan in the City panel",
+				"Click the status strip (top right) and borrow in the Budget section. Loans "
+				+ "are paid back a little each month with %d%% interest a year." % roundi(sim.loan_rate() * 100.0),
+				NO_OVERLAY)
+		if sim.month > 0 and net < 0:
+			var months: int = ceili(float(sim.money) / float(-net))
+			if months <= 24:
+				var when := "next month" if months <= 1 else "in about %d months" % months
+				_add(out, "money", URGENT if months <= 6 else WARNING, "Money will run out %s" % when,
+					"The town spends %s a month more than it takes in. Raise taxes, cut " % _pounds(-net)
+					+ "service funding, or grow the town to earn more.", NO_OVERLAY)
+	if sim.last_loan > 0 and sim.last_loan > sim.last_income * Settings.LOAN_HEAVY_SHARE:
+		var share: int = roundi(100.0 * sim.last_loan / maxf(sim.last_income, 1.0))
+		_add(out, "loan_heavy", WARNING,
+			"Loan payments take %s of your taxes" % ("all" if share >= 100 else "%d%%" % share),
+			"You paid %s on loans last month (%s of it interest). " % [_pounds(sim.last_loan), _pounds(sim.last_interest)]
+			+ "Grow the town to earn more, or repay some early in the City panel to save interest.",
+			NO_OVERLAY)
 
 	# --- Power ---
 	if sim.plants == 0:

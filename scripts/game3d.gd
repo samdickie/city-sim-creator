@@ -16,7 +16,7 @@ const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
-const SAVE_VERSION := 3
+const SAVE_VERSION := 4               # 4: difficulty and loans (older saves load as Normal with no loans)
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
@@ -135,6 +135,7 @@ var _layout_seen := -1                 # sim.layout_version last drawn
 var _camera_seen := Transform3D()      # camera position last used to pick the hovered tile
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
+var _speed_before_dialog := 1          # the speed to go back to when the New city dialog closes
 
 
 func _ready() -> void:
@@ -172,7 +173,11 @@ func _ready() -> void:
 	hud.set_items(_menu_items())
 	hud.speed_chosen.connect(_set_speed)
 	hud.tax_changed.connect(_change_tax)
-	hud.new_city_pressed.connect(_new_city)
+	hud.new_city_pressed.connect(_ask_new_city.bind(false))
+	hud.new_city_chosen.connect(_new_city_chosen)
+	hud.new_city_cancelled.connect(_new_city_cancelled)
+	hud.borrow_pressed.connect(_borrow)
+	hud.repay_pressed.connect(_repay)
 	hud.save_pressed.connect(_save_game)
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
@@ -192,7 +197,10 @@ func _ready() -> void:
 	var user_args := OS.get_cmdline_user_args()
 	if DevShots.wanted(user_args):
 		add_child(DevShots.new(self, user_args))
-	elif DevPlaytest.wanted(user_args):
+		return
+	# Every game opens on a blank map: first, pick how much money to start with.
+	_ask_new_city(true)
+	if DevPlaytest.wanted(user_args):
 		add_child(DevPlaytest.new(self, user_args))
 
 
@@ -382,7 +390,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	# Keyboard camera: WASD / arrows to move, Q and E to turn.
 	var dir := Vector2.ZERO
-	if not Input.is_key_pressed(KEY_META) and not Input.is_key_pressed(KEY_CTRL):
+	if not Input.is_key_pressed(KEY_META) and not Input.is_key_pressed(KEY_CTRL) and not hud.is_modal():
 		if Input.is_physical_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT):
 			dir.x -= 1
 		if Input.is_physical_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT):
@@ -970,7 +978,7 @@ func _funding_text() -> String:
 	var word: String = Settings.SERVICE_WORDS[s]
 	var upkeep: float = Settings.SERVICE_UPKEEP[s]
 	return "%s funding %d%%  ·  %s a month each  ·  reaches %d m" % [word.capitalize(),
-		roundi(sim.funding[s] * 100.0), Hud.money_text(roundi(upkeep * sim.funding[s])),
+		roundi(sim.funding[s] * 100.0), Hud.money_text(roundi(upkeep * sim.funding[s] * sim.upkeep_scale())),
 		sim.service_reach_m(s, cell_size_m)]
 
 
@@ -1047,11 +1055,11 @@ func _save_game() -> void:
 	hud.flash("City saved.")
 
 
-func _load_game() -> void:
-	if not FileAccess.file_exists(SAVE_FILE):
+func _load_game(path: String = SAVE_FILE) -> void:
+	if not FileAccess.file_exists(path):
 		hud.flash("No saved city yet.")
 		return
-	var data = JSON.parse_string(FileAccess.get_file_as_string(SAVE_FILE))
+	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if typeof(data) != TYPE_DICTIONARY \
 			or int(data.get("width", 0)) != map_w \
 			or int(data.get("height", 0)) != map_h:
@@ -1066,20 +1074,65 @@ func _load_game() -> void:
 	hud.flash("City loaded.")
 
 
-func _new_city() -> void:
+func _ask_new_city(first: bool) -> void:
+	# Open the New city dialog (pick a difficulty), with the clock paused behind it.
+	# first: the game has just opened on a blank map.
+	if hud.is_modal():
+		return
 	_cancel_drag()
-	sim.reset()
+	_speed_before_dialog = 1 if first else speed
+	_set_speed(0)
+	hud.open_new_city(first)
+
+
+func _new_city_chosen(level: int) -> void:
+	_new_city(level)
+	_set_speed(_speed_before_dialog)
+
+
+func _new_city_cancelled() -> void:
+	# On the first launch the map is already blank on Normal, so that's what you get.
+	_set_speed(_speed_before_dialog)
+
+
+func _new_city(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
+	_cancel_drag()
+	sim.reset(level)
 	clock = 0.0
 	world.refresh_all()
 	_layout_seen = sim.layout_version
 	_refresh_hud()
-	hud.flash("New city: the map is blank again.")
+	hud.flash("New city on %s: %s to start with." % [sim.difficulty_name(), Hud.money_text(sim.money)])
+
+
+func _borrow(amount: int) -> void:
+	var why := sim.borrow_problem(amount)
+	if why != "":
+		hud.flash("Can't borrow %s: %s." % [Hud.money_text(amount), why])
+		return
+	sim.borrow(amount)
+	_refresh_hud()
+	hud.flash("Borrowed %s. You owe %s, paid back %s a month." % [Hud.money_text(amount),
+		Hud.money_text(sim.debt), Hud.money_text(sim.loan_payment())])
+
+
+func _repay(amount: int) -> void:
+	var why := sim.repay_problem(amount)
+	if why != "":
+		hud.flash("Can't repay: %s." % why)
+		return
+	var paid := sim.repay(amount)
+	_refresh_hud()
+	if sim.debt > 0:
+		hud.flash("Repaid %s. You still owe %s." % [Hud.money_text(paid), Hud.money_text(sim.debt)])
+	else:
+		hud.flash("Repaid %s. The loan is cleared." % Hud.money_text(paid))
 
 
 # ----------------------------------------------------------------------- HUD
 
 func _refresh_hud() -> void:
-	var net := sim.last_income - sim.last_upkeep
+	var net := sim.last_balance()          # taxes - upkeep - loan payments
 	hud.show_city(sim, Hud.money_text(sim.money), ("+" if net >= 0 else "") + Hud.money_text(net),
 		Hud.money_text(sim.last_income), Hud.money_text(sim.last_upkeep))
 	hud.set_items(_menu_items())      # prices and locks change as the town grows
@@ -1117,7 +1170,7 @@ func _tile_text(i: int) -> String:
 			about += " (pollutes the air up to %d m away)" % reach
 		return "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
 	if t == Tile.PARK:
-		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP)
+		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP * sim.upkeep_scale())
 	if sim.is_service(t):
 		var s: int = t - Tile.POLICE
 		return "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),

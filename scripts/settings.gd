@@ -3,7 +3,30 @@ extends RefCounted
 ## Change these to rebalance; nothing else needs editing.
 
 # --- Money ---
-const START_MONEY := 20000        # £ at the start of a new city
+# Difficulty is picked when a new city starts and is saved with it. It only
+# changes money: what you start with, a multiplier on every monthly running cost
+# (roads, parks, services, power plants, utilities, leisure, transport), the
+# yearly interest on loans and the most you can owe at once. Demand, happiness,
+# growth, build prices and taxes are the same at every level.
+const DIFFICULTIES := [
+	{"name": "Easy", "about": "Plenty of money and cheap loans: build freely",
+		"money": 100000, "upkeep": 0.8, "loan_rate": 0.04, "loan_limit": 100000},
+	{"name": "Normal", "about": "A good start and fair loans: spend it wisely",
+		"money": 50000, "upkeep": 1.0, "loan_rate": 0.06, "loan_limit": 60000},
+	{"name": "Hard", "about": "Little money, dear running costs and loans",
+		"money": 20000, "upkeep": 1.25, "loan_rate": 0.09, "loan_limit": 30000},
+]
+const DEFAULT_DIFFICULTY := 1     # Normal (also what saves from before difficulty load as)
+const LOW_MONEY := 2000           # below this the money shows red and the advisors suggest a loan
+
+# Loans (City panel). One running balance: borrowing adds to it and to your money.
+# Each month you pay the interest (balance x yearly rate / 12) plus a fixed slice
+# of what you borrowed, so a loan is paid off in about LOAN_MONTHS.
+const BORROW_STEPS := [5000, 20000]   # the Borrow buttons
+const REPAY_STEP := 5000              # the Repay button (there's also Repay all)
+const LOAN_MONTHS := 120              # slice paid back each month = 1/120 of the most owed since the last time it was clear
+const LOAN_MIN_PAYMENT := 20          # ...but never less than this much a month
+const LOAN_HEAVY_SHARE := 0.25        # advisors warn when loan payments are more than this share of taxes
 
 # Cost to build one tile, in £.
 const ROAD_COST := 10

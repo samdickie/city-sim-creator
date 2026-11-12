@@ -21,9 +21,26 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 | Industry | Jobs; causes pollution (Phase 2). |
 
 ## Money
-- Start with £20,000. Every build costs money; bulldozing a built tile costs £5.
+- Every build costs money; bulldozing a built tile costs £5. With less money than something costs (or below zero) you can't build it; there's no bankruptcy or game over: taxes slowly bring money back.
 - Hills cost more (+8% per metre of slope); tiles steeper than 12 m can't be built on.
-- All numbers live in `scripts/settings.gd`.
+- All numbers live in `scripts/settings.gd` (`DIFFICULTIES`, the loan numbers under Money).
+
+### Difficulty (picked for each new city)
+| | Easy | Normal | Hard |
+| --- | --- | --- | --- |
+| Starting money | £100,000 | £50,000 | £20,000 |
+| Monthly upkeep (every running cost) | x0.8 | x1 | x1.25 |
+| Loan interest (a year) | 4% | 6% | 9% |
+| Most you can owe | £100,000 | £60,000 | £30,000 |
+- Purely money: demand, happiness, growth, build prices and taxes are the same at every level.
+- A "New city" dialog (three cards, Normal picked) opens when the game starts and from New city in the game menu; the game is paused behind it. 1-3 or the arrows pick, Enter starts, Esc cancels (on first launch that starts Normal; from the menu it keeps the city). It can't be changed mid-game.
+- Saved with the city and shown in the City panel ("Budget · Normal"). Saves from before difficulty load as Normal (x1, as before) with their money unchanged and nothing owed. Save version 4.
+
+### Loans
+- City panel (click the status strip), Loans: what's owed, the monthly payment, Borrow £5,000 / £20,000 (greyed out, with the reason, past the level's limit), Repay £5,000 / Repay all (greyed out with nothing owed or not enough money).
+- One running balance. Borrowing adds to the money and the balance. Each month you pay the interest (balance x yearly rate / 12) plus a slice of 1/120 of the most owed since it was last clear (at least £20), so a loan is paid off in about 10 years. Repaying early saves interest.
+- The payment is made even when the money is below zero (it just goes further below). The budget shows Taxes / Upkeep / Loan payments / Balance, and the status strip's "last month" includes loan payments.
+- Advisors: "Short of money: take a loan in the City panel" (money under £2,000 and borrowing possible); out of money suggests a loan when one is possible; a warning when loan payments are more than 25% of taxes.
 
 ## Growth (Phase 2)
 - One game month every 3 seconds (Space pauses, F fast-forwards).
@@ -101,7 +118,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - The town is the hero: small frosted-glass pieces hug the edges, nothing sits over the middle. Glass: the game behind blurred, drained of most colour and darkened to a cool slate (so text reads the same over grass, sea, overlays and night), rounded corners, hairline edge, soft shadow. Pieces fade in and out.
 - Top left: game menu (New city, Save, Load, How to play, Day and night), city name, date and clock, and speed as pause / play / fast icons (the chosen one lit; pause in amber).
 - Top centre: advisors ticker (see Advisors).
-- Top right: status strip: money and last month's change (green or red), people and jobs, happiness, four small meters (power, water, services, rubbish: icon and bar, red/amber/green, details on hover) and the demand meter (homes, shops, industry bars round a zero line). Clicking the strip opens the City panel: budget, tax rate with - / +, happiness with its complaints and fixes, services, housing and last month's growth.
+- Top right: status strip: money and last month's change (green or red), people and jobs, happiness, four small meters (power, water, services, rubbish: icon and bar, red/amber/green, details on hover) and the demand meter (homes, shops, industry bars round a zero line). Clicking the strip opens the City panel: budget (with the difficulty), tax rate with - / +, loans, happiness with its complaints and fixes, services, housing and last month's growth.
 - Bottom centre: a card with the picture of the tool in use, what's under the mouse (name, stage, land value, services, problems) and what building there costs (green) or why it can't (red). Messages pop up just above it.
 - Bottom right: map views (see Map views).
 - Works from 1280 x 720 up; the City panel scrolls if the window is too short.

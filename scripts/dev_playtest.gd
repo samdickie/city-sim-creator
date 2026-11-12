@@ -20,6 +20,7 @@ const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")
+const Advisors = preload("res://scripts/advisors.gd")
 
 const WATCHDOG_SECONDS := 600.0
 const PLAY_DISTANCE := 650.0          # a normal zoom while building
@@ -91,6 +92,7 @@ func _run() -> void:
 	print("[play] saving to %s; window %s pixels, interface scale %.2f, 3D drawn at %d%%" % [out_dir,
 		get_window().size, get_window().content_scale_factor, roundi(get_viewport().scaling_3d_scale * 100.0)])
 	await _wait(1.0)
+	await _launch_dialog()
 	await _blank_start()
 	await _camera_controls()
 	await _build_first_streets()
@@ -102,6 +104,8 @@ func _run() -> void:
 	await _keyboard_shortcuts()
 	await _coast_and_slopes()
 	await _new_city()
+	await _loans()
+	await _old_save()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
 
@@ -364,7 +368,8 @@ func _corners() -> Array[Vector2i]:
 
 func _blank_start() -> void:
 	# The very first thing a player sees: no town, the Build menu, the map.
-	check(sim.population == 0 and sim.money == Settings.START_MONEY, "a new game starts blank with £%d" % Settings.START_MONEY)
+	var start := Simulation.start_money(Settings.DEFAULT_DIFFICULTY)
+	check(sim.population == 0 and sim.money == start, "a new game starts blank with £%d" % start)
 	var built := 0
 	for i: int in sim.w * sim.h:
 		if sim.tiles[i] != Simulation.Tile.EMPTY:
@@ -719,7 +724,7 @@ func _save_and_load() -> void:
 	check(JSON.stringify(sim.to_save()) == saved, "save then load gives back exactly the same city")
 	# The save file itself loads (with the same reader as an old save).
 	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
-	check(typeof(data) == TYPE_DICTIONARY and int((data as Dictionary).get("version", 0)) == 3, "the save file is version 3, as before")
+	check(typeof(data) == TYPE_DICTIONARY and int((data as Dictionary).get("version", 0)) == 4, "the save file is version 4")
 
 
 func _keyboard_shortcuts() -> void:
@@ -852,19 +857,239 @@ func _coast_and_slopes() -> void:
 	check(wet == 0, "none of %d planted things stand in the sea (%d do)" % [total, wet])
 
 
-func _new_city() -> void:
-	await _click(hud.get("_menu_button"))
-	var menu: PanelContainer = hud.get("_menu_panel")
-	await _click(_find_button(menu, "New city"))
-	var dialog: ConfirmationDialog = hud.confirm_new
-	await _wait(0.3)
-	check(dialog.visible, "New city asks first")
-	# (The dialog is a window of its own: its buttons are placed within it.)
-	await _click_at(Vector2(dialog.position) + dialog.get_ok_button().get_global_rect().get_center())
-	await _wait(0.2)
-	await _wait(0.2)
+
+
+# ------------------------------------------------------ difficulty and loans
+
+func _built_count() -> int:
 	var built := 0
 	for i: int in sim.w * sim.h:
 		if sim.tiles[i] != Simulation.Tile.EMPTY:
 			built += 1
-	check(built == 0 and sim.population == 0, "New city clears the map")
+	return built
+
+
+func _launch_dialog() -> void:
+	# The game opens on the New city dialog, paused, with Normal picked.
+	check(hud.is_modal() and hud.new_city_panel.visible, "the game opens with the New city dialog")
+	check(int(game.get("speed")) == 0, "the clock is paused behind the dialog")
+	check(hud.new_city_level() == Settings.DEFAULT_DIFFICULTY, "Normal is picked to start with")
+	check(not (hud.get("_new_warning") as Control).visible, "no \"clears everything\" warning on a fresh game")
+	await _shot("p00_new_city_dialog")
+	# Keys pick a card, and nothing reaches the game behind it (tools, camera).
+	var tool_before := _tool()
+	var target := rig.target
+	await _key(KEY_3)
+	check(hud.new_city_level() == 2, "3 picks Hard")
+	await _key(KEY_LEFT)
+	check(hud.new_city_level() == 1, "left arrow picks the card before")
+	await _key(KEY_1)
+	check(hud.new_city_level() == 0, "1 picks Easy")
+	await _hold_key(KEY_RIGHT, 0.3)
+	check(hud.new_city_level() == 1, "right arrow picks the next card")
+	check(_tool() == tool_before and rig.target.distance_to(target) < 1.0,
+		"keys in the dialog don't pick tools or move the camera")
+	# A click on a card picks it; a click on the dimmed town around does nothing.
+	var cards: Array[PanelContainer] = hud.new_city_cards
+	await _click(cards[2])
+	check(hud.new_city_level() == 2, "clicking the Hard card picks it")
+	await _click(cards[1])
+	check(hud.new_city_level() == 1 and hud.new_city_start.text.ends_with("Normal"), "clicking Normal picks it")
+	await _click_at(Vector2(30, get_viewport().get_visible_rect().size.y * 0.5))
+	check(hud.is_modal() and _built_count() == 0, "clicking the town behind the dialog does nothing")
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	check(not hud.is_modal(), "Enter starts the city")
+	check(sim.difficulty == 1 and sim.money == Simulation.start_money(1), "...on Normal, with %s" % Hud.money_text(sim.money))
+	check(int(game.get("speed")) == 1, "the clock runs once the city has started")
+	game.call("_set_speed", 0)
+
+
+func _open_new_city_from_menu() -> void:
+	await _click(hud.get("_menu_button"))
+	var menu: PanelContainer = hud.get("_menu_panel")
+	await _click(_find_button(menu, "New city"))
+	await _wait(0.2)
+
+
+func _one_month() -> Dictionary:
+	# Run the real clock (at Fast) until the next month, then pause. Returns the
+	# money and loan just before that month's bills.
+	var month := sim.month
+	var before := {}
+	game.call("_set_speed", Settings.FAST_SPEED)
+	var t0 := Time.get_ticks_msec()
+	while sim.month == month and Time.get_ticks_msec() - t0 < 15000:
+		before = {"money": sim.money, "debt": sim.debt, "peak": sim.debt_peak}
+		await get_tree().process_frame
+	game.call("_set_speed", 0)
+	await _frames(2)
+	return before
+
+
+func _new_city() -> void:
+	# New city from the menu asks for a difficulty; Esc keeps the city.
+	var built := _built_count()
+	var money := sim.money
+	game.call("_set_speed", 1)
+	await _open_new_city_from_menu()
+	check(hud.is_modal(), "New city in the menu opens the dialog")
+	check((hud.get("_new_warning") as Control).visible, "...warning that it clears the city")
+	check(int(game.get("speed")) == 0, "...and pauses the clock")
+	await _key(KEY_ESCAPE)
+	await _wait(0.2)
+	check(not hud.is_modal() and _built_count() == built and sim.money == money,
+		"Esc in the dialog keeps the city as it was")
+	check(int(game.get("speed")) == 1, "...and the clock runs again")
+	game.call("_set_speed", 0)
+	# Each level: starting money, and upkeep x0.8 / x1 / x1.25 in a real month.
+	var o := _origin
+	var coal_upkeep: int = Settings.BUILDINGS["coal"]["upkeep"]
+	for level: int in [0, 2, 1]:
+		await _open_new_city_from_menu()
+		await _click(hud.new_city_cards[level])
+		await _click(hud.new_city_start)
+		await _wait(0.2)
+		var info: Dictionary = Settings.DIFFICULTIES[level]
+		var level_name: String = info["name"]
+		check(not hud.is_modal() and _built_count() == 0 and sim.population == 0, "%s: New city clears the map" % level_name)
+		check(sim.difficulty == level and sim.money == int(info["money"]) and sim.debt == 0,
+			"%s: starts with %s" % [level_name, Hud.money_text(sim.money)])
+		game.call("_set_speed", 0)
+		await _look_at(o + Vector2i(7, 6), PLAY_DISTANCE, -40.0, 42.0, _corners())
+		await _pick_item("power", "coal")
+		await _click_at(_screen_of(o + Vector2i(7, 6)))
+		check(sim.count_of(Simulation.Tile.POWER_PLANT) == 1, "%s: a coal plant is built" % level_name)
+		var before := await _one_month()
+		var scale: float = info["upkeep"]
+		var want := roundi(coal_upkeep * scale)
+		check(sim.last_upkeep == want, "%s: a month's upkeep for one coal plant is %s (x%.2f; got %s)" % [
+			level_name, Hud.money_text(want), scale, Hud.money_text(sim.last_upkeep)])
+		check(sim.money == int(before["money"]) + sim.last_income - sim.last_upkeep - sim.last_loan,
+			"%s: the month's bills come off the money" % level_name)
+
+
+func _loans() -> void:
+	# On Normal (from _new_city): borrow, the limit, repay, monthly payments,
+	# running out of money, the advisors, and saving and loading.
+	var limit := sim.loan_limit()
+	var rate := sim.loan_rate()
+	await _click(hud.get("_status_island"))
+	await _wait(0.2)
+	var scroll: ScrollContainer = hud.get("_city_scroll")
+	var b5: Button = hud.borrow_buttons[0]
+	var b20: Button = hud.borrow_buttons[1]
+	scroll.ensure_control_visible(hud.repay_all_button)
+	await _frames(3)
+	var owed: Label = hud.get("_debt_label")
+	check(owed.text == "Nothing" and hud.repay_button.disabled and hud.repay_all_button.disabled,
+		"Loans: nothing owed, so Repay is greyed out")
+	check(not b5.disabled and not b20.disabled, "Loans: both Borrow buttons work")
+	var money := sim.money
+	await _click(b20)
+	check(sim.debt == 20000 and sim.money == money + 20000, "Borrow £20,000 adds it to the money and what's owed")
+	check(owed.text == "£20,000", "the City panel shows £20,000 owed")
+	while not b20.disabled and sim.debt < limit:
+		await _click(b20)
+	check(sim.debt == limit and b20.disabled and b5.disabled, "at the %s limit both Borrow buttons are greyed out" % Hud.money_text(limit))
+	check(b5.tooltip_text.contains("most allowed"), "...and say why: \"%s\"" % b5.tooltip_text)
+	money = sim.money
+	await _click(b5)
+	check(sim.debt == limit and sim.money == money, "clicking a greyed-out Borrow does nothing")
+	await _click(hud.repay_button)
+	check(sim.debt == limit - Settings.REPAY_STEP and sim.money == money - Settings.REPAY_STEP,
+		"Repay £5,000 pays £5,000 back")
+	check(not b5.disabled and b20.disabled, "after repaying £5,000, £5,000 can be borrowed again but not £20,000")
+	scroll.ensure_control_visible(hud.repay_all_button)
+	await _shot("p14_loans")
+	# Monthly payments: interest on the balance plus 1/120 of the most owed.
+	for m: int in 3:
+		var before := await _one_month()
+		var debt0: int = before["debt"]
+		var peak: int = before["peak"]
+		var interest := roundi(debt0 * rate / 12.0)
+		var slice := mini(maxi(ceili(peak / float(Settings.LOAN_MONTHS)), Settings.LOAN_MIN_PAYMENT), debt0)
+		check(sim.last_interest == interest and sim.last_loan == interest + slice and sim.debt == debt0 - slice,
+			"month %d: paid %s interest + %s back (got %s + %s), owe %s" % [m + 1, Hud.money_text(interest),
+			Hud.money_text(slice), Hud.money_text(sim.last_interest), Hud.money_text(sim.last_loan - sim.last_interest),
+			Hud.money_text(sim.debt)])
+		check(sim.money == int(before["money"]) + sim.last_income - sim.last_upkeep - sim.last_loan,
+			"month %d: the payment comes off the money" % (m + 1))
+	var loan_line: Label = hud.get("_loan_label")
+	var net_line: Label = hud.get("_net_label")
+	check(loan_line.text == Hud.money_text(sim.last_loan), "the budget shows last month's loan payments (%s)" % loan_line.text)
+	check(net_line.text.begins_with(Hud.money_text(sim.last_balance())),
+		"the status strip's last month includes them: \"%s\"" % net_line.text)
+	var ids := _tip_ids()
+	check("loan_heavy" in ids, "advisors warn when loan payments are a big share of taxes")
+	# Out of money: the payment still happens, and nothing can be built.
+	sim.money = -1000
+	game.call("_refresh_hud")
+	var before := await _one_month()
+	check(sim.money == int(before["money"]) + sim.last_income - sim.last_upkeep - sim.last_loan and sim.last_loan > 0,
+		"with no money the loan is still paid (money %s)" % Hud.money_text(sim.money))
+	ids = _tip_ids()
+	check("debt" in ids, "advisors: out of money")
+	var why: String = game.call("_why_cant_build", _origin + Vector2i(2, 2))
+	check(why.begins_with("Not enough money"), "nothing can be built with no money (\"%s\")" % why)
+	check(hud.repay_button.disabled and hud.repay_all_button.disabled, "Repay is greyed out with no money")
+	sim.money = 1000
+	game.call("_refresh_hud")
+	check("loan" in _tip_ids(), "advisors: short of money, take a loan")
+	sim.money = 200000
+	game.call("_refresh_hud")
+	await _click(hud.repay_all_button)
+	check(sim.debt == 0 and sim.debt_peak == 0 and hud.repay_all_button.disabled, "Repay all clears the loan")
+	# Save and load keep the difficulty and the loan.
+	await _click(b20)
+	var saved_debt := sim.debt
+	await _click(hud.get("_city_button"))
+	await _key(KEY_S, true)
+	var saved := JSON.stringify(sim.to_save())
+	await _open_new_city_from_menu()
+	await _key(KEY_3)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	check(sim.difficulty == 2 and sim.debt == 0, "a new Hard city")
+	await _key(KEY_L, true)
+	check(sim.difficulty == 1 and sim.debt == saved_debt and JSON.stringify(sim.to_save()) == saved,
+		"loading brings back Normal and the %s owed" % Hud.money_text(saved_debt))
+
+
+func _tip_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for tip: Dictionary in Advisors.tips(sim):
+		ids.append(String(tip["id"]))
+	return ids
+
+
+func _old_save() -> void:
+	# A save from before difficulty and loans: no new fields, version 3. It loads
+	# as Normal with nothing owed, and its money is left alone.
+	var data := sim.to_save()
+	data.erase("difficulty")
+	data.erase("debt")
+	data.erase("debt_peak")
+	data["money"] = 12345
+	data["version"] = 3
+	data["map"] = game.get("map_name")
+	data["width"] = sim.w
+	data["height"] = sim.h
+	var path := "user://troon_playtest_old_save.json"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(data))
+	f.close()
+	# Start from a Hard city with a loan, so anything left over would show.
+	await _open_new_city_from_menu()
+	await _key(KEY_3)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	sim.borrow(5000)
+	game.call("_load_game", path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	check(sim.money == 12345, "an old save keeps its money (%s)" % Hud.money_text(sim.money))
+	check(sim.difficulty == Settings.DEFAULT_DIFFICULTY and sim.debt == 0 and sim.debt_peak == 0,
+		"an old save loads as Normal with nothing owed")
+	check(is_equal_approx(sim.upkeep_scale(), 1.0), "an old save's running costs are as before (x1)")
+	var budget: Label = hud.get("_budget_caption")
+	check(budget.text.ends_with("NORMAL"), "the City panel's budget says \"%s\"" % budget.text)
