@@ -158,12 +158,18 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Services tool (0), then pick one (Tab or the buttons): police station £1,500, fire station £1,500, school £2,000, hospital £4,000. One tile each; they need a road and power (3 units) to work.
 - Each covers the area round it: fully close by, fading out at its reach (police 800 m, fire 700 m, school 600 m, hospital 1 km at 100% funding). Covered areas gain land value.
 - Funding (- / +, 0-150%) sets upkeep (police £60, fire £60, school £80, hospital £150 a month at 100%) and reach (50% funding reaches 70% as far; 0% closes it).
-- Effects: over 800 people, homes and shops with no police grow at half speed; over 1,200, homes need a school to grow past terraces; over 2,500, homes with no hospital grow at half speed; over 500, built plots with no fire cover can burn down (rarely; industry twice as often).
-- A Services map view shows how many of the four cover each area.
+- Effects: over 800 people, homes and shops with no police grow at half speed; over 1,200, homes need a school to grow past terraces; over 2,500, homes with no hospital grow at half speed; over 500, built plots with no fire cover can burn down (rarely; industry twice as often; the risk falls with the strength of cover, not just in or out).
+- How cover works: each working building covers its plot fully, and the plots round it fully out to 37.5% of its reach, then less and less to nothing at its reach. A plot counts as covered from 0.3 of full cover (about 81% of the way out: a school at 100% funding counts for about 490 m). "Covered" is what growth, the hover card and the view use; the strength of cover also adds land value (up to +0.04 / 0.03 / 0.05 / 0.04), feeds happiness (homes' average cover of all four) and lowers fire risk. Funding changes the reach (see above), and a building with no road or power covers nothing.
+- A Services map view shows how many of the four cover each area, or one service at a time (see Map views).
+- Hovering any zone plot shows Police / Fire / School / Hospital with a tick (covered) or a cross (red when the plot needs it: police for homes and shops, fire for every plot, schools and hospitals for homes). Hovering a service building says how far it reaches at its funding, how many plots and people it covers, and how many of those no other building of its kind reaches.
+- Placing a service: the Services view switches to that service (and back to the view before when you pick another tool), a soft disc round the mouse shows how far it would reach, and the card says what it would add: "would reach 14 homes with no school (420 people), 9 held back now".
+- Advisor tips about one service (a school, police, a hospital, fire) open the Services view on that service; the general "services are poor" and tax tips open it on all four.
 
 ## Map views (overlays)
 - O or the row of icons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution, Traffic (names on hover). The chosen view's name, a line about it and its colour key show above the icons.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
+- Map views are always lit like early afternoon (no dark ground, lit windows, street lamps or headlights), so their colours read the same at night; the clock keeps running and the normal view goes back to the real time of day.
+- Services view: chips above its key pick All (how many of the four cover each spot) or Police, Fire, Schools or Hospitals on their own. One service: dark green full cover, light green covered, red for plots held back right now without it (the same count the advisors give: police and hospitals "growing at half speed", schools "can't grow past terraces", fire "could burn down"), orange for plots that want it but aren't held back yet, its buildings blue with a pin over each (the other services' grey). Below the key: "Schools reach 62% of residents · 9 homes can't grow past terraces without one" (before the town is big enough: from how many people it matters). C (in any view) opens the Services view, then shows each service in turn. The choice resets to All when you leave the view.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built, brown abandoned.
 
 ## Pollution
@@ -189,8 +195,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A ticker, top centre, shows the most urgent tip and a count when something needs attention (red dot urgent, amber warning, blue advice). The count opens the full list, most urgent first. Hidden when all is well.
 - Every tip comes from real simulation state: why zone plots aren't growing (the same reasons as the hover text and Growth view), power and water used vs supplied, rubbish collected, buildings with no road or power, money trend, taxes vs services, missing fire station or school, skyscrapers waiting for transport.
 - Tips appear and disappear as the town changes. Only urgent ones also flash a message, once, and not again for a year.
-- Clicking a tip switches on the map view that shows the problem (Power, Water, Roads, Services, Growth, Land value); clicking again goes back to normal. Hover for a longer explanation.
-- The rules live in `scripts/advisors.gd` (`tips(sim)` returns `[{id, text, detail, severity, overlay}]`), separate from the HUD, so new tips are one `_add()` each.
+- Clicking a tip switches on the map view that shows the problem (Power, Water, Roads, Services, Growth, Land value); a tip about one service opens the Services view on just that service. Clicking again goes back to normal. Hover for a longer explanation.
+- The rules live in `scripts/advisors.gd` (`tips(sim)` returns `[{id, text, detail, severity, overlay, filter}]`; filter = the one service a tip is about, or -1), separate from the HUD, so new tips are one `_add()` each.
 
 ## Look and feel
 - The land, aiming for SimCity 4: lush green low ground, paler dry slopes and hilltops, darker damp hollows, rough hill grazing with heather, rock on steep faces. Slopes are lit a little more strongly than they really are so the low hills read (looks only; the ground keeps its real shape).

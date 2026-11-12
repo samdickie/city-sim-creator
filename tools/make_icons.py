@@ -321,6 +321,14 @@ rail = {
     'traffic': line("<path d='M6.5 11 L8.3 6.3 C8.5 5.8 9 5.5 9.5 5.5 H14.5 C15 5.5 15.5 5.8 15.7 6.3 L17.5 11'/><rect x='4' y='11' width='16' height='5.5' rx='1.8'/><circle cx='7.6' cy='13.8' r='0.6' fill='white'/><circle cx='16.4' cy='13.8' r='0.6' fill='white'/><path d='M6.5 16.5 V19'/><path d='M17.5 16.5 V19'/>"),
     'alert': line("<path d='M12 4 L21 19.5 H3 Z'/><path d='M12 10 V14'/><circle cx='12' cy='16.8' r='0.5' fill='white'/>"),
     'stats': line("<path d='M4 19.5 H20'/><path d='M7 16.5 V11'/><path d='M12 16.5 V6'/><path d='M17 16.5 V13'/>"),
+    # The four services (the Services view's filter chips and its map pins).
+    'police': line("<polygon points='12.0,4.2 14.2,9.8 20.2,10.1 15.5,13.9 17.1,19.8 12.0,16.5 6.9,19.8 8.5,13.9 3.8,10.1 9.8,9.8'/>"),
+    'fire': line("<path d='M12 3 C13.2 7 17.5 9.2 17.5 14.2 A5.5 5.5 0 0 1 6.5 14.2 C6.5 11.2 8.4 9.6 9.3 7.6 C10.6 9 11.2 10.3 11.2 11.8 C13 10.4 13.1 6.4 12 3 Z'/>"),
+    'school': line("<path d='M2.5 9.5 L12 5 L21.5 9.5 L12 14 Z'/><path d='M6.5 11.6 V16 C8.5 18.4 15.5 18.4 17.5 16 V11.6'/><path d='M21.5 9.5 V14.5'/>"),
+    'hospital': line("<rect x='4' y='4' width='16' height='16' rx='3.5'/><path d='M12 8 V16'/><path d='M8 12 H16'/>"),
+    # Covered or not, in the hover card.
+    'tick': line("<path d='M5 12.5 L10 17.5 L19 7' stroke-width='2.8'/>"),
+    'cross': line("<path d='M7 7 L17 17' stroke-width='2.8'/><path d='M17 7 L7 17' stroke-width='2.8'/>"),
 }
 out = ['## Icons for the build menu, made by tools/make_icons.py (edit that, not this).',
        '## ITEMS: small isometric pictures (64 x 64); LINES: white line icons (24 x 24).',

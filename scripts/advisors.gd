@@ -9,6 +9,7 @@ extends RefCounted
 ##   detail    a longer explanation, shown on hover
 ##   severity  URGENT, WARNING or ADVICE
 ##   overlay   the map view that shows the problem (WorldView.Overlay), or NO_OVERLAY
+##   filter    for the Services view, the one service the tip is about (Simulation.Service), or -1 for all
 ##
 ## To add a tip: work out the condition from the simulation in tips() and call
 ## _add(). If it depends on why zone plots aren't growing, add the phrase from
@@ -204,10 +205,10 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 		if fire_stations == 0:
 			_add(out, "fire", WARNING, "Fire risk: the town has no fire station",
 				"Buildings with no fire station nearby can burn down (industry most often). "
-				+ "Build one (Services) with a road and power.", services_kind)
+				+ "Build one (Services) with a road and power.", services_kind, Simulation.Service.FIRE)
 		elif fire_funding <= 0.0:
 			_add(out, "fire_closed", WARNING, "Fire risk: the fire stations are closed",
-				"Fire funding is at 0%. Raise it to open them again.", services_kind)
+				"Fire funding is at 0%. Raise it to open them again.", services_kind, Simulation.Service.FIRE)
 
 	# --- Schools, police, hospitals ---
 	var school := _n(stuck, "school")
@@ -217,17 +218,17 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			else "%d %s a school nearby to grow" % [school, "plot needs" if school == 1 else "plots need"]
 		_add(out, "school", WARNING, text,
 			"In a town of over %d people, homes won't grow past terraces without " % Settings.SCHOOL_NEEDED_POP
-			+ "a school nearby.", services_kind)
+			+ "a school nearby. The Services view shows them in red.", services_kind, Simulation.Service.SCHOOL)
 	var police := _n(stuck, "police")
 	if police >= 5:
 		_add(out, "police", ADVICE, "%d plots grow slowly: no police nearby" % police,
 			"In a town of over %d people, homes and shops with no police station " % Settings.POLICE_NEEDED_POP
-			+ "nearby grow at half speed.", services_kind)
+			+ "nearby grow at half speed.", services_kind, Simulation.Service.POLICE)
 	var hospital := _n(stuck, "hospital")
 	if hospital >= 5:
 		_add(out, "hospital", ADVICE, "%d homes grow slowly: no hospital nearby" % hospital,
 			"In a town of over %d people, homes with no hospital nearby grow at " % Settings.HOSPITAL_NEEDED_POP
-			+ "half speed.", services_kind)
+			+ "half speed.", services_kind, Simulation.Service.HOSPITAL)
 
 	# --- Skyscrapers and taller buildings ---
 	var no_transit := _n(stuck, "sky_transit")
@@ -332,9 +333,9 @@ static func _survey(sim: Simulation) -> Dictionary:
 
 
 static func _add(out: Array[Dictionary], id: String, severity: int, text: String, detail: String,
-		overlay: int) -> void:
+		overlay: int, filter: int = -1) -> void:
 	out.append({"id": id, "severity": severity, "text": text, "detail": detail,
-		"overlay": overlay, "rank": out.size()})
+		"overlay": overlay, "filter": filter, "rank": out.size()})
 
 
 static func _n(stuck: Dictionary, key: String) -> int:

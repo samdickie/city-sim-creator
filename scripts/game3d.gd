@@ -123,7 +123,8 @@ var day_cycle := true
 var current_tool: int = Tool.ROAD
 var current_density: int = 1          # 0 = low, 1 = medium, 2 = high (homes and shops)
 var _choice := {}                      # group tool -> which of its buildings is picked
-var _auto_overlay := false            # the Districts view was switched on by the District tool
+var _auto_overlay := false            # the view was switched on by the tool (Districts, or Services while placing one)
+var _view_before := [0, -1]            # [map view, service filter] to go back to when that tool is put down
 var painting := false
 var orbiting := false
 var dragging_map := false
@@ -183,6 +184,7 @@ func _ready() -> void:
 	hud.load_pressed.connect(_load_game)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 	hud.overlay_chosen.connect(_set_overlay)
+	hud.service_filter_chosen.connect(_set_service_filter)
 	hud.funding_changed.connect(_change_funding)
 
 	get_viewport().size_changed.connect(_fit_to_screen)
@@ -386,6 +388,12 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.help_panel.visible = not hud.help_panel.visible
 			KEY_O:
 				_set_overlay((world.overlay + 1) % WorldView.Overlay.size())
+			KEY_C:
+				# The Services view, then each service in turn: all, police, fire, schools, hospitals.
+				if world.overlay != WorldView.Overlay.SERVICES:
+					_set_overlay(WorldView.Overlay.SERVICES)
+				else:
+					_set_service_filter((world.service_filter + 2) % 5 - 1)
 
 
 func _process(delta: float) -> void:
@@ -427,7 +435,7 @@ func _process(delta: float) -> void:
 	# Time of day (only moves while the game is running).
 	if day_cycle:
 		# Nights pass about three times faster than days.
-		var rate := 1.0 + world.night * 2.0
+		var rate := 1.0 + world.clock_night * 2.0
 		time_of_day = fmod(time_of_day + delta * speed * rate / Settings.DAY_SECONDS, 1.0)
 	world.set_time_of_day(time_of_day)
 	hud.set_clock(_clock_text())
@@ -480,6 +488,7 @@ func _update_hover(screen_pos: Vector2) -> void:
 		hover = t
 		var why := _why_cant_build(hover) if _in_map(hover) else "-"
 		world.set_hover(hover, why == "" or why == "-")
+		_update_reach_preview()
 		if painting:
 			_update_drag()
 		else:
@@ -792,6 +801,8 @@ func _set_item(index: int, announce: bool = true) -> void:
 		return
 	_choice[current_tool] = index
 	_show_group()
+	_auto_view()
+	_update_reach_preview()
 	if announce:
 		hud.flash("Painting: %s" % _tool_label() if current_tool == Tool.DISTRICT \
 			else "Building: %s" % _name_of(_target_tile()).to_lower())
@@ -971,6 +982,7 @@ func _change_funding(step: float) -> void:
 	var s := _target_tile() - Tile.POLICE
 	sim.set_funding(s, sim.funding[s] + step)
 	_show_group()
+	_update_reach_preview()
 	_ground_dirty = true          # coverage and land value change
 	_refresh_hud()
 
@@ -1000,23 +1012,123 @@ func _set_density(d: int) -> void:
 func _select_tool(tool_id: int) -> void:
 	current_tool = tool_id
 	_show_group()
-	# Painting districts is easier with the Districts view on.
-	if tool_id == Tool.DISTRICT and world.overlay == WorldView.Overlay.NONE:
-		_set_overlay(WorldView.Overlay.DISTRICTS)
-		_auto_overlay = true
-	elif tool_id != Tool.DISTRICT and _auto_overlay:
-		_set_overlay(WorldView.Overlay.NONE)
-		_auto_overlay = false
+	_auto_view()
+	_update_reach_preview()
 	if _in_map(hover):
 		var why := _why_cant_build(hover)
 		world.set_hover(hover, why == "" or why == "-")
 	_update_info()
 
 
+func _auto_view() -> void:
+	# Painting districts shows the Districts view (if no other view is on); placing
+	# a service shows the Services view with just that service, so you can see
+	# where it's missing. Picking another tool goes back to the view before.
+	var want := -1
+	var filter := -1
+	if current_tool == Tool.DISTRICT:
+		want = WorldView.Overlay.DISTRICTS
+	elif current_tool == Tool.SERVICE:
+		want = WorldView.Overlay.SERVICES
+		filter = _target_tile() - Tile.POLICE
+	if _auto_overlay:
+		if want == world.overlay:
+			if filter != world.service_filter:
+				_set_service_filter(filter)
+			return
+		_restore_view()
+	if want < 0 or (want == WorldView.Overlay.DISTRICTS and world.overlay != WorldView.Overlay.NONE):
+		return
+	if world.overlay == want and world.service_filter == filter:
+		return                        # (already showing it: the player's own choice, so it stays)
+	_view_before = [world.overlay, world.service_filter]
+	_set_overlay(want)
+	if filter >= 0:
+		_set_service_filter(filter)
+	_auto_overlay = true
+
+
+func _restore_view() -> void:
+	var kind: int = _view_before[0]
+	var filter: int = _view_before[1]
+	_set_overlay(kind)
+	if kind == WorldView.Overlay.SERVICES and filter >= 0:
+		_set_service_filter(filter)
+	_auto_overlay = false
+
+
 func _set_overlay(kind: int) -> void:
 	_auto_overlay = false
 	world.set_overlay(kind)
-	hud.set_overlay(kind, world.overlay_legend(kind))
+	_show_overlay_key()
+
+
+func _set_service_filter(s: int) -> void:
+	# The Services view showing one service (0-3: police, fire, school, hospital) or all four (-1).
+	if world.overlay != WorldView.Overlay.SERVICES:
+		world.set_overlay(WorldView.Overlay.SERVICES)
+	world.set_service_filter(s)
+	_show_overlay_key()
+
+
+const SERVICE_PLURAL := ["Police", "Fire stations", "Schools", "Hospitals"]
+
+
+func _show_overlay_key() -> void:
+	# The map view's key in the HUD; for one service, its own title, line and numbers.
+	var kind := world.overlay
+	var s := world.service_filter
+	if kind != WorldView.Overlay.SERVICES or s < 0:
+		hud.set_overlay(kind, world.overlay_legend(kind), s)
+		return
+	var word: String = Settings.SERVICE_WORDS[s]
+	# (The distance that counts as covered: a little short of where the cover fades out.)
+	var counts_m := roundi(sim.service_cover_tiles(s) * cell_size_m / 10.0) * 10
+	var tip := "Where %s reach: each covers %d m round it at %d%% funding (more funding, further)." % [
+		"the police" if s == 0 else ("fire stations" if s == 1 else word + "s"), counts_m,
+		roundi(sim.funding[s] * 100.0)]
+	hud.set_overlay(kind, world.overlay_legend(kind), s, "Services: %s" % SERVICE_PLURAL[s], tip, _service_note(s))
+
+
+func _service_note(s: int) -> String:
+	# "Schools reach 62% of residents · 9 homes can't grow past terraces without one":
+	# the same count the advisors give (simulation.gd service_holds_back).
+	var r := sim.service_report(s)
+	var built: int = r["built"]
+	var working: int = r["working"]
+	var share: float = r["share"]
+	var held: int = r["held"]
+	var plural: String = ["Police stations", "Fire stations", "Schools", "Hospitals"][s]
+	var first := ""
+	if built == 0:
+		first = "No %s yet" % plural.to_lower()
+	elif share < 0.0:
+		first = "Nobody lives in town yet"
+	else:
+		first = "%s reach %d%% of residents" % [plural, roundi(share * 100.0)]
+	if built > working:
+		first += " (%d not working)" % (built - working)
+	var second := ""
+	var from := sim.service_needed_from(s)
+	if sim.population < from:
+		second = ["homes and shops need police", "fires can start", "homes need a school to grow past terraces",
+			"homes need a hospital to grow at full speed"][s] + " from %s people" % Hud.thousands(from)
+	else:
+		var what: String = ["%d %s at half speed without one" % [held, "plot grows" if held == 1 else "plots grow"],
+			"%d %s no fire cover (%s burn down)" % [held, "building has" if held == 1 else "buildings have",
+				"it could" if held == 1 else "they could"],
+			"%d %s past terraces without one" % [held, "home can't grow" if held == 1 else "homes can't grow"],
+			"%d %s at half speed without one" % [held, "home grows" if held == 1 else "homes grow"]][s]
+		second = what
+	return "%s  ·  %s" % [first, second]
+
+
+func _update_reach_preview() -> void:
+	# Placing a service: a disc round the mouse shows how far it would reach.
+	if current_tool == Tool.SERVICE and _in_map(hover):
+		world.show_reach(hover, sim.service_cover_tiles(_target_tile() - Tile.POLICE))
+	else:
+		world.hide_reach()
 
 
 func _set_day_cycle(on: bool) -> void:
@@ -1140,6 +1252,8 @@ func _refresh_hud() -> void:
 	hud.set_items(_menu_items())      # prices and locks change as the town grows
 	hud.set_advice(Advisors.tips(sim), sim.month)
 	_show_group()
+	if world.overlay == WorldView.Overlay.SERVICES and world.service_filter >= 0:
+		_show_overlay_key()         # (its numbers change as the town does)
 	_update_info()
 
 
@@ -1160,7 +1274,32 @@ func _update_info() -> void:
 	elif problem != "":
 		action = problem
 		state = 1
-	hud.show_query(_tile_text(i), ground, action, state)
+	elif current_tool == Tool.SERVICE:
+		action += "  ·  " + _service_gain_text(_target_tile() - Tile.POLICE, i)
+	# Which services reach a zone plot (red: missing, and the plot needs it).
+	var marks: Array = []
+	if sim.is_zone(sim.tiles[i]):
+		for s: int in 4:
+			marks.append(2 if sim.covered(s, i) else (0 if sim.service_matters(s, i) else 1))
+	hud.show_query(_tile_text(i), ground, action, state, marks)
+
+
+func _service_gain_text(s: int, i: int) -> String:
+	# What a new service building here would add: "would reach 14 homes with no school (420 people), 9 held back now".
+	var g := sim.service_gain(s, i)
+	var plots: int = g["plots"]
+	var people: int = g["people"]
+	var held: int = g["held"]
+	var noun: String = ["homes and shops", "plots", "homes", "homes"][s]
+	var word: String = ["police", "fire cover", "school", "hospital"][s]
+	if plots == 0:
+		return "would reach no %s without %s" % [noun, "fire cover" if s == 1 else ("police" if s == 0 else "a " + word)]
+	var text := "would reach %d %s with no %s" % [plots, noun, word]
+	if people > 0:
+		text += " (%s people)" % Hud.thousands(people)
+	if held > 0:
+		text += ", %d held back now" % held
+	return text
 
 
 func _tile_text(i: int) -> String:
@@ -1178,8 +1317,20 @@ func _tile_text(i: int) -> String:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP * sim.upkeep_scale())
 	if sim.is_service(t):
 		var s: int = t - Tile.POLICE
-		return "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),
+		var text := "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),
 			sim.service_reach_m(s, cell_size_m), roundi(sim.funding[s] * 100.0)]
+		var r := sim.service_reach(i)
+		var plots: int = r["plots"]
+		if plots > 0:
+			var people: int = r["people"]
+			var alone: int = r["alone"]
+			text += "  ·  covers %d %s%s" % [plots, "plot" if plots == 1 else "plots",
+				" (%s people)" % Hud.thousands(people) if people > 0 else ""]
+			var word: String = Settings.SERVICE_WORDS[s]
+			if alone < plots:
+				text += ", %d of them no other %s reaches" % [alone, "police station" if s == 0 else (
+					"fire station" if s == 1 else word)]
+		return text
 	if t == Tile.ROAD:
 		return _road_text(i)
 	if not sim.is_zone(t):
@@ -1198,7 +1349,7 @@ func _tile_text(i: int) -> String:
 		# Boarded up: nobody lives or works here and it pays no tax.
 		text = "Abandoned — %s\n%s, level %d of %d%s: empty and boarded up, pays no tax (bulldoze it, or it's done up once things improve)" % [
 			sim.abandoned_reason(i), kind, sim.levels[i], sim.max_level(i), _stage_words(t, sim.stage(i))]
-	text += "\nLand value %s   ·   %s" % [sim.land_value_word(i), _services_text(i)]
+	text += "\nLand value %s" % sim.land_value_word(i)
 	if sim.district[i] != 0:
 		text += "   ·   %s" % sim.district_name(i)
 	if t != Tile.INDUSTRY and sim.pollution_band(i) >= 2:
@@ -1229,18 +1380,6 @@ static func _rounded_trips(n: float) -> int:
 	while n >= step * 100.0:
 		step *= 10.0
 	return roundi(n / step) * roundi(step)
-
-
-func _services_text(i: int) -> String:
-	# Which services cover this plot, e.g. "nearby: police, school".
-	var near: Array[String] = []
-	for s in 4:
-		if sim.covered(s, i):
-			var word: String = Settings.SERVICE_WORDS[s]
-			near.append(word)
-	if near.is_empty():
-		return "no services nearby"
-	return "nearby: " + ", ".join(near)
 
 
 func _stage_words(t: int, s: int) -> String:

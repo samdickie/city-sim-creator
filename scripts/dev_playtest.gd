@@ -108,6 +108,7 @@ func _run() -> void:
 	await _loans()
 	await _old_save()
 	await _traffic()
+	await _services()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
 
@@ -1525,3 +1526,245 @@ func _traffic() -> void:
 	game.call("_refresh_hud")
 	world.refresh_all()
 	game.set("_layout_seen", sim.layout_version)
+
+
+# ----------------------------------------------------------------- services
+
+func _legend_rows() -> Array[String]:
+	var rows: Array[String] = []
+	for row: Node in hud.legend_box.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		for c: Node in row.get_children():
+			if c is Label:
+				rows.append((c as Label).text)
+	return rows
+
+
+func _near_colour(c: Color, want: Color) -> bool:
+	return absf(c.r - want.r) + absf(c.g - want.g) + absf(c.b - want.b) < 0.03
+
+
+func _school_tip() -> Dictionary:
+	for tip: Dictionary in Advisors.tips(sim):
+		if tip["id"] == "school":
+			return tip
+	return {}
+
+
+func _services() -> void:
+	# The Services view one service at a time. Homes in two places with works and
+	# shops between, all built up past the size where homes need a school; a school
+	# placed with the mouse in the west covers only the west. Then: the chips (by
+	# clicking), the colours on the map, the hover card's row of ticks and crosses,
+	# the school advisor's tip opening the view on Schools, the School tool's disc
+	# and view (and going back), C, and map views lit by day at night.
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	var o := _find_land(36, 13)
+	check(o.x >= 0 and _built_count() == 0, "services: a new city with flat land for two estates at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	# Streets: an estate each side (x 0-8 and 27-35), works and shops between, one road along y = 7.
+	for side: int in [0, 13, 27]:
+		_place("road", o + Vector2i(side + 4, 1), o + Vector2i(side + 4, 11))
+		for y: int in [1, 4, 10]:
+			_place("road", o + Vector2i(side, y), o + Vector2i(side + 8 + (1 if side == 13 else 0), y))
+	_place("road", o + Vector2i(0, 7), o + Vector2i(35, 7))
+	for x: int in [14, 15, 16, 17]:
+		_place("coal", o + Vector2i(x, 12))
+	_place("water_pump", o + Vector2i(19, 12))
+	_place("water_pump", o + Vector2i(20, 12))
+	_place("homes_1", o + Vector2i(0, 0), o + Vector2i(8, 12))
+	_place("homes_1", o + Vector2i(27, 0), o + Vector2i(35, 12))
+	_place("industry", o + Vector2i(13, 0), o + Vector2i(22, 8))
+	_place("shops_1", o + Vector2i(13, 9), o + Vector2i(22, 11))
+	# Works and shops fully built; homes one level up (terraces), so their next step is tenements.
+	for y: int in range(o.y, o.y + 13):
+		for x: int in range(o.x, o.x + 36):
+			var i := y * sim.w + x
+			if sim.is_zone(sim.tiles[i]):
+				sim.levels[i] = 1 if sim.tiles[i] == Simulation.Tile.HOMES else sim.max_level(i)
+	sim.set("_power_dirty", true)
+	sim.set("_value_dirty", true)
+	sim.set("_coverage_dirty", true)
+	sim.recount()
+	game.call("_refresh_hud")
+	world.refresh_all()
+	game.set("_layout_seen", sim.layout_version)
+	var west := o + Vector2i(3, 5)          # a west home, near where the school goes
+	var east := o + Vector2i(33, 5)         # an east home, far from it (x 31 is the street)
+	var wi := west.y * sim.w + west.x
+	var ei := east.y * sim.w + east.x
+	print("[play] services: %d people, %d jobs, home demand %.0f; west home: %s; east home: %s" % [sim.population,
+		sim.jobs(), sim.demand_for(Simulation.Tile.HOMES), sim.zone_status(wi), sim.zone_status(ei)])
+	check(sim.population >= Settings.SCHOOL_NEEDED_POP and sim.tiles[ei] == Simulation.Tile.HOMES
+		and sim.service_holds_back(2, ei), "services: a town of %d people whose homes wait for a school" % sim.population)
+	var tip := _school_tip()
+	check(not tip.is_empty() and int(tip["overlay"]) == WorldView.Overlay.SERVICES and int(tip["filter"]) == 2,
+		"services: the advisor asks for a school (\"%s\") and points at the Services view on Schools" % tip.get("text", ""))
+
+	# Placing the school with the mouse: the Services view shows schools, a disc
+	# shows how far it would reach, and the card says how many homes it would reach.
+	hud.set_build_open(false)
+	await _look_at(o + Vector2i(17, 6), PLAY_DISTANCE * 2.0, -40.0, 55.0, [o, o + Vector2i(35, 0), o + Vector2i(0, 12),
+		o + Vector2i(35, 12)])
+	await _pick_item("services", "school")
+	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == 2 and bool(game.get("_auto_overlay")),
+		"services: picking the School shows the Services view on Schools")
+	var spot := o + Vector2i(2, 5)
+	await _move(_screen_of(spot))
+	await _move(_screen_of(spot) + Vector2(1, 1))
+	var decal: Decal = world.reach_decal
+	var want_r: float = sim.service_cover_tiles(2) * world.cell
+	check(game.get("hover") == spot and decal.visible and absf(decal.size.x - want_r * 2.0) < 1.0
+		and decal.position.distance_to(world.ground_point(spot)) < 1.0,
+		"services: a disc of %d m round the mouse shows where the school would reach" % roundi(want_r))
+	var action: Label = hud.get("_info_action")
+	check(action.text.contains("would reach") and action.text.contains("homes with no school"),
+		"services: the card says what it would reach: \"%s\"" % action.text)
+	await _shot("p18_services_place_school")
+	await _click_at(_screen_of(spot) + Vector2(1, 1))
+	var school := spot.y * sim.w + spot.x
+	check(sim.tiles[school] == Simulation.Tile.SCHOOL and sim.service_working(school), "services: a working school in the west")
+	await _move(_screen_of(spot + Vector2i(1, 0)))
+	await _pick_item("roads", "road")
+	check(world.overlay == WorldView.Overlay.NONE and not decal.visible and not bool(game.get("_auto_overlay")),
+		"services: picking the Road puts the view back to normal and the disc away")
+	# From another view: the Police shows the Services view, and putting it down goes back.
+	game.call("_set_overlay", WorldView.Overlay.POLLUTION)
+	await _key(KEY_0)
+	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == int(game.call("_target_tile")) - Simulation.Tile.POLICE,
+		"services: the Services tool (0) shows its own service (%d)" % world.service_filter)
+	await _key(KEY_TAB)
+	check(world.service_filter == int(game.call("_target_tile")) - Simulation.Tile.POLICE,
+		"services: Tab to the next service shows that one (%d)" % world.service_filter)
+	await _key(KEY_1)
+	check(world.overlay == WorldView.Overlay.POLLUTION, "services: ...and the Road goes back to the Pollution view")
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	sim.recount()
+	game.call("_refresh_hud")
+	var held: int = sim.service_report(2)["held"]
+	check(sim.covered(2, wi) and not sim.covered(2, ei) and not sim.service_holds_back(2, wi) and held > 0,
+		"services: the school covers the west homes, not the east ones (%d held back)" % held)
+	tip = _school_tip()
+	check(not tip.is_empty() and String(tip["text"]).begins_with("%d plot" % held),
+		"services: the advisor counts the same homes: \"%s\"" % tip.get("text", ""))
+
+	# The Services view by its icon, then each chip by clicking.
+	await _look_at(o + Vector2i(17, 6), PLAY_DISTANCE * 2.0, -40.0, 55.0, [o, o + Vector2i(35, 0), o + Vector2i(0, 12),
+		o + Vector2i(35, 12)])
+	await _click(hud.overlay_buttons[WorldView.Overlay.SERVICES])
+	var chips: Dictionary = hud.service_chips
+	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == -1 and (chips[-1] as Button).button_pressed
+		and (chips[2] as Button).is_visible_in_tree(), "services: the Services view's icon shows all four, with the chips")
+	var rows := _legend_rows()
+	check(rows.size() == 5 and rows[0] == "All four services", "services: All's key: %s" % " / ".join(rows))
+	for s: int in [0, 1, 2, 3, -1]:
+		await _click(chips[s])
+		await _frames(2)
+		rows = _legend_rows()
+		var title: Label = hud.get("_legend_title")
+		var ok := world.service_filter == s and int(hud.get("_service_filter")) == s and (chips[s] as Button).button_pressed
+		if s >= 0:
+			ok = ok and rows.size() == 5 and rows[0].begins_with("Full cover") and title.text.begins_with("Services: ") \
+				and hud.legend_note.visible and world.pin_count() == sim.services[s]
+		else:
+			ok = ok and rows[0] == "All four services" and not hud.legend_note.visible and world.pin_count() == 0
+		check(ok, "services: the %s chip: \"%s\" / %s / \"%s\"" % [["all", "police", "fire", "school", "hospital"][s + 1],
+			title.text, " / ".join(rows), hud.legend_note.text])
+	await _click(chips[2])
+	var note := hud.legend_note.text
+	check(note.contains("%d homes can't grow past terraces" % held) and note.begins_with("Schools reach"),
+		"services: the Schools key counts them: \"%s\"" % note)
+	check(_legend_rows()[2].contains("no school") and _legend_rows()[4].begins_with("School"),
+		"services: the Schools key: %s" % " / ".join(_legend_rows()))
+	var west_colour: Color = world.overlay_image.get_pixel(west.x, west.y)
+	var east_colour: Color = world.overlay_image.get_pixel(east.x, east.y)
+	check(_near_colour(west_colour, WorldView.OV_GREEN) or _near_colour(west_colour, WorldView.OV_LIGHT_GREEN),
+		"services: a west home is green (covered) on the map (%s)" % west_colour)
+	check(_near_colour(east_colour, WorldView.OV_RED), "services: an east home is red (held back, no school) (%s)" % east_colour)
+	check(_near_colour(world.overlay_image.get_pixel(spot.x, spot.y), WorldView.OV_BLUE) and world.pin_count() == 1,
+		"services: the school is blue, with a pin")
+	await _shot("p19_services_schools")
+	# C: the next service; and from the normal view, the Services view.
+	await _key(KEY_C)
+	check(world.service_filter == 3 and (chips[3] as Button).button_pressed, "services: C shows the next service (hospitals)")
+	await _key(KEY_C)
+	check(world.service_filter == -1, "services: ...and after hospitals, all four")
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	await _key(KEY_C)
+	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == -1, "services: C from the normal view opens the Services view")
+	await _click(hud.overlay_buttons[WorldView.Overlay.GROWTH])
+	await _click(hud.overlay_buttons[WorldView.Overlay.SERVICES])
+	check(world.service_filter == -1, "services: leaving the view and coming back starts on All again")
+
+	# Hover: which services reach a plot (any view).
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	var marks: HFlowContainer = hud.service_marks
+	var labels: Array[Label] = hud.get("_service_mark_labels")
+	var icons: Array[TextureRect] = hud.get("_service_mark_icons")
+	var tick: Texture2D = hud.call("_line_icon", "tick", 26)
+	var cross: Texture2D = hud.call("_line_icon", "cross", 26)
+	await _move(_screen_of(east))
+	await _move(_screen_of(east) + Vector2(1, 1))
+	var details: Label = hud.info_label
+	var title2: Label = hud.get("_info_title")
+	check(game.get("hover") == east and marks.is_visible_in_tree() and labels[2].text == "School" and icons[2].texture == cross
+		and _near_colour(icons[2].modulate, Hud.BAD) and title2.text.contains("waiting for a school"),
+		"services: hovering an east home: \"%s\", School crossed in red" % title2.text)
+	await _move(_screen_of(west))
+	await _move(_screen_of(west) + Vector2(1, 1))
+	check(game.get("hover") == west and icons[2].texture == tick and _near_colour(icons[2].modulate, Hud.GOOD)
+		and icons[0].texture == cross, "services: hovering a west home: School ticked, Police crossed")
+	await _shot("p20_services_hover")
+	await _move(_screen_of(spot))
+	await _move(_screen_of(spot) + Vector2(1, 1))
+	check(not marks.visible and title2.text.begins_with("School: working") and details.text.contains("covers")
+		and details.text.contains("people"), "services: hovering the school: \"%s / %s\"" % [title2.text, details.text])
+
+	# The school advisor's tip opens the Services view on Schools; again goes back.
+	var tips: Array = hud.get("_advice_tips")
+	var row_n := -1
+	for n: int in tips.size():
+		if tips[n]["id"] == "school":
+			row_n = n
+	check(row_n >= 0, "services: the school tip is in the advisors' list (%d of %d)" % [row_n + 1, tips.size()])
+	if row_n >= 0:
+		var rows_b: Array[Button] = hud.get("_advice_rows")
+		if row_n == 0:
+			await _click(hud.get("_ticker"))
+		else:
+			await _click(hud.get("_advice_count"))
+			await _click(rows_b[row_n])
+		check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == 2 and (chips[2] as Button).button_pressed,
+			"services: clicking it shows the Services view on Schools")
+		if hud.get("_advice_list").visible:
+			await _click(rows_b[row_n])
+		else:
+			await _click(hud.get("_ticker"))
+		check(world.overlay == WorldView.Overlay.NONE, "services: clicking it again goes back to the normal view")
+		if hud.get("_advice_list").visible:
+			await _click(hud.get("_advice_count"))
+
+	# Map views at night are lit by day; the normal view follows the clock.
+	game.set("time_of_day", 0.95)
+	await _frames(3)
+	check(world.night > 0.9, "services: night in the normal view (night %.2f)" % world.night)
+	await _click(hud.overlay_buttons[WorldView.Overlay.SERVICES])
+	await _frames(3)
+	var env: Environment = world.get("env")
+	check(world.night < 0.01 and world.clock_night > 0.9 and env.ambient_light_energy < 0.5,
+		"services: a map view at night is lit by day (night %.2f, clock %.2f, ambient %.2f)" % [world.night, world.clock_night,
+		env.ambient_light_energy])
+	await _shot("p21_services_night")
+	await _click(hud.overlay_buttons[WorldView.Overlay.NONE])
+	await _frames(3)
+	check(world.night > 0.9, "services: back to the normal view, it's night again")
+	game.set("time_of_day", 0.55)
+	await _frames(2)

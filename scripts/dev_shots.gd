@@ -583,6 +583,34 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_traffic_small, "size": SMALL_SIZE},
 		{"name": "45_traffic_cars", "at": TRAFFIC_CARS, "yaw": -40.0, "pitch": 36.0, "dist": 420.0,
 			"prep": _prep_traffic_cars, "drive": 25.0},
+		# The Services view (they don't change the town): all four, then each service
+		# on its own; a home hovered (which services reach it); placing a school (the
+		# disc it would reach, the view showing schools); map views at night (lit by
+		# day); and the smallest window (chips, key and the 10 icons).
+		{"name": "46_services_all", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services.bind(-1)},
+		{"name": "47_services_police", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services.bind(0)},
+		{"name": "48_services_fire", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services.bind(1)},
+		{"name": "49_services_schools", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services.bind(2)},
+		{"name": "50_services_hospitals", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services.bind(3)},
+		{"name": "51_services_hover", "at": Vector2(52, 50), "yaw": -35.0, "pitch": 40.0, "dist": 700.0,
+			"hud": true, "prep": _prep_services.bind(2), "hover": true},
+		{"name": "52_services_place_school", "at": SERVICES_AT, "yaw": -40.0, "pitch": 50.0, "dist": 2000.0,
+			"hud": true, "prep": _prep_place_school, "point_at_spot": true},
+		{"name": "53_night_services", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"time": NIGHT, "hud": true, "prep": _prep_services.bind(2)},
+		{"name": "54_night_traffic", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"time": NIGHT, "hud": true, "prep": _prep_traffic},
+		{"name": "55_night_pollution", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"time": NIGHT, "hud": true, "prep": _prep_view.bind(WorldView.Overlay.POLLUTION)},
+		{"name": "56_night_land_value", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"time": NIGHT, "hud": true, "prep": _prep_view.bind(WorldView.Overlay.LAND_VALUE)},
+		{"name": "57_services_small", "at": SERVICES_AT, "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_services_small, "size": SMALL_SIZE},
 		# The natural surroundings: a beach close up, the hills, and the edge of the map.
 		{"name": "19_beach", "at": Vector2(44, 108), "yaw": -70.0, "pitch": 34.0, "dist": 320.0},
 		{"name": "20_hills", "at": Vector2(112, 40), "yaw": -40.0, "pitch": 30.0, "dist": 1500.0},
@@ -619,6 +647,13 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_woodland_overlay},
 		{"name": "41_woodland_night", "at": Vector2(80, 41), "yaw": -40.0, "pitch": 34.0, "dist": 560.0,
 			"time": NIGHT, "prep": _prep_woodland},
+		# A school closed (this changes the town, so after the standard shots; far
+		# from 27's plots): the homes it served turn red in the Services view, and
+		# placing a school shows where it would help.
+		{"name": "58_services_school_gone", "at": Vector2(SCHOOL_GONE), "yaw": -40.0, "pitch": 50.0, "dist": 1500.0,
+			"hud": true, "prep": _prep_school_gone},
+		{"name": "59_services_school_gap", "at": Vector2(SCHOOL_GONE), "yaw": -40.0, "pitch": 50.0, "dist": 1500.0,
+			"hud": true, "prep": _prep_place_school, "point_at_spot": true},
 		{"name": "27_empty_plots", "at": Vector2(43, 29), "yaw": -40.0, "pitch": 38.0, "dist": 230.0,
 			"prep": _prep_empty_plots},
 	]
@@ -627,6 +662,9 @@ func _shot_list() -> Array[Dictionary]:
 const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
 const TRAFFIC_CLOSE := Vector2(68, 58)    # the link between the town and the works (the busiest road)
 const TRAFFIC_CARS := Vector2(66, 57)
+const SERVICES_AT := Vector2(58, 64)      # the whole town, for the Services view
+const SCHOOL_GONE := Vector2i(53, 67)     # the school 58 closes (in the CBD)
+var _spot := Vector2i(-1, -1)             # where 52 and 59 point the mouse: the best place for a school
 
 
 var _woodland_done := false
@@ -735,10 +773,12 @@ func _prep_panels() -> void:
 
 
 func _prep_night() -> void:
+	# The normal view: map views are always lit by day. (A service would switch
+	# to the Services view, so a park is picked.)
 	_hud_reset()
-	game.call("_set_overlay", WorldView.Overlay.GROWTH)
-	game.call("_choose_item", "police")
-	hud.call("_show_category", "services")
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_choose_item", "park")
+	hud.call("_show_category", "leisure")
 	hud.flash("Advisor: a message, to see how it looks")
 	hud.set("_message_time", 60.0)      # (still showing when the picture is taken)
 
@@ -811,6 +851,96 @@ func _prep_traffic_cars() -> void:
 	traffic.set_enabled(true)
 
 
+func _prep_view(kind: int) -> void:
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_select_tool", 0)
+	game.call("_set_overlay", kind)
+
+
+func _prep_services(filter: int) -> void:
+	# The Services view showing all four (-1) or one service, as its chip does.
+	_prep_view(WorldView.Overlay.SERVICES)
+	game.call("_set_service_filter", filter)
+	print("[shots]   Services view, %s: %s" % ["all" if filter < 0 else Settings.SERVICE_WORDS[filter],
+		hud.legend_note.text if filter >= 0 else "-"])
+
+
+func _prep_services_small() -> void:
+	_prep_services(2)
+	get_window().size = SMALL_SIZE
+
+
+func _prep_place_school() -> void:
+	# The School picked in the Build menu: the Services view shows schools on its
+	# own, and the mouse goes where a school would reach the most homes without one.
+	_hud_reset()
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_choose_item", "school")
+	_spot = _best_school_spot()
+	var p := world.ground_point(_spot)
+	rig.target = p
+	rig.snap()
+	print("[shots]   best place for a school: %s (%s)" % [_spot, sim.service_gain(2, _spot.y * sim.w + _spot.x)])
+
+
+func _best_school_spot() -> Vector2i:
+	# The home plot with no school whose neighbours (within 6 tiles) most lack one too.
+	var best := Vector2i(-1, -1)
+	var most := -1
+	for i: int in sim.w * sim.h:
+		if sim.tiles[i] != Simulation.Tile.HOMES or sim.covered(2, i):
+			continue
+		var x := i % sim.w
+		var y := i / sim.w
+		var n := 0
+		for dy: int in range(-6, 7):
+			for dx: int in range(-6, 7):
+				var k := (y + dy) * sim.w + x + dx
+				if k >= 0 and k < sim.w * sim.h and sim.tiles[k] == Simulation.Tile.HOMES and not sim.covered(2, k):
+					n += 2 if sim.service_holds_back(2, k) else 1
+		if n > most:
+			most = n
+			best = Vector2i(x, y)
+	return best
+
+
+func _prep_school_gone() -> void:
+	# Bulldoze the CBD's school, as the Bulldoze tool does.
+	var i := SCHOOL_GONE.y * sim.w + SCHOOL_GONE.x
+	if sim.tiles[i] == Simulation.Tile.SCHOOL:
+		_build("bulldoze", SCHOOL_GONE)
+		# Some of the flats it served are still young (one level built), as in a
+		# growing town: without the school they can't grow any further.
+		var young := 0
+		for y: int in range(SCHOOL_GONE.y - 9, SCHOOL_GONE.y + 10):
+			for x: int in range(SCHOOL_GONE.x - 9, SCHOOL_GONE.x + 10):
+				var k := y * sim.w + x
+				if sim.tiles[k] == Simulation.Tile.HOMES and sim.density[k] >= 1 and sim.levels[k] > 1 \
+						and not sim.covered(2, k) and (x + y) % 3 != 0:
+					sim.levels[k] = 1
+					young += 1
+		sim.recount()
+		print("[shots]   closed the school at %s; %d flats set back to their first level" % [SCHOOL_GONE, young])
+		sim.money = SHOWN_MONEY
+		world.refresh_all()
+		game.set("_layout_seen", sim.layout_version)
+		game.call("_refresh_hud")
+	_prep_services(2)
+
+
+func _point_at(at: Vector2) -> void:
+	# Point the mouse (as far as the game knows) at a tile, as moving it there does.
+	var tile := Vector2i(at)
+	game.set("hover", tile)
+	world.set_hover(tile, true)
+	game.call("_update_reach_preview")
+	game.call("_update_info")
+	for n: int in 3:
+		await get_tree().process_frame
+		RenderingServer.force_draw(false)
+
+
 func _prep_query() -> void:
 	_hud_reset()
 	hud.set_build_open(false)
@@ -869,6 +999,8 @@ func _shoot(shot: Dictionary) -> void:
 	game.set("time_of_day", float(shot.get("time", DAY)))
 	hud.visible = bool(shot.get("hud", false))
 	hud.help_panel.visible = false
+	if int(game.get("current_tool")) == 9:     # (Services: put down, so its view and disc go)
+		game.call("_select_tool", 0)
 	if shot.has("prep"):
 		var prep: Callable = shot["prep"]
 		prep.call()
@@ -900,6 +1032,8 @@ func _shoot(shot: Dictionary) -> void:
 		await _show_hover(at)
 	if shot.get("hover_road", false):
 		await _show_road_hover(at)
+	if shot.get("point_at_spot", false):
+		await _point_at(Vector2(_spot))
 	var want: Vector2i = shot.get("size", SHOT_SIZE)
 	var image := get_viewport().get_texture().get_image()
 	if want != SHOT_SIZE:

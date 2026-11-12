@@ -30,6 +30,7 @@ signal save_pressed
 signal load_pressed
 signal day_cycle_toggled(on: bool)
 signal overlay_chosen(kind: int)
+signal service_filter_chosen(service: int)  # the Services view's chips: -1 all, 0-3 police, fire, school, hospital
 signal funding_changed(step: float)
 
 const Settings = preload("res://scripts/settings.gd")
@@ -64,13 +65,18 @@ const OVERLAY_TIPS := ["The normal view",
 	"Which plots have electricity, and what carries it",
 	"How far each plot is from a road (zones need one within 2 tiles)",
 	"Why each zone is or isn't growing",
-	"How many of police, fire, schools and hospitals cover each area",
+	"How many of police, fire, schools and hospitals cover each area. Pick one to see where it's missing",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
 	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
 	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks and woodland help",
 	"How busy each road is with people driving to work and the shops. Busy roads need another way round, or buses"]
 const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution",
 	"traffic"]
+const SERVICES_VIEW := 5                   # (world3d.gd's Overlay.SERVICES)
+# The Services view's chips: [service (-1 = all four), icon, label].
+const SERVICE_CHIPS := [[-1, "services", "All"], [0, "police", "Police"], [1, "fire", "Fire"],
+	[2, "school", "Schools"], [3, "hospital", "Hospitals"]]
+const SERVICE_SHORT := ["Police", "Fire", "School", "Hospital"]   # the hover card's row
 
 var _root: Control
 var _bold: Font
@@ -166,6 +172,9 @@ var info_label: Label
 var _info_action_row: HBoxContainer
 var _info_action_icon: TextureRect
 var _info_action: Label
+var service_marks: HFlowContainer          # the hover card's row: police, fire, school, hospital, ticked or crossed
+var _service_mark_icons: Array[TextureRect] = []
+var _service_mark_labels: Array[Label] = []
 var _toast: PanelContainer
 var message_label: Label
 var _message_time := 0.0
@@ -178,7 +187,11 @@ var _legend_section: VBoxContainer
 var _legend_title: Label
 var _legend_tip: Label
 var legend_box: VBoxContainer
+var legend_note: Label                     # a line under the key (the Services view: how much one service reaches)
+var service_chips := {}                    # service (-1 = all) -> Button, in the Services view
+var _chip_row: HBoxContainer
 var _overlay_kind := 0                     # the map view that's on
+var _service_filter := -1                  # the service the Services view is showing (-1 = all)
 
 var help_panel: PanelContainer
 var _help_scroll: ScrollContainer
@@ -926,6 +939,21 @@ func _build_info() -> void:
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	info_label.custom_minimum_size = Vector2(300, 0)
 	box.add_child(info_label)
+	# Which services reach a zone plot: a tick or a cross each (red when the plot needs it).
+	service_marks = HFlowContainer.new()
+	service_marks.add_theme_constant_override("h_separation", 14)
+	service_marks.add_theme_constant_override("v_separation", 2)
+	service_marks.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.add_child(service_marks)
+	for s: int in 4:
+		var cell := _hbox(service_marks, 3)
+		var mark := _icon_rect("tick", 13, GOOD)
+		cell.add_child(mark)
+		var word := _label(SERVICE_SHORT[s], 12, TEXT)
+		cell.add_child(word)
+		_service_mark_icons.append(mark)
+		_service_mark_labels.append(word)
+	service_marks.visible = false
 	_info_action_row = _hbox(box, 6)
 	_info_action_icon = _icon_rect("value", 14, TEXT)
 	_info_action_row.add_child(_info_action_icon)
@@ -950,12 +978,22 @@ func show_info(text: String) -> void:
 	info_label.visible = true
 	info_label.add_theme_color_override("font_color", TEXT)
 	_info_action_row.visible = false
+	service_marks.visible = false
 
 
-func show_query(text: String, ground: String, action: String, state: int) -> void:
+func show_query(text: String, ground: String, action: String, state: int, services: Array = []) -> void:
 	# What's under the mouse. text: its first line is the title, the rest the
 	# details; ground: the height (or "Sea"); action: what the tool would do there.
 	# state: 0 = it can be built (and costs this), 1 = it can't (the reason), 2 = nothing to do.
+	# services: for a zone plot, police, fire, school and hospital: 2 = covered,
+	# 1 = not covered, 0 = not covered and the plot needs it ([] = no row).
+	service_marks.visible = services.size() == 4
+	for s: int in services.size():
+		var v: int = services[s]
+		var colour: Color = [BAD, TEXT_FAINT, GOOD][clampi(v, 0, 2)]
+		_service_mark_icons[s].texture = _line_icon("tick" if v == 2 else "cross", 26)
+		_service_mark_icons[s].modulate = colour
+		_service_mark_labels[s].add_theme_color_override("font_color", TEXT if v == 2 else colour)
 	var lines := text.split("\n")
 	_info_title.visible = true
 	_info_title.text = lines[0]
@@ -1004,7 +1042,29 @@ func _build_overlays() -> void:
 	_legend_tip.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_legend_tip.custom_minimum_size = Vector2(300, 0)
 	_legend_section.add_child(_legend_tip)
+	# The Services view: all four services, or one at a time (C cycles them).
+	_chip_row = _hbox(_legend_section, 2)
+	_chip_row.visible = false
+	for chip: Array in SERVICE_CHIPS:
+		var s: int = chip[0]
+		var b := Button.new()
+		b.theme_type_variation = "Chip"
+		b.toggle_mode = true
+		b.focus_mode = Control.FOCUS_NONE
+		b.text = chip[2]
+		b.icon = _line_icon(chip[1], 28)
+		b.expand_icon = false
+		b.tooltip_text = "How many of the four services cover each spot (C: the next one)" if s < 0 \
+			else "%s only: where it reaches and which plots still need it (C: the next one)" % String(chip[2])
+		b.pressed.connect(func(): service_filter_chosen.emit(s))
+		_chip_row.add_child(b)
+		service_chips[s] = b
 	legend_box = _vbox(_legend_section, 3)
+	legend_note = _label("", 12, TEXT)
+	legend_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	legend_note.custom_minimum_size = Vector2(300, 0)
+	legend_note.visible = false
+	_legend_section.add_child(legend_note)
 	_legend_section.add_child(_divider())
 
 	_overlay_caption = _label("", 11, TEXT_DIM, true)
@@ -1020,15 +1080,24 @@ func _build_overlays() -> void:
 		overlay_buttons[kind] = b
 
 
-func set_overlay(kind: int, legend: Array) -> void:
-	# Highlight the chosen view and show its colour key.
+func set_overlay(kind: int, legend: Array, filter: int = -1, title: String = "", tip: String = "",
+		note: String = "") -> void:
+	# Highlight the chosen view and show its colour key. The Services view also
+	# shows its chips (filter: the service it's showing, -1 = all); title, tip and
+	# note replace the view's own name and line, and add a line under the key.
 	_overlay_kind = kind
+	_service_filter = filter if kind == SERVICES_VIEW else -1
 	for k: int in overlay_buttons:
 		(overlay_buttons[k] as Button).set_pressed_no_signal(k == kind)
+	_chip_row.visible = kind == SERVICES_VIEW
+	for s: int in service_chips:
+		(service_chips[s] as Button).set_pressed_no_signal(s == _service_filter)
 	var view: String = OVERLAY_NAMES[kind]
 	_overlay_caption.text = "MAP VIEW  ·  %s" % view.to_upper()
-	_legend_title.text = view
-	_legend_tip.text = OVERLAY_TIPS[kind]
+	_legend_title.text = title if title != "" else view
+	_legend_tip.text = tip if tip != "" else String(OVERLAY_TIPS[kind])
+	legend_note.text = note
+	legend_note.visible = note != ""
 	for child: Node in legend_box.get_children():
 		child.queue_free()
 	for entry: Array in legend:
@@ -1043,7 +1112,8 @@ func set_overlay(kind: int, legend: Array) -> void:
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
 	var on := kind != 0 and not legend.is_empty()
-	if on != _legend_section.visible:
+	# (Also while it's fading: switching views twice in a moment must leave it right.)
+	if on != _legend_section.visible or _tweens.has(_legend_section):
 		_open(_legend_section, on)
 
 
@@ -1086,6 +1156,7 @@ func _build_help() -> void:
 			["M", "Show or hide the Build menu"],
 			["Space, F", "Pause or play; fast"],
 			["O", "Next map view"],
+			["C", "Services view: all four services, then police, fire, schools and hospitals one at a time"],
 			["T", "Cars and people on the streets on or off"],
 			["H", "This help"],
 			["Ctrl/Cmd S, L", "Save, load"],
@@ -1107,14 +1178,15 @@ func _build_help() -> void:
 			"Pick what to build in the Build menu, bottom left: categories down its side, the items beside them. Homes and shops come in low, medium and high density.",
 			"Zones grow when a road is within %d tiles and they have power. Red icon = no road nearby; yellow lightning = no power. Power travels through roads, buildings and power lines that share an edge." % Settings.ROAD_REACH,
 			"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings: pick one with Tab. Anything bigger than a first-level plot needs water (pumps and towers; it travels like power). Towns over 400 people need rubbish collected. Some buildings unlock as the town grows.",
-			"Services (0): police, fire stations, schools and hospitals cover the area around them. They need a road and power. Bigger towns grow slowly without them; fires break out where there's no fire station. Funding (- / + under the Services list) changes how far they reach.",
+			"Services (0): police, fire stations, schools and hospitals cover the area around them. They need a road and power. Bigger towns grow slowly without them; fires break out where there's no fire station. Funding (- / + under the Services list) changes how far they reach. While you place one, the map shows how far it would reach.",
+			"Services view: the chips (or C) show one service at a time: green where it reaches, red where plots are held back without it, orange where it's missing but not holding them back yet. Pointing at a plot shows which services reach it.",
 			"Taxes: people accept higher taxes when they get good services for them. High taxes with poor services stop growth, and eventually people leave (worst-served areas first). Change them in the City panel: click the strip, top right.",
 			"Money: a new city starts Easy (%s), Normal (%s) or Hard (%s); harder levels also cost more to run and pay more interest. Short of money? Borrow in the City panel. Loans are paid back a little each month over about %d years, with interest; repay early to save interest. With no money left you can't build until taxes bring some in." % [
 				money_text(_level_money(0)), money_text(_level_money(1)), money_text(_level_money(2)),
 				roundi(Settings.LOAN_MONTHS / 12.0)],
 			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
-			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key.",
+			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
 			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), or a conservation area kept low-rise.",
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
@@ -1720,7 +1792,12 @@ func _fill_advice_row(b: Button, tip: Dictionary) -> void:
 	b.tooltip_text = String(tip["detail"])
 	if overlay >= 0:
 		var view: String = OVERLAY_NAMES[overlay]
-		b.tooltip_text += "\nClick to see it on the %s map view." % view.to_lower()
+		var filter: int = tip.get("filter", -1)
+		if filter >= 0:
+			b.tooltip_text += "\nClick to see it on the map (Services view, %s only)." \
+				% String(SERVICE_CHIPS[filter + 1][2]).to_lower()
+		else:
+			b.tooltip_text += "\nClick to see it on the %s map view." % view.to_lower()
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if overlay >= 0 else Control.CURSOR_ARROW
 
 
@@ -1731,7 +1808,14 @@ func _advice_clicked(n: int) -> void:
 	var kind: int = _advice_tips[n]["overlay"]
 	if kind < 0:
 		return
-	overlay_chosen.emit(0 if kind == _overlay_kind else kind)
+	# A tip about one service opens the Services view showing just that service.
+	var filter: int = _advice_tips[n].get("filter", -1)
+	if kind == _overlay_kind and filter == _service_filter:
+		overlay_chosen.emit(0)
+		return
+	overlay_chosen.emit(kind)
+	if kind == SERVICES_VIEW:
+		service_filter_chosen.emit(filter)
 
 
 func _dot_icon(colour: Color) -> Texture2D:
@@ -1984,6 +2068,27 @@ func _make_theme() -> Theme:
 	_button_styles(theme, "Segment", seg, icon_hover, _pad(_soft_box(ACCENT, 9), 8),
 		_pad(_soft_box(ACCENT.lightened(0.12), 9), 8))
 	theme.set_color("icon_normal_color", "Segment", Color(1, 1, 1, 0.62))
+	# Chips: the Services view's All / Police / Fire / Schools / Hospitals, lit like a segment.
+	theme.set_type_variation("Chip", "Button")
+	var chip := _soft_box(Color(1, 1, 1, 0.06), 8)
+	chip.content_margin_left = 7
+	chip.content_margin_right = 8
+	chip.content_margin_top = 4
+	chip.content_margin_bottom = 4
+	var chip_hover := chip.duplicate() as StyleBoxFlat
+	chip_hover.bg_color = Color(1, 1, 1, 0.16)
+	var chip_on := chip.duplicate() as StyleBoxFlat
+	chip_on.bg_color = ACCENT
+	var chip_on_hover := chip.duplicate() as StyleBoxFlat
+	chip_on_hover.bg_color = ACCENT.lightened(0.12)
+	_button_styles(theme, "Chip", chip, chip_hover, chip_on, chip_on_hover)
+	theme.set_font_size("font_size", "Chip", 12)
+	theme.set_constant("h_separation", "Chip", 4)
+	theme.set_constant("icon_max_width", "Chip", 14)
+	theme.set_color("font_color", "Chip", TEXT_DIM)
+	theme.set_color("font_pressed_color", "Chip", Color.WHITE)
+	theme.set_color("font_hover_pressed_color", "Chip", Color.WHITE)
+	theme.set_color("icon_normal_color", "Chip", Color(1, 1, 1, 0.62))
 	theme.set_type_variation("Pause", "Button")
 	var amber := Color(0.93, 0.62, 0.18)
 	_button_styles(theme, "Pause", seg, icon_hover, _pad(_soft_box(amber, 9), 8),

@@ -1254,6 +1254,160 @@ func _needs_school(i: int, next_stage: int) -> bool:
 		and not covered(Service.SCHOOL, i)
 
 
+# --- Each service on its own (the Services view's filter, the hover card, the advisors) ---
+# The words _zone_check() uses when a missing service holds a plot back (police,
+# fire, school, hospital). Fire has no growth rule: its risk is buildings burning
+# down. advisors.gd's REASONS counts the same phrases.
+const SERVICE_HELD_PHRASES := ["no police station", "", "waiting for a school", "hospital nearby"]
+
+
+func service_full_tiles(s: int) -> float:
+	# Tiles round a service building that it covers fully (coverage 1): the
+	# first 37.5% of its reach, at its current funding.
+	return _service_radius(s) * (1.0 - 1.0 / 1.6)
+
+
+func service_cover_tiles(s: int) -> float:
+	# Tiles round a service building that it covers enough to count (coverage at
+	# least Settings.COVERED), at its current funding.
+	return _service_radius(s) * (1.0 - Settings.COVERED / 1.6)
+
+
+func cover_strength(s: int, i: int) -> int:
+	# 0 no cover, 1 the faint edge of a reach (too weak to count), 2 covered, 3 full cover.
+	var c := coverage_at(s, i)
+	if c >= 0.999:
+		return 3
+	if c >= Settings.COVERED:
+		return 2
+	return 1 if c > 0.0 else 0
+
+
+func service_matters(s: int, i: int) -> bool:
+	# Whether the rules ask for this service at this zone plot: police for homes
+	# and shops, fire for every plot, schools and hospitals for homes. (Cover
+	# anywhere also adds a little land value, and homes' cover adds to happiness.)
+	var t: int = tiles[i]
+	if not is_zone(t):
+		return false
+	match s:
+		Service.POLICE:
+			return t == Tile.HOMES or t == Tile.SHOPS
+		Service.FIRE:
+			return true
+	return t == Tile.HOMES
+
+
+func service_needed_from(s: int) -> int:
+	# The town size from which missing this service holds plots back (fire: from
+	# when fires can break out).
+	return [Settings.POLICE_NEEDED_POP, Settings.FIRE_START_POP, Settings.SCHOOL_NEEDED_POP,
+		Settings.HOSPITAL_NEEDED_POP][s]
+
+
+func service_holds_back(s: int, i: int) -> bool:
+	# This zone plot is held back right now for want of service s: the reason its
+	# hover text gives (police and hospital: growing at half speed; school: can't
+	# grow past terraces), or for fire, a building that could burn down.
+	if not service_matters(s, i) or covered(s, i):
+		return false
+	if s == Service.FIRE:
+		return levels[i] > 0 and population >= Settings.FIRE_START_POP
+	var check := _zone_check(i)
+	var why: String = check[1]
+	var phrase: String = SERVICE_HELD_PHRASES[s]
+	return why.contains(phrase)
+
+
+func service_report(s: int) -> Dictionary:
+	# Town-wide, for the Services view's key: residents within reach of service s
+	# (share 0-1, or -1 with nobody living here yet), plots held back for want of
+	# it, and how many of its buildings there are and work.
+	var people := 0
+	var reached := 0
+	var held := 0
+	var working := 0
+	for i in w * h:
+		var t: int = tiles[i]
+		if t == Tile.HOMES and levels[i] > 0:
+			var n := units(i)
+			people += n
+			if covered(s, i):
+				reached += n
+		if is_zone(t) and service_holds_back(s, i):
+			held += 1
+		if t == Tile.POLICE + s and service_working(i):
+			working += 1
+	var built: int = services[s]
+	return {"share": float(reached) / people if people > 0 else -1.0, "held": held,
+		"built": built, "working": working}
+
+
+func _reach_of(s: int, at: int) -> PackedInt32Array:
+	# The tiles a building of service s at `at` would cover enough to count.
+	var out := PackedInt32Array()
+	var radius := _service_radius(s)
+	var reach := ceili(radius)
+	var cx := at % w
+	var cy := at / w
+	for y in range(maxi(cy - reach, 0), mini(cy + reach, h - 1) + 1):
+		for x in range(maxi(cx - reach, 0), mini(cx + reach, w - 1) + 1):
+			var d := Vector2(x - cx, y - cy).length()
+			if (1.0 - d / radius) * 1.6 >= Settings.COVERED:
+				out.append(y * w + x)
+	return out
+
+
+func service_reach(i: int) -> Dictionary:
+	# What the service building at i covers by itself: zone plots and residents
+	# within the reach that counts ("alone": plots no other building of its kind
+	# covers). Nothing while it isn't working.
+	var s: int = tiles[i] - Tile.POLICE
+	var plots := 0
+	var people := 0
+	var alone := 0
+	if service_working(i):
+		var radius := _service_radius(s)
+		var others: Array[Vector2] = []
+		for j in w * h:
+			if j != i and tiles[j] == tiles[i] and service_working(j):
+				others.append(Vector2(j % w, j / w))
+		for k: int in _reach_of(s, i):
+			if not is_zone(tiles[k]):
+				continue
+			plots += 1
+			if tiles[k] == Tile.HOMES:
+				people += units(k)
+			# Covered by another building of the same kind too?
+			var spot := Vector2(k % w, k / w)
+			var shared := false
+			for o: Vector2 in others:
+				if (1.0 - spot.distance_to(o) / radius) * 1.6 >= Settings.COVERED:
+					shared = true
+					break
+			if not shared:
+				alone += 1
+	return {"plots": plots, "people": people, "alone": alone}
+
+
+func service_gain(s: int, at: int) -> Dictionary:
+	# What a new building of service s at `at` would add: zone plots that want it
+	# and have none now (and their residents), and how many of those are held
+	# back right now.
+	var plots := 0
+	var people := 0
+	var held := 0
+	for k: int in _reach_of(s, at):
+		if not service_matters(s, k) or covered(s, k):
+			continue
+		plots += 1
+		if tiles[k] == Tile.HOMES:
+			people += units(k)
+		if service_holds_back(s, k):
+			held += 1
+	return {"plots": plots, "people": people, "held": held}
+
+
 func _fires() -> void:
 	# Now and then a building with no fire station nearby burns down.
 	burned.clear()

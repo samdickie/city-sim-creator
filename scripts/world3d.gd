@@ -4,6 +4,7 @@ extends Node3D
 ## It only reads the simulation; it never changes the city.
 
 const Settings = preload("res://scripts/settings.gd")
+const Icons = preload("res://scripts/icons.gd")
 const TERRAIN_SHADER = preload("res://shaders/terrain.gdshader")
 const SEA_SHADER = preload("res://shaders/sea.gdshader")
 const BUILDING_SHADER = preload("res://shaders/building.gdshader")
@@ -306,6 +307,20 @@ const TRAFFIC_GROUND_ALPHA: Array[float] = [0.3, 0.45, 0.65, 0.8, 0.92]   # the 
 # building, roof and model shaders draw them run down (alpha below 0.75).
 const ABANDONED_ALPHA := 0.5
 var overlay: int = Overlay.NONE
+# The Services view on its own: -1 = all four (how many cover each spot), or one
+# service (simulation.gd Service: police, fire, school, hospital): where it reaches,
+# the plots that want it and don't have it, and its buildings with a pin.
+var service_filter := -1
+var service_pins := Node3D.new()
+var _pin_items: Array = []                # [Sprite3D, ground point]
+var _pin_count := 0
+var _pin_textures := {}                   # service -> Texture2D
+var reach_decal: Decal                    # where a service building would reach, under the mouse
+# Map views are lit like early afternoon whatever the clock says, so their
+# colours read true at night too (no dark ground, lit windows or street lamps).
+const MAP_VIEW_TIME := 0.55
+var clock_night := 0.0                    # night at the clock's real time (`night` is 0 in map views)
+var _clock_time := 0.5
 var overlay_image: Image
 var overlay_texture: ImageTexture
 var roof_material: ShaderMaterial
@@ -1162,6 +1177,8 @@ func _build_city_nodes() -> void:
 	_road_icon = _svg_texture(ROAD_ICON_SVG)
 	_water_icon = _svg_texture(WATER_ICON_SVG)
 	add_child(alerts)
+	add_child(service_pins)
+	_build_reach_decal()
 	_build_smoke()
 
 
@@ -1310,6 +1327,16 @@ func _build_alerts() -> void:
 	_place_alerts()
 
 
+func _place_pins() -> void:
+	# Service pins float a little higher than warning icons, and a little bigger.
+	for n in _pin_count:
+		var item: Array = _pin_items[n]
+		var sprite: Sprite3D = item[0]
+		var ground: Vector3 = item[1]
+		sprite.pixel_size = _alert_size * 1.25 / 96.0
+		sprite.position = ground + Vector3.UP * (30.0 + _alert_size * 1.2)
+
+
 func set_view_distance(distance: float) -> void:
 	# Shadows only as far as needed, so they stay crisp when zoomed in.
 	_view_distance = distance
@@ -1323,6 +1350,7 @@ func set_view_distance(distance: float) -> void:
 	if absf(size - _alert_size) > _alert_size * 0.05:
 		_alert_size = size
 		_place_alerts()
+		_place_pins()
 
 
 func _place_alerts() -> void:
@@ -1916,10 +1944,37 @@ func set_overlay(kind: int) -> void:
 		node.visible = not on
 	woods.visible = not on
 	smoke.visible = not on
+	if kind != Overlay.SERVICES:
+		service_filter = -1
+	# Map views are lit by day (see MAP_VIEW_TIME); the normal view by the clock.
+	set_time_of_day(_clock_time)
 	if on:
 		_paint_overlay()
 	else:
 		_recolour_buildings()
+		_update_pins()
+
+
+func set_service_filter(s: int) -> void:
+	# The Services view showing one service (0-3), or all four (-1).
+	service_filter = s
+	if overlay == Overlay.SERVICES:
+		_paint_overlay()
+
+
+func _service_legend(s: int) -> Array:
+	# The key for the Services view showing one service. Bands as in cover_strength().
+	var building: String = Settings.SERVICE_NAMES[s]
+	var held: String = ["Homes and shops growing at half speed: no police",
+		"Buildings that could burn down: no fire cover",
+		"Homes that can't grow past terraces: no school",
+		"Homes growing at half speed: no hospital"][s]
+	var missing: String = ["Homes and shops with no police (not holding them back yet)",
+		"Plots with no fire cover (no risk yet: empty, or a small town)",
+		"Homes with no school (not holding them back yet)",
+		"Homes with no hospital (not holding them back yet)"][s]
+	return [[OV_GREEN, "Full cover (close by)"], [OV_LIGHT_GREEN, "Covered (weaker towards the edge)"],
+		[OV_RED, held], [OV_ORANGE, missing], [OV_BLUE, "%s (marked with a pin)" % building]]
 
 
 func overlay_legend(kind: int) -> Array:
@@ -1938,6 +1993,8 @@ func overlay_legend(kind: int) -> Array:
 			return [[OV_GREEN, "Growing"], [OV_YELLOW, "Waiting (demand, space, land value or a school)"],
 				[OV_RED, "Stuck (needs a road or power)"], [OV_BLUE, "Fully built"], [OV_ABANDONED, "Abandoned"]]
 		Overlay.SERVICES:
+			if service_filter >= 0:
+				return _service_legend(service_filter)
 			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
 				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
 		Overlay.DISTRICTS:
@@ -1982,6 +2039,105 @@ func _paint_overlay() -> void:
 			overlay_image.set_pixel(x, y, _overlay_colour(i, tiles[i], values, power, reach))
 	overlay_texture.update(overlay_image)
 	_recolour_buildings()
+	_update_pins()
+
+
+func _update_pins() -> void:
+	# A pin over every building of the service the Services view is showing, so
+	# they can be found from afar. Pins are reused from one paint to the next.
+	var count := 0
+	if overlay == Overlay.SERVICES and service_filter >= 0:
+		var want := Tile.POLICE + service_filter
+		var tiles: PackedByteArray = sim.tiles
+		for i in tiles.size():
+			if tiles[i] != want:
+				continue
+			if count == _pin_items.size():
+				var fresh := Sprite3D.new()
+				fresh.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				fresh.no_depth_test = true
+				fresh.render_priority = 11
+				fresh.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+				service_pins.add_child(fresh)
+				_pin_items.append([fresh, Vector3.ZERO])
+			var item: Array = _pin_items[count]
+			var sprite: Sprite3D = item[0]
+			sprite.texture = _pin_texture(service_filter)
+			# A building that isn't working gets a faded pin.
+			sprite.modulate = Color.WHITE if sim.service_working(i) else Color(1, 1, 1, 0.45)
+			sprite.visible = true
+			item[1] = ground_point(Vector2i(i % map_w, i / map_w))
+			count += 1
+	for n in range(count, _pin_items.size()):
+		var spare: Sprite3D = _pin_items[n][0]
+		spare.visible = false
+	_pin_count = count
+	_place_pins()
+
+
+func pin_count() -> int:
+	# How many service pins are showing (dev tools).
+	return _pin_count
+
+
+func _pin_texture(s: int) -> Texture2D:
+	# A round blue badge with the service's white line icon (from icons.gd).
+	if not _pin_textures.has(s):
+		var key: String = ["police", "fire", "school", "hospital"][s]
+		var line: String = Icons.LINES[key]
+		var inner := line.substr(line.find(">") + 1)
+		inner = inner.substr(0, inner.rfind("</svg>"))
+		var blue := OV_BLUE.to_html(false)
+		var svg := "<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'>" \
+			+ "<circle cx='48' cy='48' r='42' fill='#%s' stroke='white' stroke-width='6'/>" % blue \
+			+ "<g transform='translate(19.2,19.2) scale(2.4)' fill='none' stroke='white' stroke-width='1.9' " \
+			+ "stroke-linecap='round' stroke-linejoin='round'>" + inner + "</g></svg>"
+		_pin_textures[s] = _svg_texture(svg)
+	var tex: Texture2D = _pin_textures[s]
+	return tex
+
+
+func _build_reach_decal() -> void:
+	# A soft disc with a crisp rim, projected onto the ground (and anything on it)
+	# round the mouse while a service building is being placed: where it would
+	# reach. Brighter in the middle, where it would cover fully.
+	const SIZE := 256
+	var img := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RGBA8)
+	var full := (1.0 - 1.0 / 1.6) / (1.0 - Settings.COVERED / 1.6)   # full cover, as a share of the reach
+	for y in SIZE:
+		for x in SIZE:
+			var d := Vector2(x + 0.5 - SIZE * 0.5, y + 0.5 - SIZE * 0.5).length() / (SIZE * 0.5)
+			var a := 0.0
+			if d <= 1.0:
+				a = 0.16 if d < full else 0.07
+				a = maxf(a, smoothstep(0.955, 0.985, d) * 0.95)
+				if d < full:
+					a = maxf(a, smoothstep(full - 0.03, full - 0.01, d) * 0.6)
+			img.set_pixel(x, y, Color(1, 1, 1, a))
+	img.generate_mipmaps()
+	reach_decal = Decal.new()
+	reach_decal.texture_albedo = ImageTexture.create_from_image(img)
+	reach_decal.modulate = Color(0.82, 0.96, 1.0)
+	reach_decal.normal_fade = 0.6
+	reach_decal.upper_fade = 0.05
+	reach_decal.lower_fade = 0.05
+	reach_decal.visible = false
+	add_child(reach_decal)
+
+
+func show_reach(tile: Vector2i, reach_tiles: float) -> void:
+	# The disc a service building on `tile` would cover (reach_tiles: where it counts).
+	if tile.x < 0 or tile.y < 0 or tile.x >= map_w or tile.y >= map_h:
+		reach_decal.visible = false
+		return
+	var r := reach_tiles * cell
+	reach_decal.size = Vector3(r * 2.0, 900.0, r * 2.0)
+	reach_decal.position = ground_point(tile)
+	reach_decal.visible = true
+
+
+func hide_reach() -> void:
+	reach_decal.visible = false
 
 
 func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedByteArray,
@@ -2053,6 +2209,8 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 				Growth.ABANDONED:
 					return Color(OV_ABANDONED, 0.95)
 		Overlay.SERVICES:
+			if service_filter >= 0:
+				return _one_service_colour(i, t, zone, service)
 			if service:
 				return Color(OV_BLUE, 0.95)
 			var n: int = sim.services_covering(i)
@@ -2085,6 +2243,25 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 			var step: int = 0 if sim.traffic_quiet(i) else sim.traffic_band(i) + 1
 			return Color(TRAFFIC_COLOURS[step], TRAFFIC_GROUND_ALPHA[step])
 	return none
+
+
+func _one_service_colour(i: int, t: int, zone: bool, service: bool) -> Color:
+	# The Services view showing one service (see _service_legend): its cover in
+	# greens, the plots that want it and don't have it in red (held back now) or
+	# orange, its buildings blue and the other services' buildings grey.
+	var s := service_filter
+	if service:
+		return Color(OV_BLUE, 0.95) if t == Tile.POLICE + s else Color(OV_GREY, 0.6)
+	var band: int = sim.cover_strength(s, i)
+	if zone:
+		if band >= 2:
+			return Color(OV_GREEN if band == 3 else OV_LIGHT_GREEN, 0.9)
+		if sim.service_matters(s, i):
+			return Color(OV_RED if sim.service_holds_back(s, i) else OV_ORANGE, 0.92)
+		return Color(OV_GREY, 0.45)
+	if band >= 2 and (t == Tile.EMPTY or t == Tile.PARK or t == Tile.WOODLAND):
+		return Color(OV_GREEN if band == 3 else OV_LIGHT_GREEN, 0.45)
+	return Color(0, 0, 0, 0)
 
 
 func _recolour_buildings() -> void:
@@ -5265,7 +5442,12 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 # -------------------------------------------------------------- day and night
 
 func set_time_of_day(t: float) -> void:
-	# t: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset.
+	# t: 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset. Map views are
+	# lit at MAP_VIEW_TIME whatever the clock says (clock_night keeps the real night).
+	_clock_time = t
+	clock_night = 1.0 - smoothstep(-0.12, 0.08, sin((t - 0.25) * TAU))
+	if overlay != Overlay.NONE:
+		t = MAP_VIEW_TIME
 	var phase := (t - 0.25) * TAU
 	var height := sin(phase)                       # above 0 = sun is up
 	var daylight := smoothstep(-0.08, 0.25, height)
