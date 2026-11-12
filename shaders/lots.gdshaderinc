@@ -33,6 +33,8 @@ const int K_GOLF = 16;
 const int K_YARD = 17;
 const int K_HOSPITAL = 18;
 const int K_MEADOW = 19;
+const int K_WOODS = 20;          // planted woodland (its own ground is the terrain's woods floor)
+const vec3 WOODS_FLOOR = vec3(0.20, 0.27, 0.12);   // = terrain.gdshader WOOD_FLOOR
 
 const int P_LAWN = 0;
 const int P_POND = 1;
@@ -616,6 +618,9 @@ bool lot_ground(Ctx c, out vec3 col, out float shine) {
 			if (diag == K_PARK) {
 				col = lawn(c, 1.0 + 0.6 * c.nC.g, rel.x * 0.7 + rel.y * 0.7) * (0.9 + 0.2 * c.nC.g);
 			}
+			if (diag == K_WOODS) {
+				col = lin(WOODS_FLOOR) * (0.75 + 0.5 * c.nD.r);
+			}
 			if (diag == K_INDUSTRY || diag == K_YARD) {
 				col = mix(gravel(c, lin(vec3(0.52, 0.50, 0.45))), rough_grass(c), smoothstep(0.4, 0.6, c.nD.g));
 			}
@@ -634,6 +639,16 @@ bool lot_ground(Ctx c, out vec3 col, out float shine) {
 	float along = dot(orel, vec2(-f.y, f.x));
 	float back = tile_metres * 0.5 + reach - dot(orel, f);
 	float depth = tile_metres + reach;
+	if (kind == K_WOODS) {
+		if (owner == tile) {
+			return false;     // the terrain paints the woods' floor (and their canopy from afar)
+		}
+		// A road's verge beside woodland: the woods' floor, then a mown strip by the kerb.
+		float out_m = dot(orel, f) - tile_metres * 0.5;    // metres out from the woodland
+		vec3 woods_floor = lin(WOODS_FLOOR) * (0.75 + 0.5 * c.nD.r);
+		col = mix(woods_floor, lawn(c, 0.55, along), smoothstep(8.0, 11.0, out_m + (c.nD.g - 0.5) * 5.0));
+		return true;
+	}
 	if (back < 0.0 && kind != K_PARK) {
 		// Between the kerb and the plot: a grass verge in the suburbs, paving in town.
 		bool paved = kind == K_SHOPS || kind == K_PLAZA || kind == K_CIVIC || kind == K_TENEMENTS

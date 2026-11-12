@@ -103,6 +103,7 @@ func _run() -> void:
 	await _save_and_load()
 	await _keyboard_shortcuts()
 	await _coast_and_slopes()
+	await _woodland()
 	await _new_city()
 	await _loans()
 	await _old_save()
@@ -857,6 +858,185 @@ func _coast_and_slopes() -> void:
 	check(wet == 0, "none of %d planted things stand in the sea (%d do)" % [total, wet])
 
 
+# ----------------------------------------------------------------- woodland
+
+func _woodland() -> void:
+	# Plant a strip of woodland between the works and the homes with no road, with
+	# the Build menu and a drag; then its hover card, no warnings, cleaner air and
+	# better land, bulldozing, saving and loading, and a big forest's cost.
+	var o := _origin
+	var wood := Simulation.Tile.WOODLAND
+	check(Simulation.Tile.HARBOUR == 28 and wood == 29 and Simulation.LAST_TILE == wood,
+		"woodland is a new tile number on the end (old saves' tiles keep their numbers)")
+	game.call("_set_speed", 0)
+	var a := o + Vector2i(7, 8)
+	var b := o + Vector2i(12, 9)
+	var home := o + Vector2i(11, 10)
+	var hi := home.y * sim.w + home.x
+	await _look_at(o + Vector2i(9, 9), PLAY_DISTANCE * 0.8, -40.0, 42.0, [a, b, home])
+	var free := _count(Simulation.Tile.EMPTY, a, b)
+	var smoke0 := sim.pollution_at(hi)
+	var value0: float = sim.land_value_map()[hi]
+	var trees0: int = world.planted_total()
+	await _pick_item("leisure", "woodland")
+	check(_tool() == LEISURE and int(game.call("_target_tile")) == wood, "Build menu > Leisure > Woodland picks woodland")
+	var rows: Dictionary = hud.get("_rows")
+	var row_name: Label = (rows["woodland"] as Dictionary)["name"]
+	check(String((rows["woodland"] as Dictionary)["cat"]) == "leisure" and row_name.text == "Woodland",
+		"the Woodland row is in the Leisure list")
+	var expected := 0
+	for p: Vector2i in game.call("_box", a, b):
+		if sim.tiles[p.y * sim.w + p.x] == Simulation.Tile.EMPTY:
+			expected += int(game.call("_tool_cost", p))
+	var money := sim.money
+	await _drag(_screen_of(a), _screen_of(b), MOUSE_BUTTON_LEFT, false)
+	var info: Label = hud.info_label
+	check(world.preview.multimesh.instance_count == 12 and info.text.begins_with("Woodland") and info.text.contains("£"),
+		"dragging woodland previews 12 tiles with the cost: \"%s\"" % info.text)
+	await _press(_screen_of(b), MOUSE_BUTTON_LEFT, false)
+	await _frames(3)
+	check(_count(wood, a, b) == free and free >= 10, "woodland planted on the %d open tiles dragged over" % free)
+	check(money - sim.money == expected and expected > 0 and expected <= free * 30,
+		"it cost %s (about £20 a tile; %s expected)" % [Hud.money_text(money - sim.money), Hud.money_text(expected)])
+	var trees1: int = world.planted_total()
+	check(trees1 > trees0, "its trees appear straight away (%d tree parts)" % (trees1 - trees0))
+	# No warnings, never "not working", no upkeep.
+	var warn_image: Image = world.get("warn_image")
+	var warned := 0
+	var idle := 0
+	for p: Vector2i in game.call("_box", a, b):
+		var i := p.y * sim.w + p.x
+		if sim.tiles[i] != wood:
+			continue
+		if warn_image.get_pixelv(p) != Color(0, 0, 0, 0):
+			warned += 1
+		if not sim.building_working(i):
+			idle += 1
+	check(warned == 0 and idle == 0, "woodland gets no warning icons and always counts as working (%d, %d)" % [warned, idle])
+	var survey: Dictionary = Advisors._survey(sim)
+	var broken: Array = survey["broken"]
+	check(not broken.any(func(k: int) -> bool: return sim.tiles[k] == wood), "the advisors don't count woodland as not working")
+	check(int(sim.info(wood).get("upkeep", 0)) == 0, "woodland has no upkeep")
+	# Cleaner air and better land for the homes beside it.
+	var smoke1 := sim.pollution_at(hi)
+	var value1: float = sim.land_value_map()[hi]
+	check(smoke1 < smoke0, "the air beside it is cleaner (pollution %.2f -> %.2f)" % [smoke0, smoke1])
+	check(value1 > value0, "land beside it is worth more (%.3f -> %.3f)" % [value0, value1])
+	# The hover card.
+	var spot := o + Vector2i(9, 8)
+	await _move(_screen_of(spot))
+	await _move(_screen_of(spot) + Vector2(1, 1))
+	var title: Label = hud.get("_info_title")
+	check(game.get("hover") == spot and title.text.begins_with("Woodland"), "the hover card says \"%s\"" % title.text)
+	check(not title.text.contains("road") and not title.text.contains("not working"), "...and nothing about roads")
+	await _move(Vector2(1, 1))
+	await _shot("p15_woodland")
+	game.call("_set_overlay", WorldView.Overlay.POLLUTION)
+	await _shot("p16_woodland_pollution")
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	# Save, bulldoze a row, load: it all comes back.
+	await _key(KEY_S, true)
+	var saved := JSON.stringify(sim.to_save())
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
+	var saved_tiles: Array = (data as Dictionary).get("tiles", [])
+	check(int(saved_tiles[spot.y * sim.w + spot.x]) == wood, "the save file holds the woodland")
+	await _click(hud.bulldoze_button)
+	await _drag(_screen_of(o + Vector2i(7, 9)), _screen_of(o + Vector2i(12, 9)))
+	await _frames(3)
+	check(_count(wood, o + Vector2i(7, 9), o + Vector2i(12, 9)) == 0, "bulldozing clears woodland")
+	check(world.planted_total() < trees1, "...and its trees go (%d -> %d)" % [trees1, world.planted_total()])
+	await _key(KEY_L, true)
+	await _frames(3)
+	check(_count(wood, a, b) == free and JSON.stringify(sim.to_save()) == saved, "save then load brings the woodland back")
+	check(world.planted_total() == trees1, "...with exactly the same trees (%d)" % world.planted_total())
+	# A save from before woodland (no tile 29 anywhere) still loads.
+	var old := sim.to_save()
+	var old_tiles: Array = old["tiles"]
+	for k: int in old_tiles.size():
+		if int(old_tiles[k]) == wood:
+			old_tiles[k] = Simulation.Tile.EMPTY
+	old["version"] = 3
+	old["map"] = game.get("map_name")
+	old["width"] = sim.w
+	old["height"] = sim.h
+	var path := "user://troon_playtest_pre_woodland.json"
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(old))
+	f.close()
+	game.call("_load_game", path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+	await _frames(3)
+	check(sim.count_of(wood) == 0 and world.planted_total() == trees0, "a save from before woodland loads, with none")
+	await _key(KEY_L, true)
+	await _frames(3)
+	await _big_forest()
+
+
+func _big_forest() -> void:
+	# What a 20 x 20 forest costs to draw: tree parts and the time to plant it.
+	var water: PackedByteArray = game.get("water")
+	var best := Vector2i(-1, -1)
+	var best_d := 1 << 30
+	for y: int in range(2, sim.h - 22, 2):
+		for x: int in range(2, sim.w - 22, 2):
+			var ok := true
+			for dy: int in 20:
+				for dx: int in 20:
+					var i := (y + dy) * sim.w + x + dx
+					if water[i] == 1 or sim.tiles[i] != Simulation.Tile.EMPTY:
+						ok = false
+						break
+				if not ok:
+					break
+			var d := (Vector2i(x, y) - _origin).length_squared()
+			if ok and d < best_d:
+				best = Vector2i(x, y)
+				best_d = d
+	if best.x < 0:
+		check(false, "found open land for a 20 x 20 forest")
+		return
+	var centre := best + Vector2i(10, 10)
+	var ci := centre.y * sim.w + centre.x
+	var value0: float = sim.land_value_map()[ci]
+	var smoke0 := sim.pollution_at(ci)
+	var parts0: int = world.planted_total()
+	print("[play] woods before the 20 x 20 forest: %s" % world.woods_report())
+	await _look_at(centre, 1400.0, -40.0, 40.0)
+	await _speed_here("before a 20 x 20 forest")
+	var money := sim.money
+	sim.money = 100000
+	game.call("_choose_item", "woodland")
+	game.set("drag_start", best)
+	game.set("drag_plan", game.call("_plan_tiles", best, best + Vector2i(19, 19)))
+	var t0 := Time.get_ticks_usec()
+	game.call("_finish_drag")
+	var sim_ms := (Time.get_ticks_usec() - t0) / 1000.0
+	t0 = Time.get_ticks_usec()
+	world.refresh_ground(true)
+	var ground_ms := (Time.get_ticks_usec() - t0) / 1000.0
+	game.set("_layout_seen", sim.layout_version)
+	var planted := _count(Simulation.Tile.WOODLAND, best, best + Vector2i(19, 19))
+	print("[play] planted %d woodland tiles at %s: the build %.0f ms, redrawing the ground %.0f ms (of which the trees %.0f ms); %s" % [
+		planted, best, sim_ms, ground_ms, float(world.get("planted_refresh_ms")), world.woods_report()])
+	check(planted >= 350 and world.planted_total() > parts0, "a 20 x 20 forest is planted (%d tiles)" % planted)
+	# However big the forest, the land value it adds is capped (and it's clean air here already).
+	var gain: float = sim.land_value_map()[ci] - value0
+	print("[play] land value in the middle of the forest %.3f -> %.3f, pollution %.2f -> %.2f" % [value0,
+		sim.land_value_map()[ci], smoke0, sim.pollution_at(ci)])
+	check(gain <= Settings.WOODLAND_VALUE_MAX + 0.001 + Settings.POLLUTION_VALUE_EFFECT * smoke0,
+		"a big forest adds at most %.2f land value (%.3f)" % [Settings.WOODLAND_VALUE_MAX, gain])
+	await _frames(5)
+	await _speed_here("with a 20 x 20 forest in view")
+	# Bulldoze it again.
+	game.call("_choose_item", "bulldoze")
+	game.set("drag_start", best)
+	game.set("drag_plan", game.call("_plan_tiles", best, best + Vector2i(19, 19)))
+	game.call("_finish_drag")
+	world.refresh_ground(true)
+	game.set("_layout_seen", sim.layout_version)
+	check(world.planted_total() == parts0, "bulldozing the forest takes all its trees away (%d)" % world.planted_total())
+	sim.money = money
+	game.call("_refresh_hud")
 
 
 # ------------------------------------------------------ difficulty and loans

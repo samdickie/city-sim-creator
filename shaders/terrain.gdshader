@@ -25,7 +25,7 @@ uniform float shore_level = 0.36;                   // land mask value at the wa
 uniform sampler2D land_map : filter_linear, repeat_disable;   // per tile: R = damp, G = woods, B = near the sea
 uniform vec2 land_origin = vec2(0.0);               // world x, z of land_map's corner
 uniform vec2 land_size = vec2(1.0);                 // land_map's size in metres
-uniform sampler2D built_map : filter_linear, repeat_disable;  // per map tile: R = built on
+uniform sampler2D built_map : filter_linear, repeat_disable;  // per map tile: R = built on, G = planted woodland
 uniform sampler2D noise_tex : filter_linear_mipmap, repeat_enable;  // four smooth noises (RGBA)
 uniform float normal_boost = 2.2;                   // slopes catch the light more, so low hills read
 
@@ -183,8 +183,13 @@ void fragment() {
 	vec4 land = texture(land_map, (p - land_origin) / land_size) * (1.0 - far_land);
 	vec2 tile_uv = p / map_size;
 	bool inside = tile_uv.x >= 0.0 && tile_uv.y >= 0.0 && tile_uv.x <= 1.0 && tile_uv.y <= 1.0;
-	float built = inside ? texture(built_map, tile_uv).r : 0.0;
+	vec2 built_planted = inside ? texture(built_map, tile_uv).rg : vec2(0.0);
+	float built = built_planted.r;
 	float wild = 1.0 - built;
+	// Planted woodland counts as woods, as natural woods do in the land map, out
+	// to its tile's edge (and ragged a little beyond).
+	float planted = smoothstep(0.25, 0.5, built_planted.g);
+	float wood_land = max(land.g, planted);
 	float px = max(length(fwidth(p)), 0.05);              // metres covered by one pixel here
 
 	// Smooth noise at four scales: slow drifts, broad patches, small patches, fine.
@@ -203,7 +208,7 @@ void fragment() {
 	col *= vec3(0.94 + 0.12 * nA.r, 1.0, 0.94 + 0.12 * nA.b);
 
 	// --- Fields with hedges in open country; conifer plantations on the hills.
-	float farm = wild * (1.0 - smoothstep(0.12, 0.4, land.g)) * (1.0 - smoothstep(0.08, 0.35, land.b))
+	float farm = wild * (1.0 - smoothstep(0.12, 0.4, wood_land)) * (1.0 - smoothstep(0.08, 0.35, land.b))
 		* (1.0 - smoothstep(0.2, 0.32, slope)) * (1.0 - smoothstep(farm_max_height - 15.0, farm_max_height + 15.0, h));
 	float plantation = 0.0;
 	float hedge_shade = 1.0;
@@ -276,7 +281,7 @@ void fragment() {
 	crowns = smoothstep(0.32, 0.68, crowns);
 	vec3 canopy = mix(lin(vec3(0.10, 0.17, 0.07)), lin(vec3(0.27, 0.38, 0.14)), crowns)
 		* (0.85 + 0.3 * nB.g);
-	float woods = smoothstep(0.42, 0.58, land.g + (nC.a - 0.5) * 0.25 + (nD.g - 0.5) * 0.12) * wild;
+	float woods = smoothstep(0.42, 0.58, wood_land + (nC.a - 0.5) * 0.25 + (nD.g - 0.5) * 0.12) * max(wild, planted);
 	col = mix(col, mix(lin(WOOD_FLOOR) * (0.75 + 0.5 * nD.r), canopy, far_trees), woods * 0.92);
 	col = mix(col, mix(lin(NEEDLES) * (0.8 + 0.4 * nD.r), canopy * vec3(0.72, 0.85, 0.85), far_trees), plantation * 0.92);
 
@@ -288,7 +293,7 @@ void fragment() {
 	col = mix(col, rock, smoothstep(0.3, 0.45, slope + (nC.a - 0.5) * 0.12));
 
 	// --- The shore: dune grass, then dry sand, wet sand at the water, seabed below.
-	float dune = smoothstep(0.3, 0.75, land.b + (nB.b - 0.5) * 0.3) * wild * (1.0 - plantation);
+	float dune = smoothstep(0.3, 0.75, land.b + (nB.b - 0.5) * 0.3) * wild * (1.0 - plantation) * (1.0 - woods * planted);
 	vec3 dune_col = lin(DUNE) * (0.85 + 0.3 * nD.r) * (0.85 + 0.3 * smoothstep(0.4, 0.6, nC.g));
 	col = mix(col, dune_col, dune * 0.85);
 	float m = coast + (nC.g - 0.5) * 0.06 + (nD.b - 0.5) * 0.03;

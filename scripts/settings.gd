@@ -112,6 +112,17 @@ const POWER_LINE_COST := 5
 const PARK_COST := 100
 const PARK_UPKEEP := 1.0          # £ per park tile per month
 
+# --- Woodland (planted trees; cost in BUILDINGS["woodland"], no upkeep) ---
+# Weaker than a park tile for tile, and capped, so a huge cheap forest can't
+# stand in for parks: whatever the size of the woods round a tile, it gets at
+# most WOODLAND_VALUE_MAX land value and WOODLAND_CLEANING_MAX less pollution.
+# (No leisure appeal: parks don't add any per tile either.)
+const WOODLAND_VALUE := 0.025         # land value per woodland tile, fading out over...
+const WOODLAND_VALUE_RADIUS := 2      # ...this many tiles (a park: 0.07 over 3)
+const WOODLAND_VALUE_MAX := 0.05      # the most all the woodland round a tile can add (about one park tile's worth)
+const WOODLAND_CLEANING := 0.06       # pollution soaked up per tile, within PARK_CLEANING_SPREAD (a park: 0.1)
+const WOODLAND_CLEANING_MAX := 0.25   # the most all the woodland round a tile can soak up (a works makes 0.06-0.18)
+
 # --- Services (in this order: police, fire, school, hospital) ---
 const SERVICE_NAMES := ["Police station", "Fire station", "School", "Hospital"]
 const SERVICE_WORDS := ["police", "fire", "school", "hospital"]
@@ -152,6 +163,7 @@ const SKYSCRAPER_TRANSIT := 12      # ...and a working station or bus depot with
 #   port_jobs                 extra industry demand a harbour brings
 #   near_sea                  must be built next to the sea
 #   only_one                  the town can only have one
+#   no_road                   works without a road (woodland)
 const BUILDINGS := {
 	"coal": {"name": "Coal power plant", "cost": 3000, "upkeep": 100, "power": 200,
 		"value": -0.15, "radius": 5, "about": "Cheap power, but smoky: pollutes the air and lowers land value nearby"},
@@ -171,6 +183,8 @@ const BUILDINGS := {
 		"value": -0.06, "radius": 3, "about": "Takes the rubbish of 800 residents per tile; nobody wants to live by it"},
 	"recycling": {"name": "Recycling centre", "cost": 2500, "upkeep": 70, "rubbish": 2500, "uses_power": 3,
 		"unlock": 1000, "value": -0.01, "radius": 2, "about": "Takes the rubbish of 2,500 residents, cleanly"},
+	"woodland": {"name": "Woodland", "cost": 20, "area": true, "no_road": true,
+		"about": "Plant trees: drag out a forest. Cleans the air a little and raises land value nearby; no upkeep, needs no road"},
 	"golf": {"name": "Golf course", "cost": 150, "upkeep": 2, "area": true, "value": 0.07, "radius": 3,
 		"appeal": 0.004, "about": "Fairways, greens and bunkers (drag to lay out holes); raises land value"},
 	"library": {"name": "Library", "cost": 1200, "upkeep": 40, "uses_power": 2, "unlock": 500,

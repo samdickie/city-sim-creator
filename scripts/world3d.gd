@@ -59,7 +59,8 @@ const PAVING_SHADER = preload("res://shaders/paving.gdshader")
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
-	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
+	WOODLAND }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -207,6 +208,7 @@ const LOT_GOLF := 16
 const LOT_YARD := 17         # concrete and gravel: fire station, depots, utilities, power stations
 const LOT_HOSPITAL := 18
 const LOT_MEADOW := 19       # rough grass under wind turbines and solar panels
+const LOT_WOODS := 20        # planted woodland: the terrain paints its floor; a road's verge beside it is woods floor too
 const SIDES: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 var _lot_kind := PackedByteArray()
 var _lot_detail := PackedByteArray()
@@ -268,6 +270,18 @@ const BARK := Color(0.30, 0.22, 0.15)
 const BIRCH_BARK := Color(0.80, 0.78, 0.72)
 const PINE_BARK := Color(0.45, 0.28, 0.17)
 var _tile_has_trees := PackedByteArray()       # 1 = that tile's trees are showing
+var _clumps: FastNoiseLite                     # glades and thickets inside woods (natural and planted)
+var _wood_per_row := 1                         # woods squares across the padded map
+var _wood_bark: Material
+var _wood_leaves: Material
+var _natural_tree_parts := 0                   # instances in the natural woods (for the dev tools)
+# Planted woodland: drawn like the natural woods, in the same squares, filled
+# again only where woodland (or the woods round it) changed.
+var _forest := PackedByteArray()               # per map tile: 0 open, 1 woodland, 2 untouched natural woods, 3 road or power line
+var _natural_woods := PackedByteArray()        # per map tile: 1 = thick natural woods (land map)
+var _planted_nodes := {}                       # woods square -> [trunks, canopies, cones] MultiMeshInstance3D
+var _planted_parts := {}                       # woods square -> instances in it
+var planted_refresh_ms := 0.0                  # how long the last change to the planted woods took (dev tools)
 # --- Map overlays (land value, power, roads, growth) ---
 enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS, POLLUTION }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL, ABANDONED }   # same order as simulation.gd
@@ -510,7 +524,7 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 	terrain_material.set_shader_parameter("land_map", land_map_texture)
 	terrain_material.set_shader_parameter("land_origin", Vector2(-PADDING, -PADDING) * cell)
 	terrain_material.set_shader_parameter("land_size", Vector2(gw, gh) * cell)
-	built_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_R8)
+	built_image = Image.create_empty(map_w, map_h, false, Image.FORMAT_RG8)
 	built_texture = ImageTexture.create_from_image(built_image)
 	terrain_material.set_shader_parameter("built_map", built_texture)
 	_noise_tex = _noise_texture()
@@ -1229,7 +1243,7 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				elif power[i] == 0:
 					warn.g = 1.0
 			elif sim.is_building(t):
-				if not sim.makes_power(t):
+				if not sim.makes_power(t) and not sim.needs_nothing(t):
 					if reach[i] > Settings.ROAD_REACH:
 						warn.r = 1.0
 					elif not sim.building_working(i):
@@ -1244,17 +1258,20 @@ func refresh_ground(layout_changed: bool = true) -> void:
 		_build_power_lines(tiles)
 		_update_natural_trees(tiles)
 		_update_built_map(tiles)
+		_update_planted_woods(tiles)
 
 
 func _update_built_map(tiles: PackedByteArray) -> void:
 	# Fields, woods' dark ground and the wild look give way where anything is
-	# built (power lines just cross the fields).
+	# built (power lines just cross the fields). Planted woodland stays wild, and
+	# (G) gets the woods' dark ground, as if the land map said woods there.
 	for y in map_h:
 		for x in map_w:
 			var i := y * map_w + x
 			var t := tiles[i]
-			var built := (t != Tile.EMPTY and t != Tile.POWER_LINE) or _infill[i] != 0
-			built_image.set_pixel(x, y, Color(1.0 if built else 0.0, 0.0, 0.0))
+			var planted := t == Tile.WOODLAND
+			var built := (t != Tile.EMPTY and t != Tile.POWER_LINE and not planted) or _infill[i] != 0
+			built_image.set_pixel(x, y, Color(1.0 if built else 0.0, 1.0 if planted else 0.0, 0.0))
 	built_texture.update(built_image)
 
 
@@ -1341,6 +1358,8 @@ func refresh_buildings() -> void:
 		_current_owner = i
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
+		elif t == Tile.WOODLAND:
+			pass    # (its trees are drawn with the woods: _update_planted_woods)
 		elif sim.is_building(t):
 			_plan_building(i, t, wall_list, roof_list, chimney_list)
 		elif ZONE_TINTS.has(t) and lv > 0 and sim.is_abandoned(i):
@@ -1506,6 +1525,8 @@ func _plan_lots() -> void:
 					kind = LOT_GOLF
 				Tile.WIND, Tile.SOLAR:
 					kind = LOT_MEADOW
+				Tile.WOODLAND:
+					kind = LOT_WOODS
 				Tile.FIRE, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
 						Tile.LANDFILL, Tile.RECYCLING, Tile.BUS_DEPOT, Tile.HARBOUR:
 					kind = LOT_YARD
@@ -2015,7 +2036,7 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 				c = OV_YELLOW
 			if zone:
 				return Color(c, 0.9)
-			if t == Tile.EMPTY or t == Tile.PARK:
+			if t == Tile.EMPTY or t == Tile.PARK or t == Tile.WOODLAND:
 				return Color(c, 0.45) if n > 0 else none
 			return none
 		Overlay.POLLUTION:
@@ -3042,7 +3063,7 @@ func _infill_kind(x: int, y: int) -> int:
 			if n.x < 0 or n.y < 0 or n.x >= map_w or n.y >= map_h:
 				continue
 			var nt: int = sim.tiles[n.y * map_w + n.x]
-			if nt != Tile.EMPTY and nt != Tile.POWER_LINE:
+			if nt != Tile.EMPTY and nt != Tile.POWER_LINE and nt != Tile.WOODLAND:
 				built += 1
 			if nt == Tile.ROAD and absi(dx) + absi(dy) == 1:
 				road_beside = true
@@ -4539,6 +4560,8 @@ func _build_trees() -> void:
 	var clumps := FastNoiseLite.new()               # glades and thickets inside woods
 	clumps.seed = 31
 	clumps.frequency = 0.011
+	_clumps = clumps                                # (planted woodland uses the same)
+	_wood_per_row = per_row
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 2026
 	for gz in gh:
@@ -4592,6 +4615,8 @@ func _build_trees() -> void:
 	bark.roughness = 0.95
 	var leaves := ShaderMaterial.new()
 	leaves.shader = FOLIAGE_SHADER
+	_wood_bark = bark
+	_wood_leaves = leaves
 	for n in chunk_count:
 		var chunk: Array = lists[n]
 		for mesh_id: int in 3:
@@ -4608,6 +4633,7 @@ func _build_trees() -> void:
 				else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
 			woods.add_child(node)
 			_wood_nodes.append(node)
+			_natural_tree_parts += items.size()
 	_set_tree_range(TREE_RANGE_MIN)
 
 
@@ -4951,9 +4977,10 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 
 
 func _update_natural_trees(tiles: PackedByteArray) -> void:
-	# Trees stay on open land; building anything clears them (parks plant their own).
+	# Trees stay on open land; building anything clears them (parks plant their
+	# own). Woodland keeps them, and is filled in round them (_update_planted_woods).
 	for i in tiles.size():
-		var show := 1 if (tiles[i] == Tile.EMPTY and _infill[i] == 0) else 0   # (parks plant their own)
+		var show := 1 if ((tiles[i] == Tile.EMPTY and _infill[i] == 0) or tiles[i] == Tile.WOODLAND) else 0
 		if show == _tile_has_trees[i]:
 			continue
 		_tile_has_trees[i] = show
@@ -4962,6 +4989,169 @@ func _update_natural_trees(tiles: PackedByteArray) -> void:
 		for part: int in _parts_in_tile[i]:
 			var mm: MultiMesh = _wood_mms[_part_mesh[part]]
 			mm.set_instance_transform(_part_index[part], _part_xf[part] if show == 1 else _hidden)
+
+
+const WOODLAND_EDGE := 75.0     # metres in from the edge of a forest before planted trees are at their thickest
+const WOODLAND_SETBACK := 4.0   # planted trees stand at least this far back from open or built land
+const WOODLAND_EDGE_THICK := 0.55   # how wooded the very edge is (0-1, as the land map's woods; 1 inside)
+
+
+func _update_planted_woods(tiles: PackedByteArray) -> void:
+	# Trees on woodland tiles, planted to look like the natural woods: the same
+	# kinds, sizes and clumps (_wood_kind, _clumps), bigger and closer inside a
+	# forest and thinner at its edge, where birch come in. Natural woods next door
+	# count as forest, so the two join up without an edge between them; natural
+	# trees already on a woodland tile stay, and are only filled in round.
+	# Every tree is seeded by its own spot, so nothing else built ever reshapes
+	# it. Only the woods squares near a change are filled again.
+	var t0 := Time.get_ticks_usec()
+	if _natural_woods.is_empty():
+		_natural_woods.resize(tiles.size())
+		for i in tiles.size():
+			_natural_woods[i] = 1 if water[i] == 0 and _land_value(i % map_w + PADDING, i / map_w + PADDING, 1) > 0.5 else 0
+	var forest := PackedByteArray()
+	forest.resize(tiles.size())
+	for i in tiles.size():
+		if tiles[i] == Tile.WOODLAND:
+			forest[i] = 1
+		elif tiles[i] == Tile.EMPTY and _infill[i] == 0 and _natural_woods[i] == 1:
+			forest[i] = 2
+		elif tiles[i] == Tile.ROAD or tiles[i] == Tile.POWER_LINE:
+			forest[i] = 3     # (a road or a line through the woods doesn't make an edge to thin)
+	if _forest.size() != forest.size():
+		_forest.resize(forest.size())
+		_forest.fill(0)
+	var dirty := {}
+	for i in tiles.size():
+		if forest[i] == _forest[i]:
+			continue
+		# A change reaches the trees two tiles round it (how far in from the edge they are).
+		var x := i % map_w
+		var y := i / map_w
+		for gz: int in [y - 2 + PADDING, y + 2 + PADDING]:
+			for gx: int in [x - 2 + PADDING, x + 2 + PADDING]:
+				dirty[(gz / TREE_CHUNK_TILES) * _wood_per_row + gx / TREE_CHUNK_TILES] = true
+	_forest = forest
+	if dirty.is_empty():
+		return
+	for n: int in dirty:
+		_plant_woods_square(n)
+	planted_refresh_ms = (Time.get_ticks_usec() - t0) / 1000.0
+
+
+func _plant_woods_square(n: int) -> void:
+	# Fill one woods square's planted woodland (TREE_CHUNK_TILES across, the same
+	# squares as the natural woods).
+	var lists: Array = [[], [], []]
+	var gx0 := (n % _wood_per_row) * TREE_CHUNK_TILES - PADDING
+	var gz0 := (n / _wood_per_row) * TREE_CHUNK_TILES - PADDING
+	for y in range(maxi(gz0, 0), mini(gz0 + TREE_CHUNK_TILES, map_h)):
+		for x in range(maxi(gx0, 0), mini(gx0 + TREE_CHUNK_TILES, map_w)):
+			if _forest[y * map_w + x] == 1:
+				_plant_woodland_tile(x, y, lists)
+	var count := 0
+	for mesh_id: int in 3:
+		var items: Array = lists[mesh_id]
+		count += items.size()
+	_planted_parts[n] = count
+	if not _planted_nodes.has(n):
+		if count == 0:
+			return        # (nothing planted here yet: no nodes needed)
+		var made: Array = []
+		for k: int in 3:
+			var node := MultiMeshInstance3D.new()
+			node.multimesh = _new_multimesh(_wood_meshes[k], false)
+			node.material_override = _wood_bark if k == 0 else _wood_leaves
+			node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF if k == 0 \
+				else GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+			node.visibility_range_end = _tree_range
+			node.visibility_range_end_margin = _tree_range * 0.1
+			woods.add_child(node)
+			_wood_nodes.append(node)
+			made.append(node)
+		_planted_nodes[n] = made
+	var nodes: Array = _planted_nodes[n]
+	for mesh_id: int in 3:
+		var items: Array = lists[mesh_id]
+		var node: MultiMeshInstance3D = nodes[mesh_id]
+		_fill(node.multimesh, items, false)
+		node.visible = not items.is_empty()
+
+
+func _is_forest(x: int, y: int) -> bool:
+	# Woodland, untouched natural woods, or a road or power line (the woods run
+	# right up to a lane, as they do to each other). Beyond the map edge: natural woods.
+	if x < 0 or y < 0 or x >= map_w or y >= map_h:
+		return _land_value(x + PADDING, y + PADDING, 1) > 0.5
+	return _forest[y * map_w + x] != 0
+
+
+func _plant_woodland_tile(x: int, y: int, lists: Array) -> void:
+	var corner := Vector2(x * cell, y * cell)
+	# Which sides open onto land that isn't forest (trees stand back from them).
+	var lo := Vector2(0.0, 0.0)
+	var hi := Vector2(cell, cell)
+	if not _is_forest(x - 1, y):
+		lo.x = WOODLAND_SETBACK
+	if not _is_forest(x + 1, y):
+		hi.x = cell - WOODLAND_SETBACK
+	if not _is_forest(x, y - 1):
+		lo.y = WOODLAND_SETBACK
+	if not _is_forest(x, y + 1):
+		hi.y = cell - WOODLAND_SETBACK
+	# Open or built tiles within two tiles: how far in from the forest's edge each tree is.
+	var open: Array[Rect2] = []
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
+			if (dx != 0 or dy != 0) and not _is_forest(x + dx, y + dy):
+				open.append(Rect2(Vector2(x + dx, y + dy) * cell, Vector2(cell, cell)))
+	var natural := _land_value(x + PADDING, y + PADDING, 1)
+	var natural_thick := smoothstep(0.15, 0.75, natural) if natural > 0.15 else 0.0
+	var rng := RandomNumberGenerator.new()
+	for s in 9:
+		# Every number is drawn in the same order whatever happens, so a tree only
+		# changes if its own place in the forest does.
+		rng.seed = hash(Vector3i(x, y, s)) + 4093
+		var f := Vector2((s % 3 + rng.randf_range(0.1, 0.9)) / 3.0, (s / 3 + rng.randf_range(0.1, 0.9)) / 3.0) * cell
+		var keep := rng.randf()
+		var taken := rng.randf()
+		var size := rng.randf()
+		f = f.clamp(lo, hi)
+		var at := corner + f
+		var edge := WOODLAND_EDGE
+		for r: Rect2 in open:
+			var nearest := at.clamp(r.position, r.end)
+			edge = minf(edge, at.distance_to(nearest))
+		var wood := WOODLAND_EDGE_THICK + (1.0 - WOODLAND_EDGE_THICK) * smoothstep(0.0, WOODLAND_EDGE, edge)
+		var clump := _clumps.get_noise_2d(at.x, at.y) * 0.5 + 0.5
+		var thick := smoothstep(0.15, 0.75, wood)
+		if keep > thick * (0.45 + 0.8 * clump) or coast_at(at.x, at.y) < SHORE_LEVEL + 0.4:
+			continue
+		if taken < natural_thick * (0.45 + 0.8 * clump):
+			continue     # a natural tree stands about here already
+		var inner := wood > 0.85 and clump > 0.45
+		var kind := _wood_kind(wood, clump, rng)
+		var tall := lerpf(12.0, 20.0, size) if inner else lerpf(8.0, 15.0, size)
+		var tree := _tree(at, tall, kind, rng, 1.6 if inner else 1.15, true)
+		for mesh_id: int in 3:
+			if mesh_id == 0 and inner:
+				continue    # deep in a wood the trunks can't be seen
+			var target: Array = lists[mesh_id]
+			target.append_array(tree[mesh_id])
+
+
+func planted_total() -> int:
+	# Instances (trunks, canopy blobs, cones) in the planted woodland.
+	var planted := 0
+	for n: int in _planted_parts:
+		planted += int(_planted_parts[n])
+	return planted
+
+
+func woods_report() -> String:
+	# Instances in the natural and planted woods (for the dev tools).
+	return "natural woods %d, planted woodland %d (last change %.0f ms)" % [_natural_tree_parts, planted_total(),
+		planted_refresh_ms]
 
 
 func _build_city_trees(tiles: PackedByteArray) -> void:
@@ -5023,7 +5213,7 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
 							or bt == Tile.HARBOUR or bt == Tile.RECYCLING:
 						continue
-					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE:
+					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = ROAD_HALF_WIDTH + 2.6   # in the pavement in front of the buildings
 				for k in 4:
 					if rng.randf() < 0.12:

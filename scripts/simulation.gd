@@ -9,7 +9,8 @@ const Settings = preload("res://scripts/settings.gd")
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
-	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
+	WOODLAND }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -17,9 +18,9 @@ const BUILDING_KEYS := {
 	Tile.LANDFILL: "landfill", Tile.RECYCLING: "recycling", Tile.GOLF: "golf",
 	Tile.LIBRARY: "library", Tile.MUSEUM: "museum", Tile.STADIUM: "stadium", Tile.MARINA: "marina",
 	Tile.TOWN_HALL: "town_hall", Tile.BUS_DEPOT: "bus_depot", Tile.STATION: "station",
-	Tile.HARBOUR: "harbour",
+	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland",
 }
-const LAST_TILE := Tile.HARBOUR
+const LAST_TILE := Tile.WOODLAND   # (new tiles go on the end, so saved tile numbers never change)
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -30,7 +31,7 @@ const COMPLAINTS := {
 	"housing": ["homes too dear (housing shortage)", "zone more homes, or zone them denser"],
 	"power": ["homes without power", "build another power plant, or link the homes to one"],
 	"water": ["homes without water", "build a water pump or tower"],
-	"pollution": ["polluted air near homes", "keep homes away from industry and coal, or plant parks between"],
+	"pollution": ["polluted air near homes", "keep homes away from industry and coal, or plant parks or woodland between"],
 }
 # The parts businesses weigh too. The rest (jobs, housing, power and water at
 # home) only residents feel, so they don't put shops and industry off.
@@ -99,6 +100,7 @@ var _sea_near := PackedFloat32Array() # 1 by the sea, fading to 0 inland
 var pollution := PackedFloat32Array() # 0 (clean air) to 1 (heavy) for every tile; worked out with land value
 var polluted_share := 0.0             # 0-1: share of residents living in polluted air
 var _value_dirty := true
+var _wood_effect := PackedFloat32Array() # scratch: woodland's land value or cleaning round each tile (capped)
 var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 = 100%
 var services := [0, 0, 0, 0]          # how many of each service the town has
 var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
@@ -867,6 +869,11 @@ func makes_power(t: int) -> bool:
 	return int(info(t).get("power", 0)) > 0
 
 
+func needs_nothing(t: int) -> bool:
+	# Woodland: no road, power or water, and never "not working".
+	return bool(info(t).get("no_road", false))
+
+
 func can_build_here(t: int, i: int) -> String:
 	# "" if this building may go on this tile; otherwise why not.
 	var d := info(t)
@@ -892,9 +899,9 @@ func _beside_sea(i: int) -> bool:
 
 
 func building_working(i: int) -> bool:
-	# Power plants just work. Everything else needs a road, and power if it uses any.
+	# Power plants and woodland just work. Everything else needs a road, and power if it uses any.
 	var t: int = tiles[i]
-	if makes_power(t):
+	if makes_power(t) or needs_nothing(t):
 		return true
 	if not near_road(i):
 		return false
@@ -908,6 +915,8 @@ func building_status(i: int) -> String:
 	var t: int = tiles[i]
 	if makes_power(t):
 		return "making %d units of power" % int(info(t)["power"])
+	if needs_nothing(t):
+		return "growing"
 	if not near_road(i):
 		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
 	if int(info(t).get("uses_power", 0)) > 0:
@@ -1301,6 +1310,8 @@ func _update_land_value() -> void:
 		match t:
 			Tile.PARK:
 				_spread(i, 3, Settings.PARK_BONUS)
+			Tile.WOODLAND:
+				pass    # (added up below, with a cap)
 			Tile.SHOPS:
 				if levels[i] > 0:
 					_spread(i, 3, Settings.SHOP_BONUS * stage(i))
@@ -1312,6 +1323,11 @@ func _update_land_value() -> void:
 					var radius: int = info(t).get("radius", 0)
 					if amount != 0.0:
 						_spread(i, radius, amount)
+	# Woodland: a little land value from the trees round about, never more than
+	# WOODLAND_VALUE_MAX however big the forest (so it can't replace parks).
+	_sum_woodland(Settings.WOODLAND_VALUE_RADIUS, Settings.WOODLAND_VALUE)
+	for i in w * h:
+		land_value[i] += minf(_wood_effect[i], Settings.WOODLAND_VALUE_MAX)
 	# Districts: a CBD is where everyone wants to be; the old town has character.
 	for i in w * h:
 		if district[i] == 2:
@@ -1327,6 +1343,26 @@ func _update_land_value() -> void:
 			land_value[i] += bonus * coverage[offset + i]
 	for i in w * h:
 		land_value[i] = clampf(land_value[i], 0.0, 1.0)
+
+
+func _sum_woodland(radius: int, amount: float) -> void:
+	# Into _wood_effect: every woodland tile's amount, fading out over radius tiles
+	# (as _spread does), added up round each tile.
+	if _wood_effect.size() != w * h:
+		_wood_effect.resize(w * h)
+	_wood_effect.fill(0.0)
+	if not tiles.has(Tile.WOODLAND):
+		return
+	for i in w * h:
+		if tiles[i] != Tile.WOODLAND:
+			continue
+		var cx := i % w
+		var cy := i / w
+		for y in range(maxi(cy - radius, 0), mini(cy + radius, h - 1) + 1):
+			for x in range(maxi(cx - radius, 0), mini(cx + radius, w - 1) + 1):
+				var d := Vector2(x - cx, y - cy).length()
+				if d <= radius + 0.5:
+					_wood_effect[y * w + x] += amount * (1.0 - d / (radius + 1.0))
 
 
 func _spread(i: int, radius: int, amount: float) -> void:
@@ -1431,7 +1467,7 @@ func _pollution_source(i: int) -> Vector2:
 
 func _measure_pollution() -> void:
 	# Each source adds its strength on its own tile, fading out at the edge of its
-	# spread; parks (and golf courses, half as much) soak a little up. Overlapping
+	# spread; parks (and golf courses, half as much; woodland, capped) soak a little up. Overlapping
 	# sources add up, then the total is eased into 0-1 (1 - e^-total), so a few
 	# sources together get close to 1 but never past it.
 	pollution.fill(0.0)
@@ -1445,8 +1481,11 @@ func _measure_pollution() -> void:
 			var src := _pollution_source(i)
 			if src.x > 0.0:
 				_spread_pollution(i, int(src.y), src.x)
+	# Woodland soaks up a little too, but however big the forest, no more than
+	# WOODLAND_CLEANING_MAX round any one tile.
+	_sum_woodland(Settings.PARK_CLEANING_SPREAD, Settings.WOODLAND_CLEANING)
 	for i: int in w * h:
-		pollution[i] = 1.0 - exp(-maxf(pollution[i], 0.0))
+		pollution[i] = 1.0 - exp(-maxf(pollution[i] - minf(_wood_effect[i], Settings.WOODLAND_CLEANING_MAX), 0.0))
 
 
 func _spread_pollution(i: int, radius: int, amount: float) -> void:

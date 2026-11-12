@@ -448,6 +448,59 @@ def park():
     box(-6.0, 26.5, 2.0, 0.6, 0.9, (0.40, 0.28, 0.18))
 
 
+def wood_tree(along, back, h, kind, rnd, spread=1.0):
+    """A tree as the game's woods draw them (world3d.gd _tree): game colours, so made linear."""
+    y = _y(back, 0)
+    if kind == "spruce":
+        cylinder(along, back, 0.35, h * 0.3, (0.30, 0.22, 0.15))
+        green = (0.11, 0.24, 0.15)
+        for k in range(3):
+            shade = rnd.uniform(0.85, 1.15)
+            cylinder(along, back, h * (0.21 - k * 0.05), h * (0.5 - k * 0.08), tuple(c * shade for c in green),
+                     h * (0.12 + k * 0.24), 0.0)
+        return
+    if kind == "birch":
+        cylinder(along, back, 0.25, h * 0.62, (0.80, 0.78, 0.72))
+        green, parts = (0.36, 0.48, 0.18), [(0, 0, 0.6, 0.17), (0.04, -0.03, 0.76, 0.14)]
+    else:
+        cylinder(along, back, 0.4, h * 0.5, (0.30, 0.22, 0.15))
+        green = (rnd.uniform(0.20, 0.28), rnd.uniform(0.33, 0.42), rnd.uniform(0.11, 0.16))
+        w = rnd.uniform(0.5, 0.75) * spread * 0.5
+        parts = [(0, 0, 0.64, w)] + [(rnd.uniform(-0.2, 0.2), rnd.uniform(-0.2, 0.2), rnd.uniform(0.55, 0.78),
+                                      w * rnd.uniform(0.5, 0.65)) for _ in range(2)]
+    for dx, dy, dz, s in parts:
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=2, radius=h * s, location=(along + dx * h, y + dy * h, h * dz))
+        o = bpy.context.active_object
+        o.scale = (1.0, 1.0, 0.75)
+        shade = rnd.uniform(0.85, 1.15)
+        o.data.materials.append(material("plain", tuple(c * shade for c in green), 0.95, srgb=True))
+
+
+def woodland():
+    """Planted woodland as the game draws it: close mixed trees on the woods' dark floor, bigger and
+    closer inside, thinner at the edge with birch there, and a stand of spruce."""
+    import random
+    rnd = random.Random(11)
+    ground((0.20, 0.27, 0.12), road=False)
+    box(0.0, 0.5, 49.0, 49.0, 0.08, (0.20, 0.27, 0.12), 0.0)   # the woods' dark floor (terrain WOOD_FLOOR, sRGB)
+    n = 5
+    for gy in range(n):
+        for gx in range(n):
+            along = -20.0 + gx * 10.0 + rnd.uniform(-2.5, 2.5)
+            back = 5.0 + gy * 10.0 + rnd.uniform(-2.5, 2.5)
+            edge = gx in (0, n - 1) or gy in (0, n - 1)
+            if edge and rnd.random() < 0.35:
+                continue          # thinner at the edge
+            if 3 <= gx and gy <= 1:
+                kind = "spruce"   # a stand of conifers
+            elif edge and rnd.random() < 0.35:
+                kind = "birch"
+            else:
+                kind = "broad"
+            h = rnd.uniform(9.0, 13.0) if edge else rnd.uniform(13.0, 17.0)
+            wood_tree(along, back, h, kind, rnd, 1.15 if edge else 1.6)
+
+
 def coal():
     ground(YARD)
     model("coal_plant", 0.0, 3.0, 44.0, 44.0, None, CONCRETE, PLANT_BLUE)
@@ -747,6 +800,7 @@ def normal():
 ITEMS = {
     "homes_0": homes_0, "homes_1": homes_1, "homes_2": homes_2, "shops_0": shops_0, "shops_1": shops_1,
     "shops_2": shops_2, "industry": industry, "road": road, "grid": grid, "bulldoze": bulldoze, "park": park,
+    "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,
     "police": police, "fire": fire, "school": school, "hospital": hospital, "golf": golf, "library": library,

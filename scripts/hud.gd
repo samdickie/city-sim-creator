@@ -66,7 +66,7 @@ const OVERLAY_TIPS := ["The normal view",
 	"How many of police, fire, schools and hospitals cover each area",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
 	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
-	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks help"]
+	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks and woodland help"]
 const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution"]
 
 var _root: Control
@@ -1074,7 +1074,7 @@ func _build_help() -> void:
 	for pair: Array in [
 			["Build", "Press, drag to see a preview and the cost, release to build (Esc cancels)"],
 			["Roads", "Roads and power lines run straight and can turn one corner"],
-			["Zones", "Zones and parks: drag a box. Start the drag ON a road to zone both sides of every road in the box, two plots deep"],
+			["Zones", "Zones, parks and woodland: drag a box. Start the drag ON a road to zone both sides of every road in the box, two plots deep"],
 			["9", "Street grid: drag a box to lay streets with 100 m blocks"],
 			["Tab", "Low, medium or high density for homes and shops; the next building in Power, Utilities, Leisure and Transport"],
 			["1-0, -, =", "Tools (5 or B bulldozes, Z paints districts)"],

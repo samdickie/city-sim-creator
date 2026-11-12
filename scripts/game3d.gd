@@ -21,7 +21,8 @@ const SAVE_VERSION := 4               # 4: difficulty and loans (older saves loa
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
-	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR }   # same order as simulation.gd
+	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
+	WOODLAND }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT }
 
@@ -56,7 +57,7 @@ const GROUPS := {
 	Tool.POWER: [Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WIND, Tile.SOLAR, Tile.POWER_LINE],
 	Tool.UTILITY: [Tile.WATER_PUMP, Tile.WATER_TOWER, Tile.LANDFILL, Tile.RECYCLING],
 	Tool.SERVICE: [Tile.POLICE, Tile.FIRE, Tile.SCHOOL, Tile.HOSPITAL],
-	Tool.LEISURE: [Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
+	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
 	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR],
 }
 const TOOL_TO_TILE := {
@@ -556,7 +557,7 @@ func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 		Tool.BULLDOZE, Tool.DISTRICT:
 			return _box(a, b)
 	if GROUPS.has(current_tool):
-		# Power lines run like roads; farms, landfill and golf courses are dragged
+		# Power lines run like roads; farms, landfill, woodland and golf courses are dragged
 		# as a box; everything else is one building on the tile under the mouse.
 		var t := _target_tile()
 		if t == Tile.POWER_LINE:
@@ -818,6 +819,7 @@ const SHORT := {
 	"landfill": "Takes the town's rubbish", "recycling": "Takes rubbish, cleanly",
 	"police": "Safer streets", "fire": "Stops fires spreading", "school": "Families need one",
 	"hospital": "Care for a growing town", "golf": "Fairways, greens and bunkers",
+	"woodland": "Plant trees: drag out a forest",
 	"library": "Books, and better land", "museum": "A big draw for visitors", "stadium": "A football ground",
 	"marina": "Yachts by the shore", "town_hall": "The heart of the town",
 	"bus_depot": "Plots can sit further from roads", "station": "Visitors arrive by train",
@@ -1163,6 +1165,9 @@ func _update_info() -> void:
 
 func _tile_text(i: int) -> String:
 	var t := sim.tiles[i]
+	if t == Tile.WOODLAND:
+		return "Woodland (planted trees: cleans the air a little and raises land value nearby; no upkeep)\nLand value %s   ·   %s" % [
+			sim.land_value_word(i), sim.pollution_word(i)]
 	if sim.is_building(t):
 		var about: String = sim.info(t).get("about", "")
 		var reach := sim.pollution_reach_m(t, cell_size_m)

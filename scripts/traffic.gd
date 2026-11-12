@@ -412,6 +412,8 @@ func _measure(i: int) -> void:
 					walk += u * 0.2
 			elif t == Simulation.Tile.PARK or t == Simulation.Tile.GOLF:
 				walk += 6.0
+			elif t == Simulation.Tile.WOODLAND:
+				walk += 2.0             # the odd dog walker (and not a landmark, below)
 			elif sim.is_service(t) or t >= Simulation.Tile.LIBRARY:
 				# Schools, hospitals, landmarks, stations: staff and visitors.
 				cars += 30.0

@@ -435,7 +435,7 @@ func _report() -> void:
 		print("[shots]   showcase: %s" % line)
 	var have: Array[String] = []
 	for t: int in Simulation.BUILDING_KEYS:
-		if sim.count_of(t) == 0:
+		if sim.count_of(t) == 0 and t != Simulation.Tile.WOODLAND:    # (woodland is planted by the 37-41 shots)
 			have.append(String(Simulation.BUILDING_KEYS[t]))
 	if not have.is_empty():
 		print("[shots]   missing buildings: %s" % ", ".join(have))
@@ -461,6 +461,7 @@ func _report() -> void:
 	counts.append("model parts %d" % model_items.size())
 	print("[shots]   refresh_buildings %.0f ms; instances: %s" % [(Time.get_ticks_usec() - t0) / 1000.0,
 		", ".join(counts)])
+	print("[shots]   %s" % world.woods_report())
 	var wind := 46 * sim.w + 92
 	if sim.tiles[wind] == Simulation.Tile.WIND:
 		print("[shots]   wind farm on the town's power network: %s" % ("yes" if sim.power_map()[wind] == 1 and
@@ -542,12 +543,61 @@ func _shot_list() -> Array[Dictionary]:
 			"time": NIGHT},
 		{"name": "33_abandoned", "at": Vector2(54, 51), "yaw": -35.0, "pitch": 38.0, "dist": 230.0,
 			"prep": _prep_abandoned},
+		# Planted woodland (the prep plants it, so these come after the standard
+		# shots): a forest between the terraces, the works and the natural woods to
+		# the east; close up, at its edge by the houses, from afar, with the
+		# Pollution view, and at night.
+		{"name": "37_woodland", "at": Vector2(80, 41), "yaw": -40.0, "pitch": 34.0, "dist": 560.0,
+			"prep": _prep_woodland},
+		{"name": "38_woodland_edge", "at": Vector2(73, 36), "yaw": -65.0, "pitch": 30.0, "dist": 230.0,
+			"prep": _prep_woodland},
+		{"name": "39_woodland_far", "at": Vector2(78, 46), "yaw": -40.0, "pitch": 40.0, "dist": 2400.0,
+			"prep": _prep_woodland},
+		{"name": "40_woodland_overlay", "at": Vector2(76, 52), "yaw": -40.0, "pitch": 55.0, "dist": 2000.0,
+			"hud": true, "prep": _prep_woodland_overlay},
+		{"name": "41_woodland_night", "at": Vector2(80, 41), "yaw": -40.0, "pitch": 34.0, "dist": 560.0,
+			"time": NIGHT, "prep": _prep_woodland},
 		{"name": "27_empty_plots", "at": Vector2(43, 29), "yaw": -40.0, "pitch": 38.0, "dist": 230.0,
 			"prep": _prep_empty_plots},
 	]
 
 
 const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
+
+
+var _woodland_done := false
+
+
+func _prep_woodland() -> void:
+	# Plant a forest with the real build tool (once): 11 x 26 tiles east of the
+	# terraces' last street, from the north edge of town down to the works, with
+	# the natural woods beyond it. Far from 27's plots, so that shot is unchanged.
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	if _woodland_done:
+		return
+	_woodland_done = true
+	var probe := 55 * sim.w + 79       # in the forest's south end, by the works
+	var smoke0 := sim.pollution_at(probe)
+	print("[shots]   woods before planting: %s" % world.woods_report())
+	var t0 := Time.get_ticks_usec()
+	var n := _build("woodland", Vector2i(74, 31), Vector2i(84, 56))
+	world.refresh_ground(true)
+	game.set("_layout_seen", sim.layout_version)
+	game.set("_ground_dirty", false)
+	print("[shots]   planted %d woodland tiles (build and redraw %.0f ms); %s" % [n,
+		(Time.get_ticks_usec() - t0) / 1000.0, world.woods_report()])
+	print("[shots]   pollution at (79, 55), by the works: %.2f -> %.2f" % [smoke0, sim.pollution_at(probe)])
+	sim.money = SHOWN_MONEY
+	game.call("_select_tool", 0)
+	game.call("_refresh_hud")
+
+
+func _prep_woodland_overlay() -> void:
+	_prep_woodland()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.POLLUTION)
 
 
 func _prep_abandoned() -> void:
