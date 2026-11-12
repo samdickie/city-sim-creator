@@ -4,10 +4,12 @@ extends Node3D
 ##
 ## Each car or person crosses one road tile at a time, in from one edge and out
 ## of another, along the same straight runs and bends the roads are drawn with:
-## cars keep left (UK), people walk on the pavements. At a junction they pick a
-## way at random (no real route finding). Only the streets round the camera are
-## filled, and the numbers follow how busy each street is: the homes, shops and
-## jobs beside it, fewer at night, none until the town has people or jobs.
+## cars keep left (UK), people walk on the pavements. Only the streets round the
+## camera are filled. Cars follow the simulation's traffic model (the Traffic map
+## view): busy roads get more of them, and at a junction they're more likely to
+## turn onto the busier road (no real route finding); on heavy and jammed roads
+## they crawl, so queues build up. People follow the homes, shops and jobs beside
+## a street. Fewer of both at night, none until the town has people or jobs.
 ## Everything is drawn with a few MultiMeshes whose buffers are rebuilt each frame.
 
 signal message(text: String)
@@ -82,6 +84,8 @@ var _roads := PackedInt32Array()        # every road tile joined to another
 var _depots := PackedInt32Array()       # bus depot tiles
 var _bus_area := PackedByteArray()      # 1 = road within reach of a working bus depot
 var _car_weight := PackedFloat32Array() # per road tile: cars it draws in the daytime
+var _volume := PackedFloat32Array()     # ...the traffic model's trips a day (to pick the way at junctions)
+var _crawl := PackedFloat32Array()      # ...the fastest cars go there (slow on heavy and jammed roads)
 var _walk_weight := PackedFloat32Array()# ...and people walking
 var _layout_seen := -1
 var _month_seen := -1
@@ -329,6 +333,10 @@ func _read_roads() -> void:
 		_bus_area.resize(size)
 		_car_weight.resize(size)
 		_walk_weight.resize(size)
+		_volume.resize(size)
+		_volume.fill(0.0)
+		_crawl.resize(size)
+		_crawl.fill(100.0)
 	_roads.clear()
 	_depots.clear()
 	for y: int in _h:
@@ -353,6 +361,8 @@ func _read_roads() -> void:
 			else:
 				_car_weight[i] = 0.0
 				_walk_weight[i] = 0.0
+				_volume[i] = 0.0
+				_crawl[i] = 100.0
 	# The streets round the camera are worked out again (see _follow_camera);
 	# until then anyone whose way ahead has gone starts again on any road.
 	_car_tiles.clear()
@@ -384,12 +394,16 @@ func _measure_some() -> void:
 
 
 func _measure(i: int) -> void:
-	# Residents and jobs on the plots round a street; shops bring the most people on foot.
+	# Cars: the traffic model's trips a day on this street. People: residents and
+	# jobs on the plots round it; shops bring the most people on foot.
 	var tiles: PackedByteArray = sim.tiles
 	var levels: PackedByteArray = sim.levels
 	var x := i % _w
 	var y := i / _w
-	var cars := 0.0
+	var trips: float = sim.traffic_at(i)
+	_volume[i] = trips
+	var band: int = sim.traffic_band(i)
+	_crawl[i] = Settings.QUEUE_SPEED if band >= 3 else (Settings.HEAVY_SPEED if band == 2 else 100.0)
 	var walk := 0.0
 	for dy: int in range(-1, 2):
 		for dx: int in range(-1, 2):
@@ -403,7 +417,6 @@ func _measure(i: int) -> void:
 				if levels[k] == 0:
 					continue
 				var u := float(sim.units(k))
-				cars += u
 				if t == Simulation.Tile.HOMES:
 					walk += u * 0.25
 				elif t == Simulation.Tile.SHOPS:
@@ -416,13 +429,10 @@ func _measure(i: int) -> void:
 				walk += 2.0             # the odd dog walker (and not a landmark, below)
 			elif sim.is_service(t) or t >= Simulation.Tile.LIBRARY:
 				# Schools, hospitals, landmarks, stations: staff and visitors.
-				cars += 30.0
 				walk += 30.0
-			elif sim.is_building(t) and t != Simulation.Tile.WIND and t != Simulation.Tile.SOLAR:
-				cars += 10.0            # power plants and utilities: a few staff
 	if sim.district[i] == 2:
 		walk *= 1.5                     # the centre is busier on foot
-	_car_weight[i] = minf(cars / Settings.PEOPLE_PER_CAR, Settings.CARS_PER_STREET)
+	_car_weight[i] = minf(trips / Settings.TRIPS_PER_CAR, Settings.CARS_PER_STREET)
 	_walk_weight[i] = minf(walk / Settings.PEOPLE_PER_WALKER, Settings.WALKERS_PER_STREET)
 
 
@@ -541,25 +551,39 @@ func _random_link(tile: int) -> int:
 
 
 func _choose_exit(tile: int, entry: int, bus: bool, straight_bias: bool) -> int:
-	# Any road out except straight back; a dead end means turning round.
-	# Buses keep to the roads round their depot when they can.
+	# Any road out except straight back; a dead end means turning round. Cars
+	# mostly follow the traffic: each way out is as likely as the trips the traffic
+	# model puts on it (a little for quiet streets too), so busy roads stay busy and
+	# quiet ones quiet. Buses keep to the roads round their depot when they can.
 	var m: int = _links[tile]
 	var options: Array[int] = []
+	var weights: Array[float] = []
 	var fallback: Array[int] = []
+	var total := 0.0
+	var floor_trips := 30.0 + 0.04 * _volume[tile]
 	for d: int in 4:
 		if d == entry or ((m >> d) & 1) == 0:
 			continue
-		if bus and _bus_area[tile + _steps[d]] == 0:
+		var next := tile + _steps[d]
+		if bus and _bus_area[next] == 0:
 			fallback.append(d)
 			continue
-		options.append(d)
+		var weight := _volume[next] + floor_trips
 		if straight_bias and d == (entry ^ 1):
-			options.append(d)           # going straight on is a bit more likely
+			weight *= 1.5               # going straight on is a bit more likely
+		options.append(d)
+		weights.append(weight)
+		total += weight
 	if options.is_empty():
-		options = fallback
-	if options.is_empty():
-		return entry
-	return options[_rng.randi_range(0, options.size() - 1)]
+		if fallback.is_empty():
+			return entry
+		return fallback[_rng.randi_range(0, fallback.size() - 1)]
+	var r := _rng.randf() * total
+	for k: int in options.size():
+		r -= weights[k]
+		if r <= 0.0:
+			return options[k]
+	return options[options.size() - 1]
 
 
 # ------------------------------------------------------- paths across a tile
@@ -641,11 +665,13 @@ func _locate(tile: int, entry: int, exit: int, s: float, offset: float) -> void:
 
 
 func _limit_for(tile: int, entry: int, exit: int) -> float:
+	# How fast across this tile: slow round corners, and crawling where it's jammed.
+	var crawl := _crawl[tile]
 	if exit == entry:
-		return U_TURN_SPEED
+		return minf(U_TURN_SPEED, crawl)
 	if exit == (entry ^ 1):
-		return 100.0
-	return TURN_SPEED if LINK_COUNT[_links[tile]] >= 3 else BEND_SPEED
+		return crawl
+	return minf(TURN_SPEED if LINK_COUNT[_links[tile]] >= 3 else BEND_SPEED, crawl)
 
 
 # ---------------------------------------------------------------- vehicles
@@ -812,14 +838,15 @@ func _move_vehicle(k: int, delta: float, lane_head: Dictionary, lane_next: Packe
 
 func _approach_speed(tile: int) -> float:
 	var m: int = _links[tile]
+	var crawl := _crawl[tile]                               # (a queue ahead)
 	match LINK_COUNT[m]:
 		0:
-			return 100.0
+			return crawl
 		1:
-			return U_TURN_SPEED
+			return minf(U_TURN_SPEED, crawl)
 		2:
-			return 100.0 if m == 3 or m == 12 else BEND_SPEED   # straight on, or a corner
-	return TURN_SPEED + 2.0                                 # a junction (some go straight on)
+			return minf(100.0 if m == 3 or m == 12 else BEND_SPEED, crawl)   # straight on, or a corner
+	return minf(TURN_SPEED + 2.0, crawl)                    # a junction (some go straight on)
 
 
 func _half_length(k: int) -> float:

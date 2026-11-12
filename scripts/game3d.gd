@@ -1180,6 +1180,8 @@ func _tile_text(i: int) -> String:
 		var s: int = t - Tile.POLICE
 		return "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),
 			sim.service_reach_m(s, cell_size_m), roundi(sim.funding[s] * 100.0)]
+	if t == Tile.ROAD:
+		return _road_text(i)
 	if not sim.is_zone(t):
 		if t == Tile.EMPTY and water[i] == 0:
 			var where := "" if sim.district[i] == 0 else ", %s" % sim.district_name(i).to_lower()
@@ -1204,6 +1206,29 @@ func _tile_text(i: int) -> String:
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text
+
+
+func _road_text(i: int) -> String:
+	# "Road — busy: about 1,200 trips a day", and what to do about heavy traffic.
+	var trips := sim.traffic_at(i)
+	var word := sim.traffic_word(i)
+	var text := "Road — %s%s" % [word.left(1).to_upper(), word.substr(1)]
+	if trips < 50.0:
+		text += ": hardly any traffic"
+	else:
+		text += ": about %s trips a day" % Hud.thousands(_rounded_trips(trips))
+	var fix := sim.traffic_fix(i)
+	if fix != "":
+		text += "\n%s traffic: %s" % ["Jammed" if sim.traffic_band(i) >= 3 else "Heavy", fix]
+	return text
+
+
+static func _rounded_trips(n: float) -> int:
+	# Two significant figures at most: 1,234 -> 1,200; 87 -> 90; 23,456 -> 23,000.
+	var step := 10.0
+	while n >= step * 100.0:
+		step *= 10.0
+	return roundi(n / step) * roundi(step)
 
 
 func _services_text(i: int) -> String:

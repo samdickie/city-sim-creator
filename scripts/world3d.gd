@@ -282,8 +282,9 @@ var _natural_woods := PackedByteArray()        # per map tile: 1 = thick natural
 var _planted_nodes := {}                       # woods square -> [trunks, canopies, cones] MultiMeshInstance3D
 var _planted_parts := {}                       # woods square -> instances in it
 var planted_refresh_ms := 0.0                  # how long the last change to the planted woods took (dev tools)
-# --- Map overlays (land value, power, roads, growth) ---
-enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS, POLLUTION }
+# --- Map overlays (land value, power, roads, growth...) ---
+# (New views go on the end; hud.gd's OVERLAY_NAMES / OVERLAY_TIPS / OVERLAY_ICONS follow this order.)
+enum Overlay { NONE, LAND_VALUE, POWER, ROADS, GROWTH, SERVICES, WATER, DISTRICTS, POLLUTION, TRAFFIC }
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL, ABANDONED }   # same order as simulation.gd
 const OV_RED := Color(0.88, 0.24, 0.18)
 const OV_ORANGE := Color(0.96, 0.52, 0.18)
@@ -297,6 +298,10 @@ const OV_DARK_BLUE := Color(0.16, 0.30, 0.58)
 const OV_CBD := Color(0.62, 0.38, 0.92)
 const OV_CONSERVATION := Color(0.80, 0.56, 0.28)
 const OV_ABANDONED := Color(0.45, 0.30, 0.24)
+# Traffic view: quiet, free-flowing, busy, heavy, jammed (simulation.gd traffic_band, plus traffic_quiet).
+const OV_QUIET := Color(0.42, 0.58, 0.46)
+const TRAFFIC_COLOURS: Array[Color] = [OV_QUIET, OV_GREEN, OV_YELLOW, OV_ORANGE, OV_RED]
+const TRAFFIC_GROUND_ALPHA: Array[float] = [0.3, 0.45, 0.65, 0.8, 0.92]   # the road tile's ground round the road
 # Abandoned buildings: their instance colour's alpha is set to this, and the
 # building, roof and model shaders draw them run down (alpha below 0.75).
 const ABANDONED_ALPHA := 0.5
@@ -1900,6 +1905,11 @@ func set_overlay(kind: int) -> void:
 	roof_material.set_shader_parameter("overlay_on", on)
 	for mat in _model_materials:
 		mat.set_shader_parameter("overlay_on", on)
+	# Only the Traffic view colours the road surface itself (by congestion).
+	if road_material:
+		road_material.set_shader_parameter("overlay_on", kind == Overlay.TRAFFIC)
+		road_material.set_shader_parameter("overlay_map", overlay_texture)
+		road_material.set_shader_parameter("map_size", Vector2(map_w, map_h) * cell)
 	# Trees, paving and parked cars would hide the colours on the ground.
 	for node: GeometryInstance3D in [paving, props, parked_bodies, parked_cabins,
 			city_trunks, city_crowns, city_cones]:
@@ -1939,7 +1949,26 @@ func overlay_legend(kind: int) -> Array:
 		Overlay.POLLUTION:
 			return [[OV_GREEN, "Clean air"], [OV_LIGHT_GREEN, "A little"], [OV_YELLOW, "Some"],
 				[OV_ORANGE, "Polluted"], [OV_RED, "Heavy"]]
+		Overlay.TRAFFIC:
+			# Bands match the hover text (simulation.gd traffic_band, Settings.TRAFFIC_BANDS).
+			var cap: float = sim.road_capacity()
+			var bands: Array = Settings.TRAFFIC_BANDS
+			return [[TRAFFIC_COLOURS[0], "Quiet"],
+				[TRAFFIC_COLOURS[1], "Free-flowing"],
+				[TRAFFIC_COLOURS[2], "Busy: over %s trips a day" % _trips_words(cap * float(bands[0]))],
+				[TRAFFIC_COLOURS[3], "Heavy: over %s" % _trips_words(cap * float(bands[1]))],
+				[TRAFFIC_COLOURS[4], "Jammed: over %s, more than a road takes" % _trips_words(cap * float(bands[2]))]]
 	return []
+
+
+static func _trips_words(n: float) -> String:
+	# 6000 -> "6,000"
+	var digits := str(roundi(n))
+	var out := ""
+	while digits.length() > 3:
+		out = "," + digits.substr(digits.length() - 3) + out
+		digits = digits.substr(0, digits.length() - 3)
+	return digits + out
 
 
 func _paint_overlay() -> void:
@@ -2046,6 +2075,15 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 			if t == Tile.EMPTY:
 				return Color(bands[band], 0.6) if band > 0 else none
 			return Color(bands[band], 0.9)
+		Overlay.TRAFFIC:
+			# Only the roads, by how congested they are; everything else greyed out.
+			# The whole road tile is tinted (busier ones more strongly) so thin roads
+			# still read from afar; the road surface itself takes the full colour
+			# (road.gdshader).
+			if t != Tile.ROAD:
+				return none
+			var step: int = 0 if sim.traffic_quiet(i) else sim.traffic_band(i) + 1
+			return Color(TRAFFIC_COLOURS[step], TRAFFIC_GROUND_ALPHA[step])
 	return none
 
 

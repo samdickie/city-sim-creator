@@ -107,6 +107,7 @@ func _run() -> void:
 	await _new_city()
 	await _loans()
 	await _old_save()
+	await _traffic()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
 
@@ -336,7 +337,7 @@ func _find_button(root: Node, text: String) -> Button:
 
 # ------------------------------------------------------------- the play test
 
-func _find_land() -> Vector2i:
+func _find_land(wide: int = 14, high: int = 12) -> Vector2i:
 	# A flat patch of open land, 14 x 12 tiles, near where the camera starts:
 	# where a player would start a town.
 	var start := Vector2i(roundi(rig.target.x / world.cell), roundi(rig.target.z / world.cell))
@@ -344,11 +345,11 @@ func _find_land() -> Vector2i:
 	var best_d := 1 << 30
 	var water: PackedByteArray = game.get("water")
 	var slope: PackedFloat32Array = game.get("slope")
-	for y: int in range(4, sim.h - 16):
-		for x: int in range(4, sim.w - 18):
+	for y: int in range(4, sim.h - high - 4):
+		for x: int in range(4, sim.w - wide - 4):
 			var ok := true
-			for dy: int in 12:
-				for dx: int in 14:
+			for dy: int in high:
+				for dx: int in wide:
 					var i := (y + dy) * sim.w + x + dx
 					if water[i] == 1 or slope[i] > Settings.MAX_SLOPE_M * 0.5:
 						ok = false
@@ -1273,3 +1274,254 @@ func _old_save() -> void:
 	check(is_equal_approx(sim.upkeep_scale(), 1.0), "an old save's running costs are as before (x1)")
 	var budget: Label = hud.get("_budget_caption")
 	check(budget.text.ends_with("NORMAL"), "the City panel's budget says \"%s\"" % budget.text)
+
+
+# ------------------------------------------------------------------ traffic
+
+func _place(id: String, from: Vector2i, to: Vector2i = Vector2i(-1, -1)) -> void:
+	# Exactly what a mouse drag from `from` to `to` does with this Build menu item
+	# (for the bulk of a layout; the drags that matter are made with the mouse).
+	game.call("_choose_item", id)
+	game.set("drag_start", from)
+	game.set("drag_plan", game.call("_plan_tiles", from, to if to.x >= 0 else from))
+	game.call("_finish_drag")
+
+
+func _fill_plots(from: Vector2i, to: Vector2i) -> void:
+	# Every zone plot in the box built up (so the traffic is the same every run):
+	# works and shops fully, homes to tenements (stage 3, 60 people), so there are
+	# more jobs than workers and the one link road jams but two don't.
+	for y: int in range(from.y, to.y + 1):
+		for x: int in range(from.x, to.x + 1):
+			var i := y * sim.w + x
+			if sim.is_zone(sim.tiles[i]):
+				sim.levels[i] = sim.max_level(i)
+				if sim.tiles[i] == Simulation.Tile.HOMES:
+					while sim.levels[i] > 1 and sim.stage(i) > 3:
+						sim.levels[i] -= 1
+	sim.set("_power_dirty", true)
+	sim.set("_value_dirty", true)
+	sim.set("_coverage_dirty", true)
+	sim.set("_traffic_dirty", true)
+	sim.recount()
+	game.call("_refresh_hud")
+	world.refresh_all()
+	game.set("_layout_seen", sim.layout_version)
+
+
+func _trips(p: Vector2i) -> float:
+	return sim.traffic_at(p.y * sim.w + p.x)
+
+
+func _road_trips(from: Vector2i, to: Vector2i) -> float:
+	var total := 0.0
+	for y: int in range(from.y, to.y + 1):
+		for x: int in range(from.x, to.x + 1):
+			total += _trips(Vector2i(x, y))
+	return total
+
+
+func _busiest(from: Vector2i, to: Vector2i) -> float:
+	var most := 0.0
+	for y: int in range(from.y, to.y + 1):
+		for x: int in range(from.x, to.x + 1):
+			most = maxf(most, _trips(Vector2i(x, y)))
+	return most
+
+
+func _town_state() -> int:
+	# Everything the rules decide, except traffic.
+	return hash([sim.tiles, sim.levels, sim.decline, sim.abandoned, sim.money, sim.population,
+		sim.land_value_map(), sim.happiness, sim.demand, sim.pollution_map()])
+
+
+func _traffic() -> void:
+	# Two districts, homes to the west and works and shops to the east, joined by a
+	# single road: that link is the busiest road and jams, a dead end is quiet. A
+	# second link takes traffic off the first; a plot with no road adds no trips; a
+	# bus depot takes cars off the roads near the homes. Then the Traffic view (icon
+	# and O), the legend, the hover card, the City panel and the advisor; the same
+	# town always gives the same traffic, also after saving and loading; and jams
+	# change nothing else in the town (for now they're only shown).
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	check(sim.difficulty == 0 and _built_count() == 0, "traffic: a new city (Easy) for the traffic test")
+	var o := _find_land(28, 13)
+	check(o.x >= 0, "traffic: found flat land for two districts at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	# West: homes on a spine with four side streets. East: the same, with works and shops.
+	for side: int in [0, 19]:
+		_place("road", o + Vector2i(side + 4, 1), o + Vector2i(side + 4, 11))
+		for y: int in [1, 4, 7, 10]:
+			_place("road", o + Vector2i(side, y), o + Vector2i(side + 8, y))
+	for x: int in [24, 25, 26, 27]:
+		_place("coal", o + Vector2i(x, 12))
+	_place("homes_1", o + Vector2i(0, 0), o + Vector2i(8, 12))
+	_place("industry", o + Vector2i(19, 0), o + Vector2i(27, 8))
+	_place("shops_1", o + Vector2i(19, 9), o + Vector2i(27, 12))
+	# The link between them, with the mouse.
+	await _pick_item("roads", "road")
+	await _look_at(o + Vector2i(14, 6), PLAY_DISTANCE * 1.6, -40.0, 50.0, [o + Vector2i(8, 4), o + Vector2i(19, 4)])
+	await _drag(_screen_of(o + Vector2i(9, 4)), _screen_of(o + Vector2i(18, 4)))
+	check(_count(Simulation.Tile.ROAD, o + Vector2i(9, 4), o + Vector2i(18, 4)) == 10, "traffic: a link road joins the two districts")
+	_fill_plots(o, o + Vector2i(27, 12))
+	check(sim.population > 3000 and sim.jobs() > sim.population * Settings.WORKER_SHARE,
+		"traffic: both districts built up (%d people, %d jobs)" % [sim.population, sim.jobs()])
+
+	# A couple of months on the real clock: worked out again each month.
+	var t_before: int = sim.traffic_trips
+	await _one_month()
+	await _one_month()
+	check(not bool(sim.get("_traffic_dirty")) and sim.traffic_trips > 0,
+		"traffic: worked out each month (%d -> %d car trips a day, %.1f ms)" % [t_before, sim.traffic_trips, sim.traffic_ms])
+	_fill_plots(o, o + Vector2i(27, 12))           # (back to fully built, whatever the months did)
+
+	var link := o + Vector2i(13, 4)
+	var dead_end := o + Vector2i(0, 1)
+	var town_most := _busiest(o, o + Vector2i(27, 12))
+	var link_most := _busiest(o + Vector2i(9, 4), o + Vector2i(18, 4))
+	print("[play] traffic: link %d trips a day (%s), dead end %d (%s), busiest road %d; %d car trips a day, %d%% in jams, %.1f ms" % [
+		roundi(_trips(link)), sim.traffic_word(link.y * sim.w + link.x), roundi(_trips(dead_end)),
+		sim.traffic_word(dead_end.y * sim.w + dead_end.x), roundi(town_most), sim.traffic_trips,
+		roundi(sim.traffic_jammed_share() * 100.0), sim.traffic_ms])
+	check(link_most >= town_most * 0.9, "traffic: the link carries the most traffic (%d of the busiest %d)" % [
+		roundi(link_most), roundi(town_most)])
+	check(_trips(link) > _trips(dead_end) * 5.0 and sim.traffic_band(link.y * sim.w + link.x) > sim.traffic_band(dead_end.y * sim.w + dead_end.x),
+		"traffic: the link (%d) is in a higher band than a dead end (%d)" % [roundi(_trips(link)), roundi(_trips(dead_end))])
+	check(sim.traffic_band(link.y * sim.w + link.x) == 3, "traffic: the only link is jammed")
+	check(sim.traffic_jammed_share() >= Settings.TRAFFIC_JAM_TIP and "traffic" in _tip_ids(),
+		"traffic: the advisors mention the jams (%d%% of trips)" % roundi(sim.traffic_jammed_share() * 100.0))
+	for tip: Dictionary in Advisors.tips(sim):
+		if tip["id"] == "traffic":
+			check(int(tip["overlay"]) == WorldView.Overlay.TRAFFIC, "traffic: the tip shows the Traffic view: \"%s\"" % tip["text"])
+
+	# The same town always gives the same traffic.
+	var first: PackedFloat32Array = sim.traffic_map().duplicate()
+	sim.set("_traffic_dirty", true)
+	sim.set("_graph_version", -1)
+	check(sim.traffic_map() == first, "traffic: the same town gives exactly the same traffic")
+
+	# The Traffic view: its icon, its key and the O key.
+	hud.set_build_open(false)
+	await _look_at(o + Vector2i(14, 6), PLAY_DISTANCE * 1.6, -40.0, 50.0, [o, o + Vector2i(27, 0), o + Vector2i(0, 12),
+		o + Vector2i(27, 12)])
+	var buttons: Dictionary = hud.overlay_buttons
+	await _click(buttons[WorldView.Overlay.TRAFFIC])
+	check(world.overlay == WorldView.Overlay.TRAFFIC and Hud.OVERLAY_NAMES[WorldView.Overlay.TRAFFIC] == "Traffic",
+		"traffic: the Traffic view's icon shows it")
+	var legend: VBoxContainer = hud.legend_box
+	await _frames(2)
+	var rows: Array[String] = []
+	for row: Node in legend.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		for c: Node in row.get_children():
+			if c is Label:
+				rows.append((c as Label).text)
+	check(rows.size() == 5 and rows[0] == "Quiet" and rows[1] == "Free-flowing" and rows[2].begins_with("Busy")
+		and rows[3].begins_with("Heavy") and rows[4].begins_with("Jammed"), "traffic: the key: %s" % " / ".join(rows))
+	var link_colour: Color = world.overlay_image.get_pixel(link.x, link.y)
+	var red := WorldView.OV_RED
+	check(absf(link_colour.r - red.r) + absf(link_colour.g - red.g) + absf(link_colour.b - red.b) < 0.03,
+		"traffic: the jammed link is red on the map (%s)" % link_colour)
+	# Hover the link: the card says how busy it is and what to do.
+	await _move(_screen_of(link))
+	await _move(_screen_of(link) + Vector2(1, 1))
+	var title: Label = hud.get("_info_title")
+	var details: Label = hud.info_label
+	check(game.get("hover") == link and title.text.begins_with("Road — Jammed") and title.text.contains("trips a day")
+		and details.text.contains("parallel roads"), "traffic: hovering the link: \"%s / %s\"" % [title.text, details.text])
+	await _move(_screen_of(dead_end) + Vector2(1, 1))
+	check(game.get("hover") == dead_end and (title.text.begins_with("Road — Quiet") or title.text.begins_with("Road — Free")),
+		"traffic: hovering the dead end: \"%s\"" % title.text)
+	await _move(Vector2(1, 1))
+	await _shot("p17_traffic_view")
+	game.call("_set_overlay", WorldView.Overlay.POLLUTION)
+	await _key(KEY_O)
+	check(world.overlay == WorldView.Overlay.TRAFFIC, "traffic: O after Pollution shows Traffic")
+	await _key(KEY_O)
+	check(world.overlay == WorldView.Overlay.NONE, "traffic: O after Traffic goes back to normal")
+	# The City panel.
+	await _click(hud.get("_status_island"))
+	var line: Label = hud.traffic_label
+	check(hud.city_panel.visible and line.text.contains("% of trips in jams"), "traffic: the City panel says \"%s\"" % line.text)
+	await _click(hud.get("_city_button"))
+
+	# A second link takes traffic off the first.
+	var a_before := _trips(link)
+	await _pick_item("roads", "road")
+	await _look_at(o + Vector2i(14, 6), PLAY_DISTANCE * 1.6, -40.0, 50.0, [o + Vector2i(8, 10), o + Vector2i(19, 10)])
+	await _drag(_screen_of(o + Vector2i(9, 10)), _screen_of(o + Vector2i(18, 10)))
+	check(_count(Simulation.Tile.ROAD, o + Vector2i(9, 10), o + Vector2i(18, 10)) == 10, "traffic: a second link road")
+	var link2 := o + Vector2i(13, 10)
+	print("[play] traffic: with a second link: first %d -> %d trips a day, second %d" % [roundi(a_before),
+		roundi(_trips(link)), roundi(_trips(link2))])
+	check(_trips(link) < a_before * 0.8 and _trips(link2) > 0.0,
+		"traffic: the second link takes traffic off the first (%d -> %d; the second %d)" % [roundi(a_before),
+		roundi(_trips(link)), roundi(_trips(link2))])
+	check(sim.traffic_band(link.y * sim.w + link.x) < 3, "traffic: ...so the first link is no longer jammed (%s)" % sim.traffic_word(link.y * sim.w + link.x))
+
+	# A plot with no road makes no trips.
+	var trips0: int = sim.traffic_trips
+	var lone := o + Vector2i(13, 0)
+	_place("homes_1", lone)
+	_fill_plots(lone, lone)
+	check(sim.tiles[lone.y * sim.w + lone.x] == Simulation.Tile.HOMES and sim.units(lone.y * sim.w + lone.x) > 0
+		and not sim.has_road_access(lone.y * sim.w + lone.x), "traffic: homes with no road within reach (%d people)" % sim.units(lone.y * sim.w + lone.x))
+	check(sim.traffic_trips == trips0, "traffic: ...add no trips (%d, %d)" % [trips0, sim.traffic_trips])
+
+	# A bus depot near the homes takes cars off their roads.
+	var west0 := _road_trips(o, o + Vector2i(8, 12))
+	var transit0: int = sim.transit_trips
+	await _pick_item("transport", "bus_depot")
+	await _look_at(o + Vector2i(4, 6), PLAY_DISTANCE, -40.0, 42.0, [o + Vector2i(2, 6)])
+	await _click_at(_screen_of(o + Vector2i(2, 6)))
+	var depot := (o.y + 6) * sim.w + o.x + 2
+	check(sim.tiles[depot] == Simulation.Tile.BUS_DEPOT and sim.building_working(depot), "traffic: a working bus depot among the homes")
+	var west1 := _road_trips(o, o + Vector2i(8, 12))
+	print("[play] traffic: the bus depot: the homes' roads %d -> %d trips a day; %d -> %d by bus" % [roundi(west0),
+		roundi(west1), transit0, sim.transit_trips])
+	check(west1 < west0 * 0.85 and sim.transit_trips > transit0, "traffic: the bus depot takes trips off the roads near it (%d -> %d)" % [
+		roundi(west0), roundi(west1)])
+
+	# Saving and loading: traffic isn't saved, it's worked out again, the same.
+	await _key(KEY_S, true)
+	var saved_traffic: PackedFloat32Array = sim.traffic_map().duplicate()
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
+	check(typeof(data) == TYPE_DICTIONARY and not (data as Dictionary).has("traffic"), "traffic: nothing about traffic in the save")
+	await _click(hud.bulldoze_button)
+	await _drag(_screen_of(o + Vector2i(4, 5)), _screen_of(o + Vector2i(4, 6)))
+	check(sim.traffic_map() != saved_traffic, "traffic: bulldozing a road changes the traffic")
+	await _key(KEY_L, true)
+	await _frames(2)
+	check(sim.traffic_map() == saved_traffic, "traffic: after loading it's worked out again, exactly the same")
+
+	# View only: jams change nothing else. The same months twice, the second time
+	# with tiny roads (everything jammed) and the traffic worked out every month.
+	var snapshot := sim.to_save()
+	var runs: Array[int] = []
+	var jam_seen := 0.0
+	for squeeze: bool in [false, true]:
+		sim.from_save(snapshot)
+		sim.set("_capacity_scale", 0.02 if squeeze else 1.0)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 4242
+		sim.set("_rng", rng)
+		for m: int in 6:
+			seed(777 + m)
+			sim.tick()
+			if squeeze:
+				jam_seen = maxf(jam_seen, sim.traffic_jammed_share())
+		runs.append(_town_state())
+	sim.set("_capacity_scale", 1.0)
+	check(jam_seen > 0.5, "traffic: with tiny roads most trips are in jams (%d%%)" % roundi(jam_seen * 100.0))
+	check(runs[0] == runs[1], "traffic: ...and growth, happiness, land value, money and pollution come out exactly the same")
+	sim.from_save(snapshot)
+	game.call("_refresh_hud")
+	world.refresh_all()
+	game.set("_layout_seen", sim.layout_version)

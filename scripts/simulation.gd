@@ -123,6 +123,20 @@ var _bus_cover := PackedByteArray()   # 1 = within reach of a working bus depot
 var _transit := PackedByteArray()     # 1 = near a working station or bus depot (for skyscrapers)
 var _rng := RandomNumberGenerator.new()
 
+# --- Traffic (see "traffic" below): worked out from the town, never saved ---
+var traffic := PackedFloat32Array()   # per map tile: car trips a day along it (0 off the roads)
+var traffic_trips := 0                # car trips a day in the whole town
+var transit_trips := 0                # trips a day made by bus or train instead
+var jammed_share := 0.0               # 0-1: share of the town's driving done on jammed roads
+var traffic_ms := 0.0                 # how long the last traffic update took (for the dev tools)
+var _traffic_dirty := true
+var _capacity_scale := 1.0            # (dev tools only: the play test shrinks the roads to show jams change nothing else)
+var _graph_version := -1              # layout_version the road graph below was built for
+var _road_tile := PackedInt32Array()  # road node -> map tile
+var _road_node := PackedInt32Array()  # map tile -> road node (-1 = not a road)
+var _road_next := PackedInt32Array()  # 4 per road node: the next road node each way (-1 = none)
+var _access := PackedInt32Array()     # map tile -> the road node its trips start and end at (-1 = none)
+
 
 func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	w = width
@@ -174,6 +188,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	_power_dirty = true
 	_value_dirty = true
 	_coverage_dirty = true
+	_traffic_dirty = true
 	layout_version += 1
 	shortage = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
 	_rng.randomize()
@@ -191,6 +206,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 			_power_dirty = true
 			_value_dirty = true
 			_coverage_dirty = true
+			_traffic_dirty = true
 		return
 	tiles[i] = t
 	levels[i] = 0                     # a new zone starts as an empty plot
@@ -202,6 +218,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	_water_dirty = true
 	_value_dirty = true
 	_coverage_dirty = true
+	_traffic_dirty = true
 	layout_version += 1
 
 
@@ -449,6 +466,7 @@ func tick() -> void:
 	_update_road_distance()
 	_power_dirty = true
 	_value_dirty = true               # land value and pollution are worked out afresh each month
+	_traffic_dirty = true             # ...and traffic, when it's next asked for (it changes nothing else)
 	recount()
 	_update_land_value()
 	_grow()
@@ -1845,6 +1863,439 @@ func date_text() -> String:
 	return "%s %d" % [MONTHS[month % 12], Settings.START_YEAR + floori(month / 12.0)]
 
 
+# ------------------------------------------------------------- traffic
+# A light model: no individual cars, just how many trips a day use each road tile.
+#   1. Trip ends. Each home plot with a road sends its working residents to work
+#      (TRAFFIC_WORK_TRIPS each) and everyone to the shops (TRAFFIC_SHOP_TRIPS);
+#      a working station sends its visitors to the shops and a harbour its lorries
+#      to the works. Homes near a bus depot or station make some trips by bus or
+#      train instead. A plot's trips start and end at its nearest road tile.
+#   2. Where they go. Shops and works are grouped into squares (at most
+#      TRAFFIC_MAX_GROUPS). From each group the road network is flooded outwards
+#      (steps along the roads). Each origin splits its trips between the groups by
+#      size x 1 / (1 + (steps / reach)^2), so near places get most of them.
+#   3. Which way. Every trip goes by a shortest way: flowing "downhill" in each
+#      group's flood, split evenly wherever two ways are equally short (as water
+#      drains), adding to every road tile it passes. Arriving trips are shared out
+#      to the group's plots' own roads by their size.
+# So spines between homes and jobs are busy, dead ends quiet, and a single link
+# between two parts of town carries everything between them. Drivers don't yet
+# avoid jams. Deterministic: no random numbers, everything in tile order.
+#
+# View only, for now: nothing here changes growth, happiness, land value or
+# pollution. Hooks for later:
+#   traffic_at(i)               car trips a day on map tile i (0 off the roads)
+#   traffic_congestion_at(i)    trips / road capacity (1 = full)
+#   traffic_band(i)             -1 not a road, 0 free-flowing, 1 busy, 2 heavy, 3 jammed
+#   traffic_word(i), traffic_fix(i)   in words, for hover text ("quiet" below TRAFFIC_QUIET)
+#   traffic_jammed_share()      0-1: share of the town's driving done in jams
+#   traffic_trips, transit_trips   trips a day by car, and by bus or train instead
+# Worked out when first asked for after anything changed (every month, after
+# building or loading); never saved.
+
+const TRAFFIC_WORDS := ["free-flowing", "busy", "heavy", "jammed"]
+
+
+func traffic_map() -> PackedFloat32Array:
+	_update_traffic()
+	return traffic
+
+
+func traffic_at(i: int) -> float:
+	_update_traffic()
+	return traffic[i]
+
+
+func road_capacity() -> float:
+	return Settings.ROAD_CAPACITY * _capacity_scale
+
+
+func traffic_congestion_at(i: int) -> float:
+	return traffic_at(i) / road_capacity()
+
+
+func traffic_band(i: int) -> int:
+	if tiles[i] != Tile.ROAD:
+		return -1
+	return _band_of(traffic_congestion_at(i))
+
+
+func _band_of(congestion: float) -> int:
+	var band := 0
+	for limit: float in Settings.TRAFFIC_BANDS:
+		if congestion >= limit:
+			band += 1
+	return band
+
+
+func traffic_word(i: int) -> String:
+	# "quiet", "free-flowing", "busy", "heavy" or "jammed" ("" if not a road).
+	var band := traffic_band(i)
+	if band < 0:
+		return ""
+	if traffic_quiet(i):
+		return "quiet"
+	var word: String = TRAFFIC_WORDS[band]
+	return word
+
+
+func traffic_quiet(i: int) -> bool:
+	# A free-flowing road with hardly any traffic (a dead end, a back street).
+	return tiles[i] == Tile.ROAD and traffic_congestion_at(i) < Settings.TRAFFIC_QUIET
+
+
+func traffic_fix(i: int) -> String:
+	# Honest, general advice for a heavy or jammed road ("" when it's fine).
+	if traffic_band(i) < 2:
+		return ""
+	return "add parallel roads, or a bus depot nearby"
+
+
+func traffic_jammed_share() -> float:
+	_update_traffic()
+	return jammed_share
+
+
+func _update_traffic() -> void:
+	if not _traffic_dirty:
+		return
+	_traffic_dirty = false
+	var t0 := Time.get_ticks_usec()
+	_update_road_distance()
+	_update_coverage()
+	_update_power()
+	_build_road_graph()
+	traffic.resize(w * h)
+	traffic.fill(0.0)
+	traffic_trips = 0
+	transit_trips = 0
+	jammed_share = 0.0
+	var n := _road_tile.size()
+	if n == 0:
+		traffic_ms = (Time.get_ticks_usec() - t0) / 1000.0
+		return
+
+	# --- 1. Places to go: shops and works, grouped into squares.
+	var plot_node := PackedInt32Array()     # every working shop or works plot: its road node...
+	var plot_group := PackedInt32Array()    # ...its group...
+	var plot_shop := PackedFloat32Array()   # ...its shop jobs (customers go by these)...
+	var plot_works := PackedFloat32Array()  # ...and its works jobs
+	var plot_tile := PackedInt32Array()
+	for i: int in w * h:
+		var t: int = tiles[i]
+		if (t == Tile.SHOPS or t == Tile.INDUSTRY) and _access[i] >= 0 and _connected(i):
+			var u := units(i)
+			if u > 0:
+				# (One entry per road the plot fronts, sharing its jobs.)
+				var ways := _plot_roads(i)
+				for a: int in ways:
+					plot_node.append(a)
+					plot_tile.append(i)
+					plot_shop.append(float(u) / ways.size() if t == Tile.SHOPS else 0.0)
+					plot_works.append(float(u) / ways.size() if t == Tile.INDUSTRY else 0.0)
+	var size: int = Settings.TRAFFIC_GROUP_TILES
+	var group_of := {}
+	while true:
+		group_of.clear()
+		for k: int in plot_tile.size():
+			var key := (plot_tile[k] % w) / size * 4096 + (plot_tile[k] / w) / size
+			if not group_of.has(key):
+				group_of[key] = group_of.size()
+		if group_of.size() <= Settings.TRAFFIC_MAX_GROUPS:
+			break
+		size *= 2
+	var groups := group_of.size()
+	plot_group.resize(plot_tile.size())
+	var g_jobs := PackedFloat32Array()
+	var g_shop := PackedFloat32Array()
+	var g_works := PackedFloat32Array()
+	g_jobs.resize(groups)
+	g_shop.resize(groups)
+	g_works.resize(groups)
+	g_jobs.fill(0.0)
+	g_shop.fill(0.0)
+	g_works.fill(0.0)
+	for k: int in plot_tile.size():
+		var g: int = group_of[(plot_tile[k] % w) / size * 4096 + (plot_tile[k] / w) / size]
+		plot_group[k] = g
+		g_shop[g] += plot_shop[k]
+		g_works[g] += plot_works[k]
+		g_jobs[g] += plot_shop[k] + plot_works[k]
+
+	# --- 2. Flood the roads from each group: steps to it from every road node.
+	var dist := PackedInt32Array()
+	var order := PackedInt32Array()
+	var reached := PackedInt32Array()
+	dist.resize(groups * n)
+	dist.fill(-1)
+	order.resize(groups * n)
+	reached.resize(groups)
+	var next := _road_next
+	for g: int in groups:
+		var base := g * n
+		var tail := base
+		for k: int in plot_node.size():
+			if plot_group[k] == g and dist[base + plot_node[k]] < 0:
+				dist[base + plot_node[k]] = 0
+				order[tail] = plot_node[k]
+				tail += 1
+		var head := base
+		while head < tail:
+			var v := order[head]
+			head += 1
+			var dv := dist[base + v] + 1
+			var e := v * 4
+			for s: int in 4:
+				var u := next[e + s]
+				if u >= 0 and dist[base + u] < 0:
+					dist[base + u] = dv
+					order[tail] = u
+					tail += 1
+		reached[g] = tail - base
+
+	# --- 3. Trips from homes (and the station and harbour), split between the groups.
+	var workers: float = population * Settings.WORKER_SHARE
+	var employed := clampf(float(jobs()) / workers, 0.0, 1.0) if workers > 0.0 else 0.0
+	var rail := _near_station()
+	var work_from := PackedFloat32Array()   # per road node: car trips to work, to the shops, lorries
+	var shop_from := PackedFloat32Array()
+	var lorry_from := PackedFloat32Array()
+	work_from.resize(n)
+	shop_from.resize(n)
+	lorry_from.resize(n)
+	work_from.fill(0.0)
+	shop_from.fill(0.0)
+	lorry_from.fill(0.0)
+	var by_transit := 0.0
+	for i: int in w * h:
+		var t: int = tiles[i]
+		var a: int = _access[i]
+		if a < 0:
+			continue
+		if t == Tile.HOMES:
+			var people := units(i)
+			if people <= 0 or not _connected(i):
+				continue
+			var work := people * Settings.WORKER_SHARE * employed * Settings.TRAFFIC_WORK_TRIPS
+			var shop := people * Settings.TRAFFIC_SHOP_TRIPS
+			var share := 0.0
+			if _bus_cover[i] == 1:
+				share += Settings.TRAFFIC_BUS_SHARE
+			if rail[i] == 1:
+				share += Settings.TRAFFIC_RAIL_SHARE
+			by_transit += (work + shop) * share
+			var ways := _plot_roads(i)       # (split between the roads the plot fronts)
+			var part := (1.0 - share) / ways.size()
+			for r: int in ways:
+				work_from[r] += work * part
+				shop_from[r] += shop * part
+		elif t == Tile.STATION and building_working(i):
+			var visitors: float = info(t).get("visitors", 0.0)
+			shop_from[a] += population * visitors * Settings.TRAFFIC_VISITOR_TRIPS
+		elif t == Tile.HARBOUR and building_working(i):
+			var port: float = info(t).get("port_jobs", 0)
+			lorry_from[a] += port * Settings.TRAFFIC_HARBOUR_LORRIES
+	transit_trips = roundi(by_transit)
+
+	var flow := PackedFloat32Array()        # per group, per road node: trips setting off from there
+	flow.resize(groups * n)
+	flow.fill(0.0)
+	var arrive_shop := PackedFloat32Array() # per group: trips arriving for its shops, its works
+	var arrive_works := PackedFloat32Array()
+	arrive_shop.resize(groups)
+	arrive_works.resize(groups)
+	arrive_shop.fill(0.0)
+	arrive_works.fill(0.0)
+	var pull_work := PackedFloat32Array()
+	var pull_shop := PackedFloat32Array()
+	var pull_lorry := PackedFloat32Array()
+	pull_work.resize(groups)
+	pull_shop.resize(groups)
+	pull_lorry.resize(groups)
+	var work_r2 := 1.0 / (Settings.TRAFFIC_WORK_REACH * Settings.TRAFFIC_WORK_REACH)
+	var shop_r2 := 1.0 / (Settings.TRAFFIC_SHOP_REACH * Settings.TRAFFIC_SHOP_REACH)
+	var lorry_r2 := 1.0 / (Settings.TRAFFIC_LORRY_REACH * Settings.TRAFFIC_LORRY_REACH)
+	var cars := 0.0
+	for v: int in n:
+		var work := work_from[v]
+		var shop := shop_from[v]
+		var lorry := lorry_from[v]
+		if work <= 0.0 and shop <= 0.0 and lorry <= 0.0:
+			continue
+		var sum_work := 0.0
+		var sum_shop := 0.0
+		var sum_lorry := 0.0
+		for g: int in groups:
+			var d := dist[g * n + v]
+			if d < 0:
+				pull_work[g] = 0.0
+				pull_shop[g] = 0.0
+				pull_lorry[g] = 0.0
+				continue
+			var d2 := float(d * d)
+			pull_work[g] = g_jobs[g] / (1.0 + d2 * work_r2)
+			pull_shop[g] = g_shop[g] / (1.0 + d2 * shop_r2)
+			pull_lorry[g] = g_works[g] / (1.0 + d2 * lorry_r2)
+			sum_work += pull_work[g]
+			sum_shop += pull_shop[g]
+			sum_lorry += pull_lorry[g]
+		# (Nowhere to go along the roads from here: those trips go out of town, off the map.)
+		var kw := work / sum_work if sum_work > 0.0 else 0.0
+		var ks := shop / sum_shop if sum_shop > 0.0 else 0.0
+		var kl := lorry / sum_lorry if sum_lorry > 0.0 else 0.0
+		for g: int in groups:
+			var to_works := pull_work[g] * kw * g_works[g] / g_jobs[g] if g_jobs[g] > 0.0 else 0.0
+			var to_shop := pull_work[g] * kw - to_works + pull_shop[g] * ks
+			to_works += pull_lorry[g] * kl
+			if to_shop + to_works > 0.0:
+				flow[g * n + v] += to_shop + to_works
+				arrive_shop[g] += to_shop
+				arrive_works[g] += to_works
+				cars += to_shop + to_works
+	traffic_trips = roundi(cars)
+
+	# --- 4. Each group's trips flow downhill to it, split evenly between equally short ways.
+	var volume := PackedFloat32Array()
+	volume.resize(n)
+	volume.fill(0.0)
+	for g: int in groups:
+		var base := g * n
+		for idx: int in range(base + reached[g] - 1, base - 1, -1):
+			var v := order[idx]
+			var f := flow[base + v]
+			if f <= 0.0:
+				continue
+			var dv := dist[base + v]
+			if dv == 0:
+				continue                    # arrived (shared out to the plots below)
+			volume[v] += f
+			var e := v * 4
+			var ways := 0
+			for s: int in 4:
+				var u := next[e + s]
+				if u >= 0 and dist[base + u] == dv - 1:
+					ways += 1
+			var part := f / ways
+			for s: int in 4:
+				var u := next[e + s]
+				if u >= 0 and dist[base + u] == dv - 1:
+					flow[base + u] += part
+	# Arrivals end on each plot's own road, shared by its size.
+	for k: int in plot_node.size():
+		var g := plot_group[k]
+		var arriving := 0.0
+		if g_shop[g] > 0.0:
+			arriving += arrive_shop[g] * plot_shop[k] / g_shop[g]
+		if g_works[g] > 0.0:
+			arriving += arrive_works[g] * plot_works[k] / g_works[g]
+		volume[plot_node[k]] += arriving
+
+	var total := 0.0
+	var jammed := 0.0
+	var jam_level: float = Settings.TRAFFIC_BANDS[Settings.TRAFFIC_BANDS.size() - 1]
+	var full := road_capacity() * jam_level
+	for v: int in n:
+		traffic[_road_tile[v]] = volume[v]
+		total += volume[v]
+		if volume[v] >= full:
+			jammed += volume[v]
+	jammed_share = jammed / total if total > 0.0 else 0.0
+	traffic_ms = (Time.get_ticks_usec() - t0) / 1000.0
+
+
+func _plot_roads(i: int) -> PackedInt32Array:
+	# The road nodes a plot's trips use: every road beside it, or else its nearest road.
+	var out := PackedInt32Array()
+	var x := i % w
+	if x < w - 1 and _road_node[i + 1] >= 0:
+		out.append(_road_node[i + 1])
+	if x > 0 and _road_node[i - 1] >= 0:
+		out.append(_road_node[i - 1])
+	if i < w * (h - 1) and _road_node[i + w] >= 0:
+		out.append(_road_node[i + w])
+	if i >= w and _road_node[i - w] >= 0:
+		out.append(_road_node[i - w])
+	if out.is_empty() and _access[i] >= 0:
+		out.append(_access[i])
+	return out
+
+
+func _near_station() -> PackedByteArray:
+	# 1 = within SKYSCRAPER_TRANSIT tiles of a working railway station.
+	var near := PackedByteArray()
+	near.resize(w * h)
+	near.fill(0)
+	var r: int = Settings.SKYSCRAPER_TRANSIT
+	for i: int in w * h:
+		if tiles[i] != Tile.STATION or not building_working(i):
+			continue
+		var cx := i % w
+		var cy := i / w
+		for y: int in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+			for x: int in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+				if (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r:
+					near[y * w + x] = 1
+	return near
+
+
+func _build_road_graph() -> void:
+	# Road tiles as a network (each joined to the roads beside it), and for every
+	# tile the nearest road tile within reach (ties go to the first found, in tile order).
+	if _graph_version == layout_version and _access.size() == w * h:
+		return
+	_graph_version = layout_version
+	_road_node.resize(w * h)
+	_road_node.fill(-1)
+	_road_tile.clear()
+	for i: int in w * h:
+		if tiles[i] == Tile.ROAD:
+			_road_node[i] = _road_tile.size()
+			_road_tile.append(i)
+	var n := _road_tile.size()
+	_road_next.resize(n * 4)
+	_road_next.fill(-1)
+	for v: int in n:
+		var i := _road_tile[v]
+		var x := i % w
+		if x < w - 1:
+			_road_next[v * 4] = _road_node[i + 1]
+		if x > 0:
+			_road_next[v * 4 + 1] = _road_node[i - 1]
+		if i < w * (h - 1):
+			_road_next[v * 4 + 2] = _road_node[i + w]
+		if i >= w:
+			_road_next[v * 4 + 3] = _road_node[i - w]
+	_access.resize(w * h)
+	_access.fill(-1)
+	var steps := PackedByteArray()
+	steps.resize(w * h)
+	steps.fill(255)
+	var queue := PackedInt32Array()
+	queue.resize(w * h)
+	var tail := 0
+	for v: int in n:
+		var i := _road_tile[v]
+		_access[i] = v
+		steps[i] = 0
+		queue[tail] = i
+		tail += 1
+	var head := 0
+	while head < tail:
+		var i := queue[head]
+		head += 1
+		var d := steps[i] + 1
+		if d > Settings.ROAD_REACH + 1:      # (one further for plots reached by bus)
+			continue
+		var x := i % w
+		for k: int in [i + 1 if x < w - 1 else -1, i - 1 if x > 0 else -1, i + w if i < w * (h - 1) else -1,
+				i - w if i >= w else -1]:
+			if k >= 0 and steps[k] == 255:
+				steps[k] = d
+				_access[k] = _access[i]
+				queue[tail] = k
+				tail += 1
+
+
 # ------------------------------------------------------------- road reach
 
 func _update_road_distance() -> void:
@@ -1968,5 +2419,6 @@ func from_save(data: Dictionary) -> void:
 	_power_dirty = true
 	_value_dirty = true
 	_coverage_dirty = true
+	_traffic_dirty = true             # (traffic isn't saved: it's worked out again from the town)
 	layout_version += 1
 	recount()

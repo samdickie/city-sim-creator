@@ -57,7 +57,8 @@ const GOOD := Color(0.47, 0.88, 0.60)
 const BAD := Color(1.0, 0.48, 0.45)
 const WARN := Color(1.0, 0.80, 0.38)
 const HINT := Color(0.55, 0.75, 1.0)
-const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts", "Pollution"]
+const OVERLAY_NAMES := ["Normal", "Land value", "Power", "Roads", "Growth", "Services", "Water", "Districts", "Pollution",
+	"Traffic"]
 const OVERLAY_TIPS := ["The normal view",
 	"What land is worth: the sea, parks and shops raise it; industry and power plants lower it",
 	"Which plots have electricity, and what carries it",
@@ -66,8 +67,10 @@ const OVERLAY_TIPS := ["The normal view",
 	"How many of police, fire, schools and hospitals cover each area",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
 	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
-	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks and woodland help"]
-const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution"]
+	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks and woodland help",
+	"How busy each road is with people driving to work and the shops. Busy roads need another way round, or buses"]
+const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution",
+	"traffic"]
 
 var _root: Control
 var _bold: Font
@@ -123,6 +126,7 @@ var power_label: Label
 var utility_label: Label                   # water
 var services_label: Label
 var rubbish_label: Label
+var traffic_label: Label
 var growth_label: Label
 
 # Top centre: advisors.
@@ -556,6 +560,7 @@ func _build_city_panel() -> void:
 	utility_label = _service_row(box, "utilities")
 	services_label = _service_row(box, "services")
 	rubbish_label = _service_row(box, "bin")
+	traffic_label = _service_row(box, "traffic")
 
 	box.add_child(_divider())
 	box.add_child(_caption("Town"))
@@ -1109,7 +1114,7 @@ func _build_help() -> void:
 				roundi(Settings.LOAN_MONTHS / 12.0)],
 			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
-			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts and pollution, each with a colour key.",
+			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key.",
 			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), or a conservation area kept low-rise.",
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
@@ -1457,6 +1462,21 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 		rubbish_colour = BAD if piling > 0.3 else (WARN if piling > 0.0 else GOOD)
 	_set_row_colour(rubbish_label, rubbish_colour)
 	_set_meter(3, 1.0 - piling if collecting else 0.0, rubbish_colour, rubbish_label.text)
+
+	# Traffic (shown only for now: jams don't hold anything back yet).
+	var jams: float = sim.traffic_jammed_share()
+	var car_trips: int = sim.traffic_trips
+	var transit: int = sim.transit_trips
+	if car_trips <= 0:
+		traffic_label.text = "Traffic: none yet"
+	else:
+		traffic_label.text = "Traffic: %d%% of trips in jams   ·   %s car trips a day" % [roundi(jams * 100.0),
+			thousands(car_trips)]
+		if transit > 0:
+			traffic_label.text += ", %s by bus or train" % thousands(transit)
+	traffic_label.tooltip_text = "The Traffic map view shows which roads are busy"
+	_set_row_colour(traffic_label, BAD if jams >= Settings.TRAFFIC_JAM_WARN else (
+		WARN if jams >= Settings.TRAFFIC_JAM_TIP else (GOOD if car_trips > 0 else TEXT_DIM)))
 
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
 	if sim.abandoned_count > 0:

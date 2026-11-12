@@ -317,6 +317,8 @@ rail = {
     'value': line("<path d='M3.5 12.5 L11.5 4.5 H19.5 V12.5 L11.5 20.5 Z'/><circle cx='15.5' cy='8.5' r='1.3'/>"),
     'growth': line("<path d='M4 18.5 L10 12.5 L13.5 16 L20 9.5'/><path d='M15 9.5 H20 V14.5'/>"),
     'pollution': line("<path d='M7 18.5 H17 A4 4 0 0 0 16.4 10.6 A5.5 5.5 0 0 0 6 11.5 A3.5 3.5 0 0 0 7 18.5 Z'/>"),
+    # A car seen from the front: windscreen, body, headlights and wheels.
+    'traffic': line("<path d='M6.5 11 L8.3 6.3 C8.5 5.8 9 5.5 9.5 5.5 H14.5 C15 5.5 15.5 5.8 15.7 6.3 L17.5 11'/><rect x='4' y='11' width='16' height='5.5' rx='1.8'/><circle cx='7.6' cy='13.8' r='0.6' fill='white'/><circle cx='16.4' cy='13.8' r='0.6' fill='white'/><path d='M6.5 16.5 V19'/><path d='M17.5 16.5 V19'/>"),
     'alert': line("<path d='M12 4 L21 19.5 H3 Z'/><path d='M12 10 V14'/><circle cx='12' cy='16.8' r='0.5' fill='white'/>"),
     'stats': line("<path d='M4 19.5 H20'/><path d='M7 16.5 V11'/><path d='M12 16.5 V6'/><path d='M17 16.5 V13'/>"),
 }

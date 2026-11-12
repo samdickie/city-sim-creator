@@ -235,6 +235,40 @@ const POLLUTION_VALUE_EFFECT := 0.2       # land value lost in full pollution
 const POLLUTION_GROWTH_EFFECT := 0.6      # homes in full pollution grow this much slower (0.6 = 60%)
 const POLLUTION_APPEAL_EFFECT := 0.15     # appeal lost if every resident lived in polluted air
 
+# --- Traffic (a light model: tiles and totals, no individual cars) ---
+# Worked out each month (and after loading or building) from the town itself, so
+# nothing is saved. For now it is only shown (Traffic map view, hover text, City
+# panel, advisors, the cars on the streets): congestion does not yet affect
+# growth, happiness, land value or pollution.
+# Trips are journeys a day by car, there and back counted separately. Residents
+# drive to work and to the shops; each trip picks a place to go by how big it is
+# and how far away (nearer places far more likely), and takes a shortest way
+# along the roads. Plots with no road make no trips.
+const TRAFFIC_WORK_TRIPS := 2.0       # trips a day per working resident (there and back)
+const TRAFFIC_SHOP_TRIPS := 0.6       # trips a day per resident to the shops (0.3 round trips)
+const TRAFFIC_WORK_REACH := 30.0      # tiles: a job this far away is half as likely as one next door (1.5 km)
+const TRAFFIC_SHOP_REACH := 12.0      # ...and shops (600 m): people shop locally
+const TRAFFIC_LORRY_REACH := 40.0     # ...and the harbour's lorries to the works
+const TRAFFIC_VISITOR_TRIPS := 2.0    # a railway station's visitors (BUILDINGS "visitors" x population) each drive there and back
+const TRAFFIC_HARBOUR_LORRIES := 6.0  # lorry trips a day per port job ("port_jobs") between the harbour and the works
+# Public transport takes trips off the roads: the share of a home's trips made by
+# bus within reach of a working bus depot (the "bus" radius), and by train near a
+# working station (SKYSCRAPER_TRANSIT radius). They add up.
+const TRAFFIC_BUS_SHARE := 0.25
+const TRAFFIC_RAIL_SHARE := 0.15
+# Places of work and shops are grouped into squares this many tiles across (doubled
+# until there are at most TRAFFIC_MAX_GROUPS), which keeps the model quick in a big town.
+const TRAFFIC_GROUP_TILES := 8
+const TRAFFIC_MAX_GROUPS := 16
+# How much a road tile carries before it's full, in trips a day (both ways).
+const ROAD_CAPACITY := 5000.0
+# Congestion = trips / capacity. Bands for the map and hover text:
+# free-flowing · busy (from 0.5) · heavy (0.8) · jammed (1.0 and over).
+const TRAFFIC_BANDS := [0.5, 0.8, 1.0]
+const TRAFFIC_QUIET := 0.1            # free-flowing roads under this are "quiet" (drawn paler on the map)
+const TRAFFIC_JAM_TIP := 0.08         # advisors mention jams once this share of trips is in them...
+const TRAFFIC_JAM_WARN := 0.2         # ...and warn from this share
+
 # --- Look (no effect on the simulation) ---
 const DAY_SECONDS := 240.0        # real seconds for a full day and night at normal speed
 const START_TIME_OF_DAY := 0.38   # 0 = midnight, 0.5 = noon
@@ -250,9 +284,11 @@ const INTERFACE_SCALE := 0.0      # interface size: 0 = follow the screen (2 on 
 const TRAFFIC_ON := true          # cars and people on the streets when the game starts
 const MAX_CARS := 300             # most cars and buses drawn at once (only round the camera)
 const MAX_PEOPLE := 400           # most people walking at once (only round the camera)
-const PEOPLE_PER_CAR := 200       # residents and jobs on the plots beside a street, per car on it
-const PEOPLE_PER_WALKER := 40     # the same, per person walking (shops count 3x, homes 0.25x)
-const CARS_PER_STREET := 2.0      # the busiest streets: at most this many cars per road tile
+const TRIPS_PER_CAR := 1500.0     # cars drawn on a street: one per this many trips a day (the traffic model)
+const PEOPLE_PER_WALKER := 40     # residents and jobs beside a street per person walking (shops count 3x, homes 0.25x)
+const CARS_PER_STREET := 3.0      # the busiest streets: at most this many cars per road tile
+const QUEUE_SPEED := 2.5          # metres per second on jammed roads (cars queue), ...
+const HEAVY_SPEED := 6.0          # ...and on heavy ones
 const WALKERS_PER_STREET := 4.0   # ...and people per road tile
 const NIGHT_TRAFFIC := 0.3        # share of the daytime cars still out at night
 const NIGHT_WALKERS := 0.12       # share of the daytime people still out at night

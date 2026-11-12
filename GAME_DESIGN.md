@@ -10,7 +10,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings.
 - **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D version is kept in `archive/2d/` for reference (Godot ignores it).
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
-- **Simulate tiles and totals, not individual people.** No real traffic; a zone counts as connected if a road touches it.
+- **Simulate tiles and totals, not individual people.** A zone counts as connected if a road is near it. Traffic is a light model of trips a day per road tile (see Traffic), not individual cars; for now it is only shown, it doesn't hold the town back.
 
 ## Tiles
 | Tile | Notes |
@@ -162,7 +162,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A Services map view shows how many of the four cover each area.
 
 ## Map views (overlays)
-- O or the row of icons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution (names on hover). The chosen view's name, a line about it and its colour key show above the icons.
+- O or the row of icons bottom right: Normal, Land value, Power, Roads, Growth, Services, Water, Districts, Pollution, Traffic (names on hover). The chosen view's name, a line about it and its colour key show above the icons.
 - Ground and buildings take each plot's colour; trees, paving and parked cars hide so the colours read clearly.
 - Land value uses the same bands as the hover text (0.2 / 0.35 / 0.5 / 0.65). Growth: green growing, yellow waiting (demand, space or land value), red stuck (road or power), blue fully built, brown abandoned.
 
@@ -173,6 +173,17 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Pollution map view: clean, a little, some, polluted, heavy (green to red). Hover text mentions pollution from "some" upwards, and polluting buildings say how far their pollution reaches.
 - Coal plant chimneys smoke (a few particle streams; looks only).
 - For a happiness score or advisors: `pollution_at(i)`, `pollution_band(i)`, `polluted_homes_share()`, `pollution_feeling()` (already in appeal), `air_word()` in `scripts/simulation.gd`. Numbers in the Pollution section of `scripts/settings.gd`.
+
+## Traffic
+- A light model, worked out each month and whenever the town changes (it takes about 20 ms in a town of 28,000); never saved (loading works it out again). No individual cars: just how many car trips a day use each road tile.
+- Trips: every working resident drives to work and back (2 trips a day), and everyone makes 0.6 trips a day to the shops. A station's visitors (3% of the population each, as for shop demand) drive between it and the shops, and a harbour's lorries (6 a day per port job) to the works. Plots with no road make no trips. Homes within reach of a working bus depot make 25% of their trips by bus, and near a station (600 m) 15% by train (together 40%).
+- Where to: shops and works are grouped into squares (8 tiles, doubled until there are at most 16 groups). Each home splits its trips between the groups by size x 1 / (1 + (distance / reach)^2), distance counted along the roads: work reach 30 tiles (1.5 km), shops 12 (600 m), lorries 40. So most people work and shop nearby, but a big estate across town still draws commuters.
+- Which way: always a shortest way along the roads, split evenly where two ways are equally short (like water draining downhill). A plot's trips start and end on the roads it fronts. So the roads between homes and jobs are busiest, back streets and dead ends quiet, and a single link between two parts of town carries everything between them. Drivers don't yet avoid jams.
+- A road tile takes 5,000 trips a day. Congestion = trips / 5,000: free-flowing (below 0.5; "quiet" below 0.1), busy (0.5), heavy (0.8), jammed (1 and over). In the demo town (28,000 people, about 38,000 car trips a day and 7,000 by bus or train) 96% of road tiles are free-flowing, 3% busy, 1% heavy and the link from town to the works jams (about 2% of driving is in jams).
+- Traffic map view: roads only, coloured quiet (pale green), free-flowing (green), busy (yellow), heavy (orange), jammed (red); the road surface itself takes the colour and its whole tile is tinted (busier ones more strongly) so it reads from afar; everything else greyed out.
+- Hover a road: "Road — Busy: about 2,600 trips a day"; on heavy and jammed roads also "add parallel roads, or a bus depot nearby". City panel (Services): "Traffic: 2% of trips in jams · 37,800 car trips a day, 7,000 by bus or train". Advisors: from 8% of trips in jams (a warning from 20%); clicking it shows the Traffic view.
+- View only, for now: congestion doesn't affect growth, happiness, land value or pollution (a later decision). Hooks in `scripts/simulation.gd`: `traffic_at(i)`, `traffic_congestion_at(i)`, `traffic_band(i)`, `traffic_word(i)`, `traffic_fix(i)`, `traffic_jammed_share()`, `traffic_trips`, `transit_trips`. Numbers under Traffic in `scripts/settings.gd`.
+- Known weaknesses: no through traffic from beyond the map and no trips to schools, hospitals or landmarks; inside a group of shops or works the last stretch isn't routed (arrivals are shared out to each plot's own road); drivers always take a shortest way, so a jam never sends anyone round another way; trips stop at the edge of a road network that has no jobs.
 
 ## Advisors
 - A ticker, top centre, shows the most urgent tip and a count when something needs attention (red dot urgent, amber warning, blue advice). The count opens the full list, most urgent first. Hidden when all is well.
@@ -197,11 +208,11 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A full day and night every 4 minutes at normal speed: the sun crosses the sky, windows and street lights come on at dusk. "Day and night" in the game menu turns it off.
 
 ## People and traffic
-- Cars, buses and people walking bring the streets to life. Looks only: they don't affect the simulation. T turns them off and on (`TRAFFIC_ON` in settings to start with them off).
-- Cars keep left and follow the road's own straight runs and bends, slowing for corners, junctions and dead ends (where they turn round), and queue behind the car in front. At a junction they pick a way at random, slightly preferring straight on. They tilt with the hills; after dark they have head and tail lights and a pool of light on the road ahead.
+- Cars, buses and people walking bring the streets to life. Looks only: they don't affect the simulation. T turns them off and on (`TRAFFIC_ON` in settings to start with them off). The cars tell the same story as the Traffic map view (see Traffic).
+- Cars keep left and follow the road's own straight runs and bends, slowing for corners, junctions and dead ends (where they turn round), and queue behind the car in front. At a junction they pick a way as likely as the traffic model's trips on it (quiet streets a little too), slightly preferring straight on, so busy roads stay busy. On heavy roads they slow to 6 m/s and on jammed ones crawl at 2.5 m/s, so queues build up. They tilt with the hills; after dark they have head and tail lights and a pool of light on the road ahead.
 - Red buses run on the roads within reach of a working bus depot (about one vehicle in twelve).
 - People walk along both pavements, a little apart, bobbing as they go.
-- How busy a street is depends on the plots beside it: one car per 200 residents and jobs, one walker per 40 (shops count three times, homes a quarter), capped per street. CBD streets have 1.5x the walkers. Night has 30% of the cars and 12% of the walkers. None until the town has people or jobs.
+- How many cars a street gets follows the traffic model: one car per 1,500 trips a day, at most 3 per road tile. Walkers follow the plots beside it: one per 40 residents and jobs (shops count three times, homes a quarter), capped per street. CBD streets have 1.5x the walkers. Night has 30% of the cars and 12% of the walkers. None until the town has people or jobs.
 - Only the streets round the camera are filled (cars up to 1.8 km away as you zoom out, people within 700 m); anyone who drives out of range reappears in view. At most 300 vehicles and 400 people; no people drawn beyond 1.1 km zoom and no cars beyond 3.5 km.
 - Drawn with six MultiMeshes (car bodies, cabins, lamps, light pools, people, heads) filled from one buffer each frame; with a crowd, each person moves every other frame. Code in `scripts/traffic.gd`; numbers in `scripts/settings.gd`.
 

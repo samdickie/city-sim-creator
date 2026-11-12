@@ -439,6 +439,7 @@ func _report() -> void:
 			have.append(String(Simulation.BUILDING_KEYS[t]))
 	if not have.is_empty():
 		print("[shots]   missing buildings: %s" % ", ".join(have))
+	traffic_report(sim, "[shots]")
 	# Why the zone plots still empty haven't been built on (the most common reasons).
 	var why_empty := {}
 	for i: int in sim.w * sim.h:
@@ -466,6 +467,55 @@ func _report() -> void:
 	if sim.tiles[wind] == Simulation.Tile.WIND:
 		print("[shots]   wind farm on the town's power network: %s" % ("yes" if sim.power_map()[wind] == 1 and
 			sim.get("_net_id")[wind] == sim.get("_net_id")[79 * sim.w + 83] else "NO"))
+
+
+static func traffic_report(s: Simulation, tag: String) -> void:
+	# The traffic model on this town: how long it takes, and how the roads come out.
+	var times: Array[String] = []
+	for k: int in 3:
+		s.set("_traffic_dirty", true)
+		if k == 0:
+			s.set("_graph_version", -1)        # the first time also builds the road graph
+		s.traffic_map()
+		times.append("%.1f" % s.traffic_ms)
+	var roads := [0, 0, 0, 0]
+	var volume := [0.0, 0.0, 0.0, 0.0]
+	var busiest := 0.0
+	var busiest_at := -1
+	var quiet := 0
+	for i: int in s.w * s.h:
+		var band := s.traffic_band(i)
+		if band < 0:
+			continue
+		var v := s.traffic_at(i)
+		roads[band] += 1
+		volume[band] += v
+		if v < 100.0:
+			quiet += 1
+		if v > busiest:
+			busiest = v
+			busiest_at = i
+	var n: int = roads[0] + roads[1] + roads[2] + roads[3]
+	var total: float = volume[0] + volume[1] + volume[2] + volume[3]
+	print("%s traffic model: %s ms (first with the road graph), %d car trips a day, %d by bus or train, %d%% of trips in jams" % [
+		tag, " / ".join(times), s.traffic_trips, s.transit_trips, roundi(s.traffic_jammed_share() * 100.0)])
+	if n > 0:
+		print("%s   road tiles: %d free-flowing, %d busy, %d heavy, %d jammed (%d%% / %d%% / %d%% / %d%%); %d carry under 100 trips; busiest %d trips at (%d, %d); capacity %d" % [
+			tag, roads[0], roads[1], roads[2], roads[3], roundi(100.0 * roads[0] / n), roundi(100.0 * roads[1] / n),
+			roundi(100.0 * roads[2] / n), roundi(100.0 * roads[3] / n), quiet, roundi(busiest), busiest_at % s.w,
+			busiest_at / s.w, roundi(s.road_capacity())])
+		print("%s   share of driving: free-flowing %d%%, busy %d%%, heavy %d%%, jammed %d%%" % [tag,
+			roundi(100.0 * volume[0] / total), roundi(100.0 * volume[1] / total), roundi(100.0 * volume[2] / total),
+			roundi(100.0 * volume[3] / total)])
+		var all := PackedFloat32Array()
+		for i: int in s.w * s.h:
+			if s.tiles[i] == Simulation.Tile.ROAD:
+				all.append(s.traffic_at(i))
+		all.sort()
+		var marks: Array[String] = []
+		for p: int in [25, 50, 75, 90, 95, 99]:
+			marks.append("%d%% under %d" % [p, roundi(all[mini(all.size() - 1, all.size() * p / 100)])])
+		print("%s   trips a day per road tile: %s" % [tag, ", ".join(marks)])
 
 
 func _count_tall(from_stage: int) -> int:
@@ -521,6 +571,18 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_new_city_small, "size": SMALL_SIZE},
 		{"name": "36_hud_loans", "at": Vector2(52, 60), "yaw": -40.0, "pitch": 40.0, "dist": 1500.0,
 			"hud": true, "prep": _prep_loans},
+		# Traffic (they don't change the town): the Traffic view of the whole town,
+		# close up with a busy road hovered, in the smallest window (10 map view
+		# icons), and the normal view where a busy road meets quiet streets, after
+		# the cars have driven for a while (they follow the traffic model).
+		{"name": "42_traffic_overview", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_traffic},
+		{"name": "43_traffic_close", "at": TRAFFIC_CLOSE, "yaw": -40.0, "pitch": 45.0, "dist": 900.0,
+			"hud": true, "prep": _prep_traffic, "hover_road": true},
+		{"name": "44_traffic_small", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"hud": true, "prep": _prep_traffic_small, "size": SMALL_SIZE},
+		{"name": "45_traffic_cars", "at": TRAFFIC_CARS, "yaw": -40.0, "pitch": 36.0, "dist": 420.0,
+			"prep": _prep_traffic_cars, "drive": 25.0},
 		# The natural surroundings: a beach close up, the hills, and the edge of the map.
 		{"name": "19_beach", "at": Vector2(44, 108), "yaw": -70.0, "pitch": 34.0, "dist": 320.0},
 		{"name": "20_hills", "at": Vector2(112, 40), "yaw": -40.0, "pitch": 30.0, "dist": 1500.0},
@@ -563,6 +625,8 @@ func _shot_list() -> Array[Dictionary]:
 
 
 const SMALL_SIZE := Vector2i(1280, 720)   # the smallest window the interface is laid out for
+const TRAFFIC_CLOSE := Vector2(68, 58)    # the link between the town and the works (the busiest road)
+const TRAFFIC_CARS := Vector2(66, 57)
 
 
 var _woodland_done := false
@@ -729,6 +793,24 @@ func _prep_loans() -> void:
 	hud.get("_city_button").button_pressed = true
 
 
+func _prep_traffic() -> void:
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_select_tool", 0)
+	game.call("_set_overlay", WorldView.Overlay.TRAFFIC)
+
+
+func _prep_traffic_small() -> void:
+	_prep_traffic()
+	get_window().size = SMALL_SIZE
+
+
+func _prep_traffic_cars() -> void:
+	_hud_reset()
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	traffic.set_enabled(true)
+
+
 func _prep_query() -> void:
 	_hud_reset()
 	hud.set_build_open(false)
@@ -747,6 +829,25 @@ func _show_hover(at: Vector2) -> void:
 			if d < best_d:
 				best_d = d
 				best = p
+	game.set("hover", best)
+	world.set_hover(best, true)
+	game.call("_update_info")
+	for n: int in 3:
+		await get_tree().process_frame
+		RenderingServer.force_draw(false)
+
+
+func _show_road_hover(at: Vector2) -> void:
+	# Point the mouse (as far as the game knows) at the busiest road near `at`.
+	var best := Vector2i(-1, -1)
+	var most := -1.0
+	for y: int in range(int(at.y) - 6, int(at.y) + 7):
+		for x: int in range(int(at.x) - 6, int(at.x) + 7):
+			var i := y * sim.w + x
+			if sim.tiles[i] == Simulation.Tile.ROAD and sim.traffic_at(i) > most:
+				most = sim.traffic_at(i)
+				best = Vector2i(x, y)
+	print("[shots]   hovering the road at %s: %d trips a day" % [best, roundi(most)])
 	game.set("hover", best)
 	world.set_hover(best, true)
 	game.call("_update_info")
@@ -787,8 +888,18 @@ func _shoot(shot: Dictionary) -> void:
 	for n: int in 3:
 		await get_tree().process_frame
 		RenderingServer.force_draw(false)
+	if shot.has("drive"):
+		# Let the cars drive (the game clock is stopped in the shots), so queues form.
+		var steps := roundi(float(shot["drive"]) * 30.0)
+		for k: int in steps:
+			traffic.update(1.0 / 30.0, rig.target, rig.distance)
+		for n: int in 3:
+			await get_tree().process_frame
+			RenderingServer.force_draw(false)
 	if shot.get("hover", false):
 		await _show_hover(at)
+	if shot.get("hover_road", false):
+		await _show_road_hover(at)
 	var want: Vector2i = shot.get("size", SHOT_SIZE)
 	var image := get_viewport().get_texture().get_image()
 	if want != SHOT_SIZE:

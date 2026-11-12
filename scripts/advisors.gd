@@ -262,6 +262,15 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			+ "Homes there grow slowly and people are less keen to live in the town. Keep "
 			+ "homes away from them, or put parks in between.", WorldView.Overlay.POLLUTION)
 
+	# --- Traffic (shown only for now: jams don't hold the town back yet) ---
+	var jams: float = sim.traffic_jammed_share()
+	if jams >= Settings.TRAFFIC_JAM_TIP:
+		_add(out, "traffic", WARNING if jams >= Settings.TRAFFIC_JAM_WARN else ADVICE,
+			"%d%% of trips are stuck in jams" % roundi(jams * 100.0),
+			"Some roads carry more traffic than they can take: the red ones on the Traffic map. "
+			+ "Build another road alongside (a second way between homes and work), or a bus "
+			+ "depot near the homes so fewer people drive.", WorldView.Overlay.TRAFFIC)
+
 	# --- Abandoned buildings ---
 	if sim.abandoned_count > 0:
 		_add(out, "abandoned", WARNING if sim.abandoned_count >= 5 else ADVICE,
