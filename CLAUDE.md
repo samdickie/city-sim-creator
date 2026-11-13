@@ -66,6 +66,9 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - **Rebuild them after changing the rules** (growth, money, services): they are snapshots, and the play test (`_examples`) checks each still makes money and is happy when loaded.
 - Saves now also keep last month's budget (`last_income`...), read with defaults, so a loaded city shows its balance straight away.
 
+## Promo video
+- `tools/make_promo.sh [outdir] [--draft] [--only=skyline,night]` films a 27 second video for X (`scripts/dev_promo.gd`, which extends dev_examples.gd; `-- --promo=<frame dir>`): the City example's plan grown from the empty map a month a frame, then fly-rounds of the loaded example (skyline, street, suburb, coast, works, map views with the HUD, sunset, title). Every frame is saved as a JPG and joined with ffmpeg into `screenshots/promo/troon_city_promo.mp4` (1920x1080, 30 fps, H.264, silent sound track, about 50 MB). About 8 minutes; `--draft` is 960x540. Shots are the `_scene_*` functions (camera from/to as `[tile, yaw, pitch, distance]`); the words are `TITLE` and `TAGLINE`.
+
 ## Building models and menu pictures
 - Built headless with Blender's Python module (pip `bpy`; 5.1.2 was used with Python 3.13):
   `python tools/make_buildings.py assets/models [preview_dir]`. Set `ONLY=name1,name2` to rebuild just some models; the previews are worth looking at.

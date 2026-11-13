@@ -13,6 +13,7 @@ const Traffic = preload("res://scripts/traffic.gd")
 const Advisors = preload("res://scripts/advisors.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")   # dev tool: tools/screenshots.sh
 const DevExamples = preload("res://scripts/dev_examples.gd")   # dev tool: tools/make_examples.sh
+const DevPromo = preload("res://scripts/dev_promo.gd")   # dev tool: tools/make_promo.sh
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
 const MAP_FILE := "res://map/troon_map.json"
@@ -201,6 +202,9 @@ func _ready() -> void:
 	# Dev tools only: `-- --shots=<dir>` builds a demo town and saves screenshots;
 	# `-- --playtest=<dir>` plays a new game with mouse and keyboard events.
 	var user_args := OS.get_cmdline_user_args()
+	if DevPromo.wanted_promo(user_args):
+		add_child(DevPromo.new(self, user_args))
+		return
 	if DevExamples.wanted_examples(user_args):
 		add_child(DevExamples.new(self, user_args))
 		return
