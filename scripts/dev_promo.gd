@@ -15,11 +15,16 @@ extends "res://scripts/dev_examples.gd"
 
 const FPS := 30
 const WARM_UP := 24                   # frames drawn but not kept after a cut (shadows, trees, props settle)
-const TITLE := "TROON CITY"
-const TAGLINE := "A city builder on real Scottish terrain"
+# No place names in the film: it should read as a city builder set anywhere.
+const OPENING := "EMPTY LAND"
+const OPENING_SUB := "Nothing built yet."
+const TITLE := "BUILD YOUR CITY"
+const TAGLINE := "A city builder on real terrain"
+const HUD_CITY_NAME := "My City"       # shown in place of the town's name in the interface
 
 var film_size := Vector2i(1920, 1080)
 var only_scenes: PackedStringArray = []
+var stills := false                   # --promo-stills: pictures to go with a post, no film
 var _frame_no := 0
 var _last_tick := 0
 var _city_loaded := false
@@ -49,6 +54,8 @@ func _init(game_node: Node3D, args: PackedStringArray) -> void:
 			var parts := a.trim_prefix("--promo-size=").split("x")
 			if parts.size() == 2:
 				film_size = Vector2i(int(parts[0]), int(parts[1]))
+		elif a == "--promo-stills":
+			stills = true
 		elif a.begins_with("--promo-only="):
 			only_scenes = a.trim_prefix("--promo-only=").split(",", false)
 	if out_dir.is_relative_path():
@@ -68,10 +75,14 @@ func _run() -> void:
 	get_viewport().scaling_3d_scale = 1.0
 	get_viewport().scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
 	get_window().mode = Window.MODE_WINDOWED
-	get_window().size = film_size
+	get_window().size = SHOT_SIZE if stills else film_size
 	hud.visible = false
+	_rename_city(hud)
 	_build_overlay()
 	await get_tree().process_frame
+	if stills:
+		await _run_stills()
+		return
 	print("[promo] filming at %s, %d frames a second, to %s" % [film_size, FPS, out_dir])
 
 	for scene: Array in [["empty", _scene_empty], ["grow", _scene_grow], ["skyline", _scene_skyline],
@@ -90,6 +101,51 @@ func _run() -> void:
 	print("[promo] done: %d frames (%.1f s of film) in %.0f s" % [_frame_no, float(_frame_no) / FPS,
 		(Time.get_ticks_msec() - started) / 1000.0])
 	get_tree().quit(0)
+
+
+# -------------------------------------------------------------------- stills
+
+func _run_stills() -> void:
+	# Pictures to post beside the film (1600x1000), taken like the screenshots.
+	# No place names: the interface's town name is already swapped.
+	game.call("_new_city", 1)
+	await _shoot({"name": "1_world", "at": Vector2(56, 62), "yaw": -34.0, "pitch": 32.0, "dist": 3900.0, "time": 0.58})
+	game.call("_load_example", "city")
+	_finish_example()
+	var plain := func() -> void: game.call("_set_overlay", WorldView.Overlay.NONE)
+	for shot: Dictionary in [
+		{"name": "2_build_menu", "at": Vector2(50, 61), "yaw": -40.0, "pitch": 36.0, "dist": 1500.0, "hud": true,
+			"prep": _prep_build_menu},
+		{"name": "3_growth", "at": Vector2(47, 64), "yaw": -40.0, "pitch": 17.0, "dist": 720.0, "prep": plain},
+		{"name": "3_growth_b", "at": Vector2(50, 70), "yaw": 20.0, "pitch": 15.0, "dist": 800.0, "prep": plain},
+		{"name": "4_happiness", "at": Vector2(52, 60), "yaw": -40.0, "pitch": 40.0, "dist": 1500.0, "hud": true,
+			"prep": _prep_city_panel},
+		{"name": "5_traffic", "at": Vector2(54, 58), "yaw": -40.0, "pitch": 55.0, "dist": 2500.0, "hud": true,
+			"prep": _prep_traffic},
+		{"name": "5_power", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0, "hud": true,
+			"prep": _prep_view.bind(WorldView.Overlay.POWER)},
+		{"name": "6_view_land_value", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"prep": func() -> void: game.call("_set_overlay", WorldView.Overlay.LAND_VALUE)},
+		{"name": "6_view_services", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"prep": func() -> void: game.call("_set_overlay", WorldView.Overlay.SERVICES)},
+		{"name": "6_view_pollution", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"prep": func() -> void: game.call("_set_overlay", WorldView.Overlay.POLLUTION)},
+		{"name": "6_view_traffic", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0,
+			"prep": func() -> void: game.call("_set_overlay", WorldView.Overlay.TRAFFIC)},
+		{"name": "6_night", "at": Vector2(48, 64), "yaw": -40.0, "pitch": 24.0, "dist": 1200.0, "time": 0.80, "prep": plain},
+		{"name": "7_close", "at": Vector2(63, 51), "yaw": -30.0, "pitch": 30.0, "dist": 420.0, "prep": plain},
+	]:
+		await _shoot(shot)
+	get_tree().quit(1 if _failed > 0 else 0)
+
+
+func _prep_city_panel() -> void:
+	# The interface with the City panel open: happiness and what it's made of, the budget.
+	_hud_reset()
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	hud.set_build_open(false)
+	game.call("_select_tool", 0)
+	hud.get("_city_button").button_pressed = true
 
 
 # ------------------------------------------------------------------- filming
@@ -157,6 +213,15 @@ func _move(seconds: float, a: Array, b: Array, ease_amount: float = 0.0, each: C
 		if each.is_valid():
 			each.call(t)
 		await _frame()
+
+
+func _rename_city(node: Node) -> void:
+	# The interface's own name for the town (top left).
+	var l := node as Label
+	if l and l.text == "Troon":
+		l.text = HUD_CITY_NAME
+	for child: Node in node.get_children():
+		_rename_city(child)
 
 
 func _daytime(t: float) -> void:
@@ -242,7 +307,7 @@ func _scene_empty() -> void:
 	game.call("_new_city", 1)
 	_daytime(0.58)
 	_cam(Vector2(56, 62), -34.0, 40.0, 4300.0)
-	_words("", "", "TROON, SCOTLAND", "Real terrain. Nothing built yet.")
+	_words("", "", OPENING, OPENING_SUB)
 	await _settle(40)
 	await _move(1.4, [Vector2(56, 62), -34.0, 40.0, 4300.0], [Vector2(56, 62), -35.0, 40.0, 4050.0], 0.0,
 		func(t: float) -> void: _fade.color.a = 1.0 - smoothstep(0.0, 0.3, t))

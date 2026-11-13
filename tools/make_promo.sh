@@ -1,11 +1,11 @@
 #!/bin/bash
 # Dev tool: film a short promotional video of the game (see scripts/dev_promo.gd).
 #
-#   tools/make_promo.sh [outdir] [--draft] [--only=skyline,night]
+#   tools/make_promo.sh [outdir] [--draft] [--only=skyline,night] [--stills]
 #
 # Opens a Godot window, grows the City example from the empty map, flies round
 # the finished city and saves every frame to outdir/frames (default
-# screenshots/promo), then joins them into outdir/troon_city_promo.mp4 with
+# screenshots/promo), then joins them into outdir/city_promo.mp4 with
 # ffmpeg: 1920x1080, 30 frames a second, H.264 with a silent sound track, which
 # is what X (Twitter) takes. About 10 minutes. --draft films at 960x540 (quicker).
 # Don't cover or minimise the window while it runs.
@@ -17,14 +17,23 @@ GODOT="${GODOT:-$HOME/Downloads/Godot.app/Contents/MacOS/Godot}"
 OUT="screenshots/promo"
 ONLY=""
 SIZE="1920x1080"
+STILLS=""
 for arg in "$@"; do
 	case "$arg" in
 		--only=*) ONLY="${arg#--only=}" ;;
 		--draft) SIZE="960x540" ;;
+		--stills) STILLS=1 ;;
 		-h|--help) sed -n '2,13p' "$0"; exit 0 ;;
 		*) OUT="$arg" ;;
 	esac
 done
+if [ -n "$STILLS" ]; then
+	# Pictures to post beside the film instead (outdir/stills, 1600x1000).
+	mkdir -p "$OUT/stills"
+	OUT="$(cd "$OUT" && pwd)"
+	"$GODOT" --path . --windowed --resolution 1600x1000 -- "--promo=$OUT/stills" --promo-stills 2>&1 | tee "$OUT/stills/godot.log"
+	exit "${PIPESTATUS[0]}"
+fi
 mkdir -p "$OUT/frames"
 OUT="$(cd "$OUT" && pwd)"
 rm -f "$OUT"/frames/f*.jpg
@@ -45,5 +54,5 @@ grep -nE "SCRIPT ERROR|Parse Error" "$LOG" && exit 1
 ffmpeg -y -loglevel error -framerate 30 -i "$OUT/frames/f%05d.jpg" \
 	-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -shortest \
 	-c:v libx264 -preset slow -crf 17 -maxrate 16M -bufsize 32M -vf "scale=in_range=full:out_range=tv,format=yuv420p" -color_range tv -profile:v high \
-	-r 30 -c:a aac -b:a 128k -movflags +faststart "$OUT/troon_city_promo.mp4" || exit 1
-ls -lh "$OUT/troon_city_promo.mp4"
+	-r 30 -c:a aac -b:a 128k -movflags +faststart "$OUT/city_promo.mp4" || exit 1
+ls -lh "$OUT/city_promo.mp4"
