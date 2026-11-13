@@ -12,10 +12,12 @@ const Hud = preload("res://scripts/hud.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const Advisors = preload("res://scripts/advisors.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")   # dev tool: tools/screenshots.sh
+const DevExamples = preload("res://scripts/dev_examples.gd")   # dev tool: tools/make_examples.sh
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
 const MAP_FILE := "res://map/troon_map.json"
 const SAVE_FILE := "user://troon_save.json"
+const EXAMPLES_DIR := "res://examples"   # ready-made cities (the game menu's Example cities)
 const SAVE_VERSION := 4               # 4: difficulty and loans (older saves load as Normal with no loans)
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
@@ -182,6 +184,7 @@ func _ready() -> void:
 	hud.repay_pressed.connect(_repay)
 	hud.save_pressed.connect(_save_game)
 	hud.load_pressed.connect(_load_game)
+	hud.example_chosen.connect(_load_example)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
 	hud.overlay_chosen.connect(_set_overlay)
 	hud.service_filter_chosen.connect(_set_service_filter)
@@ -198,6 +201,9 @@ func _ready() -> void:
 	# Dev tools only: `-- --shots=<dir>` builds a demo town and saves screenshots;
 	# `-- --playtest=<dir>` plays a new game with mouse and keyboard events.
 	var user_args := OS.get_cmdline_user_args()
+	if DevExamples.wanted_examples(user_args):
+		add_child(DevExamples.new(self, user_args))
+		return
 	if DevShots.wanted(user_args):
 		add_child(DevShots.new(self, user_args))
 		return
@@ -1155,10 +1161,13 @@ func _set_speed(new_speed: int) -> void:
 # --------------------------------------------------------------- save / load
 
 func _save_game() -> void:
-	var f := FileAccess.open(SAVE_FILE, FileAccess.WRITE)
+	hud.flash("City saved." if _write_save(SAVE_FILE) else "Save failed.")
+
+
+func _write_save(path: String) -> bool:
+	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
-		hud.flash("Save failed.")
-		return
+		return false
 	var data := sim.to_save()
 	data["version"] = SAVE_VERSION
 	data["map"] = map_name
@@ -1166,10 +1175,10 @@ func _save_game() -> void:
 	data["height"] = map_h
 	f.store_string(JSON.stringify(data))
 	f.close()
-	hud.flash("City saved.")
+	return true
 
 
-func _load_game(path: String = SAVE_FILE) -> void:
+func _load_game(path: String = SAVE_FILE, done_text: String = "City loaded.") -> void:
 	if not FileAccess.file_exists(path):
 		hud.flash("No saved city yet.")
 		return
@@ -1185,7 +1194,16 @@ func _load_game(path: String = SAVE_FILE) -> void:
 	world.refresh_all()
 	_layout_seen = sim.layout_version
 	_refresh_hud()
-	hud.flash("City loaded.")
+	hud.flash(done_text)
+
+
+func _load_example(id: String) -> void:
+	# A ready-made city from the examples folder (Settings.EXAMPLES; made by
+	# tools/make_examples.sh). It replaces the city on the map, like Load; your
+	# own save file is only changed if you then press Save.
+	for item: Dictionary in Settings.EXAMPLES:
+		if String(item["id"]) == id:
+			_load_game(EXAMPLES_DIR.path_join(id + ".json"), "Loaded %s." % String(item["name"]))
 
 
 func _ask_new_city(first: bool) -> void:

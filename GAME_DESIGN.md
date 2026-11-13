@@ -116,7 +116,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Interface
 - The town is the hero: small frosted-glass pieces hug the edges, nothing sits over the middle. Glass: the game behind blurred, drained of most colour and darkened to a cool slate (so text reads the same over grass, sea, overlays and night), rounded corners, hairline edge, soft shadow. Pieces fade in and out.
-- Top left: game menu (New city, Save, Load, How to play, Day and night), city name, date and clock, and speed as pause / play / fast icons (the chosen one lit; pause in amber).
+- Top left: game menu (New city, Save, Load, How to play, Example cities: Village, Town and City, ready-made towns to load and carry on with; Day and night), city name, date and clock, and speed as pause / play / fast icons (the chosen one lit; pause in amber).
 - Top centre: advisors ticker (see Advisors).
 - Top right: status strip: money and last month's change (green or red), people and jobs, happiness, four small meters (power, water, services, rubbish: icon and bar, red/amber/green, details on hover) and the demand meter (homes, shops, industry bars round a zero line). Clicking the strip opens the City panel: budget (with the difficulty), tax rate with - / +, loans, happiness with its complaints and fixes, services, housing and last month's growth.
 - Bottom centre: a card with the picture of the tool in use, what's under the mouse (name, stage, land value, services, problems) and what building there costs (green) or why it can't (red). Messages pop up just above it.

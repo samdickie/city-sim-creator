@@ -109,8 +109,40 @@ func _run() -> void:
 	await _old_save()
 	await _traffic()
 	await _services()
+	await _examples()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
+
+
+func _examples() -> void:
+	# The game menu's Example cities (Settings.EXAMPLES, made by tools/make_examples.sh):
+	# each loads with a click and is a town that pays its way. Last, as it
+	# replaces the city on the map.
+	var menu: PanelContainer = hud.get("_menu_panel")
+	var people_before := 0
+	for item: Dictionary in Settings.EXAMPLES:
+		var title: String = item["name"]
+		await _click(hud.get("_menu_button"))
+		if people_before == 0:
+			await _shot("p22_menu_examples")
+		await _click(_find_button(menu, title))
+		await _wait(0.5)
+		check(not menu.visible, "picking the example %s closes the menu" % title)
+		check(sim.population > people_before, "the example %s loads: %d people" % [title, sim.population])
+		check(sim.last_balance() > 0 and sim.money > 0 and sim.debt == 0,
+			"the example %s makes money (%+d a month) and owes nothing" % [title, sim.last_balance()])
+		check(sim.abandoned_count == 0 and sim.happiness >= 0.55, "the example %s is a happy town (%d%%), nothing abandoned" % [
+			title, roundi(sim.happiness * 100.0)])
+		people_before = sim.population
+	# The last one is the big city: a year on, it's still growing richer.
+	var money := sim.money
+	var people := sim.population
+	for m: int in 12:
+		sim.tick()
+	check(sim.money > money and sim.population > people * 0.97,
+		"a year on, the example city has more money (%d -> %d) and has kept its people (%d -> %d)" % [
+		money, sim.money, people, sim.population])
+	await _shot("p23_example_city")
 
 
 # ------------------------------------------------------------------ checks

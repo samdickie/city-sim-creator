@@ -2505,6 +2505,11 @@ func to_save() -> Dictionary:
 		"decline": Array(decline),
 		"abandoned": Array(abandoned),
 		"funding": funding.duplicate(),
+		# Last month's budget, so a loaded city shows its balance straight away.
+		"last_income": last_income,
+		"last_upkeep": last_upkeep,
+		"last_loan": last_loan,
+		"last_interest": last_interest,
 	}
 
 
@@ -2557,8 +2562,10 @@ func from_save(data: Dictionary) -> void:
 	money = int(data.get("money", start_money(difficulty)))
 	debt = maxi(int(data.get("debt", 0)), 0)
 	debt_peak = maxi(int(data.get("debt_peak", debt)), debt) if debt > 0 else 0
-	last_loan = 0
-	last_interest = 0
+	last_income = int(data.get("last_income", 0))     # (older saves: no balance until a month has passed)
+	last_upkeep = int(data.get("last_upkeep", 0))
+	last_loan = int(data.get("last_loan", 0))
+	last_interest = int(data.get("last_interest", 0))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
 	var saved_funding: Array = data.get("funding", [])

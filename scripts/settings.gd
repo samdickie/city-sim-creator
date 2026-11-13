@@ -16,6 +16,12 @@ const DIFFICULTIES := [
 	{"name": "Hard", "about": "Little money, dear running costs and loans",
 		"money": 20000, "upkeep": 1.25, "loan_rate": 0.09, "loan_limit": 30000},
 ]
+# Ready-made cities in the game menu: examples/<id>.json, made by tools/make_examples.sh.
+const EXAMPLES := [
+	{"id": "village", "name": "Village", "about": "A small seaside village with room to grow"},
+	{"id": "town", "name": "Town", "about": "A busy harbour town with terraces, shops and a works"},
+	{"id": "city", "name": "City", "about": "A large, mature city with a skyline, parks and every service"},
+]
 const DEFAULT_DIFFICULTY := 1     # Normal (also what saves from before difficulty load as)
 const LOW_MONEY := 2000           # below this the money shows red and the advisors suggest a loan
 

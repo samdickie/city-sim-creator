@@ -28,6 +28,7 @@ signal borrow_pressed(amount: int)
 signal repay_pressed(amount: int)           # -1 = everything owed
 signal save_pressed
 signal load_pressed
+signal example_chosen(id: String)           # a ready-made city picked in the game menu (Settings.EXAMPLES)
 signal day_cycle_toggled(on: bool)
 signal overlay_chosen(kind: int)
 signal service_filter_chosen(service: int)  # the Services view's chips: -1 all, 0-3 police, fire, school, hospital
@@ -89,6 +90,7 @@ var _demand_colours := {}
 var _left_island: PanelContainer
 var _menu_button: Button
 var _menu_panel: PanelContainer
+var example_buttons: Dictionary = {}       # example id -> its row in the game menu
 var _day_button: Button
 var speed_buttons := {}
 var date_label: Label
@@ -376,6 +378,19 @@ func _build_game_menu() -> void:
 		b.tooltip_text = item[2]
 		b.pressed.connect(func(): _menu_chosen(id))
 		box.add_child(b)
+	# Ready-made cities to load and carry on with.
+	box.add_child(_divider())
+	var head := _label("Example cities", 12, TEXT_FAINT)
+	box.add_child(head)
+	for item: Dictionary in Settings.EXAMPLES:
+		var example: String = item["id"]
+		var e := _menu_row("load", String(item["name"]))
+		e.tooltip_text = "%s. Replaces the city on the map" % String(item["about"])
+		e.pressed.connect(func():
+			_close_menu()
+			example_chosen.emit(example))
+		box.add_child(e)
+		example_buttons[example] = e
 	box.add_child(_divider())
 	_day_button = _menu_row("sun", "Day and night: on")
 	_day_button.toggle_mode = true
