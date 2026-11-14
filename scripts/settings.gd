@@ -36,6 +36,19 @@ const LOAN_HEAVY_SHARE := 0.25        # advisors warn when loan payments are mor
 
 # Cost to build one tile, in £.
 const ROAD_COST := 10
+# The three kinds of road (the kind is kept per road tile: sim.road_kind).
+# An avenue is wider and faster; a motorway is faster still, but plots can't
+# open onto it (it doesn't count as "a road nearby") and it's noisy.
+const ROAD_NAMES := ["Road", "Avenue", "Motorway"]
+const ROAD_IDS := ["road", "avenue", "motorway"]
+const ROAD_COSTS := [10, 40, 120]             # £ a tile
+const ROAD_UPKEEPS := [0.5, 1.5, 4.0]         # £ a tile a month
+const ROAD_CAPACITIES := [5000.0, 14000.0, 40000.0]   # trips a day before it's full
+const ROAD_STEPS := [12, 8, 5]                # time to drive across a tile (drivers take the quickest way)
+const MOTORWAY := 2
+const MOTORWAY_NOISE := 0.02                  # land value lost beside each motorway tile...
+const MOTORWAY_NOISE_RADIUS := 3              # ...fading out over this many tiles...
+const MOTORWAY_NOISE_MAX := 0.1               # ...and at most this much in all
 const INDUSTRY_COST := 80         # (homes and shops cost depends on density, see below)
 const BULLDOZE_COST := 5          # clearing a built tile (empty tiles are free)
 
@@ -104,7 +117,6 @@ const TAX_TOLERANCE_POOR := 1.3
 const SERVICES_EXPECTED_POP := 4000
 const SERVICES_EFFECT := 0.6      # how much better (or worse) than expected services move appeal
 const TAX_BASE := 2.0             # £ per resident or job per month at a 100% rate
-const ROAD_UPKEEP := 0.5          # £ per road tile per month
 
 # --- Happiness ---
 # Happiness (0-100%) sums up how residents feel, and it is what draws people in.
@@ -329,8 +341,7 @@ const TRAFFIC_RAIL_SHARE := 0.15
 # until there are at most TRAFFIC_MAX_GROUPS), which keeps the model quick in a big town.
 const TRAFFIC_GROUP_TILES := 8
 const TRAFFIC_MAX_GROUPS := 16
-# How much a road tile carries before it's full, in trips a day (both ways).
-const ROAD_CAPACITY := 5000.0
+# (How much a road tile carries before it's full: ROAD_CAPACITIES, by kind of road.)
 # Congestion = trips / capacity. Bands for the map and hover text:
 # free-flowing · busy (from 0.5) · heavy (0.8) · jammed (1.0 and over).
 const TRAFFIC_BANDS := [0.5, 0.8, 1.0]

@@ -686,6 +686,10 @@ func _apply_tool(p: Vector2i) -> bool:
 		sim.set_tile(i, Tile.EMPTY)
 	elif current_tool == Tool.DISTRICT:
 		sim.set_district(i, _district_choice())
+	elif current_tool == Tool.ROAD:
+		sim.set_road(i, _road_choice())
+	elif current_tool == Tool.GRID:
+		sim.set_road(i, 0)
 	else:
 		sim.set_tile(i, _target_tile(), current_density if _has_density() else 1)
 	return true
@@ -703,8 +707,12 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			return "-"
 	else:
 		if here == _target_tile():
-			# Same zone again does nothing, unless it changes the density.
-			if not _has_density() or sim.density[i] == current_density:
+			# Same zone again does nothing, unless it changes the density
+			# (or, for a road, makes it another kind of road).
+			if current_tool == Tool.ROAD:
+				if sim.road_kind[i] == _road_choice():
+					return "-"
+			elif not _has_density() or sim.density[i] == current_density:
 				return "-"
 		# Everything but roads goes round roads, power lines and power plants
 		# rather than replacing them; the street grid only goes on open land.
@@ -731,7 +739,8 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 func _base_cost(tool_id: int) -> int:
 	match tool_id:
 		Tool.ROAD:
-			return Settings.ROAD_COST
+			var road_cost: int = Settings.ROAD_COSTS[_road_choice()]
+			return road_cost
 		Tool.HOMES:
 			var homes_cost: int = Settings.HOMES_COSTS[current_density]
 			return homes_cost
@@ -772,6 +781,12 @@ func _tool_cost(p: Vector2i) -> int:
 		return base
 	var hill := 1.0 + slope[p.y * map_w + p.x] * Settings.SLOPE_COST_PER_METRE
 	return roundi(base * hill)
+
+
+func _road_choice() -> int:
+	# The kind of road the Road tool lays: 0 road, 1 avenue, 2 motorway.
+	var kind: int = _choice.get(Tool.ROAD, 0)
+	return kind
 
 
 func _target_tile() -> int:
@@ -818,6 +833,9 @@ func _tool_label() -> String:
 		return district_name + " district" if _district_choice() == 2 else district_name
 	if GROUPS.has(current_tool):
 		return _name_of(_target_tile())
+	if current_tool == Tool.ROAD:
+		var road_name: String = Settings.ROAD_NAMES[_road_choice()]
+		return road_name
 	var tool_name: String = TOOL_NAMES[current_tool]
 	return tool_name
 
@@ -851,6 +869,7 @@ const SHORT := {
 	"shops_0": "Corner shops", "shops_1": "Parades, shops with flats", "shops_2": "Big stores and hotels",
 	"offices_0": "Small offices", "offices_1": "Office blocks", "offices_2": "Office towers",
 	"industry": "Works and factories", "road": "Joined-up streets", "grid": "Streets in 100 m blocks",
+	"avenue": "Wide and tree-lined: more traffic", "motorway": "Fast, for traffic across town",
 	"bulldoze": "Clear anything", "park": "Trees and open space",
 	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
 	"wind": "Clean power: drag a wind farm", "solar": "Quiet, clean power", "power_line": "Carries power",
@@ -881,7 +900,8 @@ func _menu_entries() -> Array:
 	for d in 3:
 		out.append(["offices_%d" % d, "zones", Tool.OFFICES, d, -1, Tile.OFFICES])
 	out.append(["industry", "zones", Tool.INDUSTRY, -1, -1, Tile.INDUSTRY])
-	out.append(["road", "roads", Tool.ROAD, -1, -1, Tile.ROAD])
+	for k in Settings.ROAD_IDS.size():
+		out.append([Settings.ROAD_IDS[k], "roads", Tool.ROAD, -1, k, Tile.ROAD])
 	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
 	out.append(["bulldoze", "roads", Tool.BULLDOZE, -1, -1, Tile.EMPTY])
 	var group_cats := {Tool.POWER: "power", Tool.UTILITY: "utilities", Tool.SERVICE: "services",
@@ -960,6 +980,12 @@ func _menu_items() -> Array:
 			else:
 				about = "Carries power across open land (roads and buildings carry it too)"
 				price += " / tile"
+		elif tool_id == Tool.ROAD:
+			item_name = Settings.ROAD_NAMES[e[4]]
+			about = ["Roads run straight and can turn one corner",
+				"Two lanes each way with trees down the middle: takes nearly three times the traffic of a road, and drivers prefer it. Drag over a road to widen it",
+				"Three lanes each way: takes eight times the traffic of a road and is the quickest way across town. Plots can't open onto it, so join it to ordinary roads; it's noisy to live beside"][e[4]]
+			price = Hud.money_text(Settings.ROAD_COSTS[e[4]]) + " / tile"
 		else:
 			item_name = TOOL_NAMES[tool_id]
 			about = {Tool.INDUSTRY: "Jobs, but it lowers land value nearby",
@@ -1420,11 +1446,12 @@ func _road_text(i: int) -> String:
 	# "Road — busy: about 1,200 trips a day", and what to do about heavy traffic.
 	var trips := sim.traffic_at(i)
 	var word := sim.traffic_word(i)
-	var text := "Road — %s%s" % [word.left(1).to_upper(), word.substr(1)]
+	var text := "%s — %s%s" % [sim.road_name(i), word.left(1).to_upper(), word.substr(1)]
 	if trips < 50.0:
 		text += ": hardly any traffic"
 	else:
-		text += ": about %s trips a day" % Hud.thousands(_rounded_trips(trips))
+		text += ": about %s trips a day (it takes %s)" % [Hud.thousands(_rounded_trips(trips)),
+			Hud.thousands(roundi(sim.road_capacity(sim.road_kind[i])))]
 	var fix := sim.traffic_fix(i)
 	if fix != "":
 		text += "\n%s traffic: %s" % ["Jammed" if sim.traffic_band(i) >= 3 else "Heavy", fix]

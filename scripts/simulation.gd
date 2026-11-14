@@ -52,6 +52,7 @@ var tiles := PackedByteArray()        # Tile enum per map tile
 var levels := PackedByteArray()       # zones: 0 = empty plot, then 1 up to the density's maximum
 var density := PackedByteArray()      # zones: 0 = low, 1 = medium, 2 = high
 var district := PackedByteArray()     # any tile: 0 = normal, 1 = conservation area, 2 = CBD
+var road_kind := PackedByteArray()    # road tiles: 0 = road, 1 = avenue, 2 = motorway (Settings.ROAD_NAMES)
 var decline := PackedByteArray()      # zones: months in decline (see Settings.ABANDON_MONTHS)
 var abandoned := PackedByteArray()    # zones: 1 = the building stands empty (no people, jobs or tax)
 var money := 0
@@ -67,6 +68,7 @@ var shop_jobs := 0
 var industry_jobs := 0
 var office_jobs := 0
 var road_tiles := 0
+var road_upkeep := 0.0                # £ a month for all the roads, by kind
 var plants := 0                       # anything that makes power
 var park_tiles := 0
 var counts := {}                      # tile type -> how many the town has
@@ -163,6 +165,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	levels.resize(w * h)
 	density.resize(w * h)
 	district.resize(w * h)
+	road_kind.resize(w * h)
 	decline.resize(w * h)
 	abandoned.resize(w * h)
 	_transit.resize(w * h)
@@ -184,6 +187,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	levels.fill(0)
 	density.fill(1)
 	district.fill(0)
+	road_kind.fill(0)
 	decline.fill(0)
 	abandoned.fill(0)
 	difficulty = clampi(level, 0, Settings.DIFFICULTIES.size() - 1)
@@ -226,6 +230,7 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 			_traffic_dirty = true
 		return
 	tiles[i] = t
+	road_kind[i] = 0                  # (set_road gives a new road its kind)
 	levels[i] = 0                     # a new zone starts as an empty plot
 	decline[i] = 0
 	abandoned[i] = 0
@@ -237,6 +242,47 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	_coverage_dirty = true
 	_traffic_dirty = true
 	layout_version += 1
+
+
+func set_road(i: int, kind: int) -> void:
+	# Lay a road of this kind (Settings.ROAD_NAMES), or change the kind of the one here.
+	if tiles[i] == Tile.ROAD and road_kind[i] == kind:
+		return
+	if tiles[i] != Tile.ROAD:
+		set_tile(i, Tile.ROAD)
+	road_kind[i] = kind
+	_roads_dirty = true
+	_value_dirty = true
+	_traffic_dirty = true
+	layout_version += 1
+
+
+func road_kind_at(i: int) -> int:
+	# 0 road, 1 avenue, 2 motorway; -1 if there's no road here.
+	return road_kind[i] if tiles[i] == Tile.ROAD else -1
+
+
+func is_street(i: int) -> bool:
+	# A road plots can open onto: any kind but a motorway.
+	return tiles[i] == Tile.ROAD and road_kind[i] != Settings.MOTORWAY
+
+
+func road_name(i: int) -> String:
+	var n: String = Settings.ROAD_NAMES[road_kind[i]]
+	return n
+
+
+func _no_road_text(i: int) -> String:
+	# "needs a road within 2 tiles", and a word about the motorway if that's all there is.
+	var text := "needs a road within %d tiles" % Settings.ROAD_REACH
+	var r: int = Settings.ROAD_REACH
+	var cx := i % w
+	var cy := i / w
+	for y in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+		for x in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+			if tiles[y * w + x] == Tile.ROAD and road_kind[y * w + x] == Settings.MOTORWAY:
+				return text + " (a motorway doesn't count)"
+	return text
 
 
 func set_district(i: int, d: int) -> void:
@@ -334,7 +380,7 @@ func _zone_check(i: int) -> Array:
 	if abandoned[i] == 1:
 		return [Growth.ABANDONED, "abandoned, " + abandoned_reason(i)]
 	if not has_road_access(i):
-		return [Growth.BLOCKED, "won't grow, needs a road within %d tiles" % Settings.ROAD_REACH]
+		return [Growth.BLOCKED, "won't grow, " + _no_road_text(i)]
 	_update_power()
 	if powered[i] == 0:
 		if _net_id[i] < 0:
@@ -672,7 +718,7 @@ func _collect_taxes() -> void:
 			taxable += units(i) * (0.6 + 0.8 * land_value[i]) * (Settings.OFFICE_TAX if tiles[i] == Tile.OFFICES else 1.0)
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
 	# Every running cost is scaled by the difficulty (x1 on Normal).
-	last_upkeep = roundi((road_tiles * Settings.ROAD_UPKEEP + park_tiles * Settings.PARK_UPKEEP
+	last_upkeep = roundi((road_upkeep + park_tiles * Settings.PARK_UPKEEP
 		+ service_upkeep() + building_upkeep()) * upkeep_scale())
 	money += last_income - last_upkeep
 	_pay_loan()
@@ -810,6 +856,7 @@ func recount() -> void:
 	industry_jobs = 0
 	office_jobs = 0
 	road_tiles = 0
+	road_upkeep = 0.0
 	plants = 0
 	park_tiles = 0
 	power_used = 0
@@ -842,6 +889,7 @@ func recount() -> void:
 		match t:
 			Tile.ROAD:
 				road_tiles += 1
+				road_upkeep += Settings.ROAD_UPKEEPS[road_kind[i]]
 			Tile.PARK:
 				park_tiles += 1
 			Tile.HOMES:
@@ -996,7 +1044,7 @@ func building_status(i: int) -> String:
 		var why := airport_problem(i)
 		return "open, flights coming and going" if why == "" else "not open, " + why
 	if not near_road(i):
-		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
+		return "not working, " + _no_road_text(i)
 	if int(info(t).get("uses_power", 0)) > 0:
 		_update_power()
 		if powered[i] == 0:
@@ -1334,7 +1382,7 @@ func service_status(i: int) -> String:
 	if f <= 0.0:
 		return "closed (no funding)"
 	if not near_road(i):
-		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
+		return "not working, " + _no_road_text(i)
 	_update_power()
 	if powered[i] == 0:
 		return "not working, no power"
@@ -1728,6 +1776,11 @@ func _update_land_value() -> void:
 		_sum_woodland(Settings.AIRPORT_NOISE_RADIUS, Settings.AIRPORT_NOISE, Tile.AIRPORT)
 		for i in w * h:
 			land_value[i] -= minf(_wood_effect[i], Settings.AIRPORT_NOISE_MAX)
+	# Motorway noise, the same way.
+	if road_kind.has(Settings.MOTORWAY):
+		_sum_woodland(Settings.MOTORWAY_NOISE_RADIUS, Settings.MOTORWAY_NOISE, MOTORWAY_TILES)
+		for i in w * h:
+			land_value[i] -= minf(_wood_effect[i], Settings.MOTORWAY_NOISE_MAX)
 	# Districts: a CBD is where everyone wants to be; the old town has character.
 	for i in w * h:
 		if district[i] == 2:
@@ -1745,16 +1798,23 @@ func _update_land_value() -> void:
 		land_value[i] = clampf(land_value[i], 0.0, 1.0)
 
 
+const MOTORWAY_TILES := -1     # for _sum_woodland: every motorway tile
+
+
 func _sum_woodland(radius: int, amount: float, kind: int = Tile.WOODLAND) -> void:
 	# Into _wood_effect: every woodland tile's amount, fading out over radius tiles
-	# (as _spread does), added up round each tile. (Also used for airport noise.)
+	# (as _spread does), added up round each tile. (Also used for airport and motorway noise.)
 	if _wood_effect.size() != w * h:
 		_wood_effect.resize(w * h)
 	_wood_effect.fill(0.0)
-	if not tiles.has(kind):
+	var motorways := kind == MOTORWAY_TILES
+	if not motorways and not tiles.has(kind):
 		return
 	for i in w * h:
-		if tiles[i] != kind or (kind == Tile.AIRPORT and not building_working(i)):
+		if motorways:
+			if tiles[i] != Tile.ROAD or road_kind[i] != Settings.MOTORWAY:
+				continue
+		elif tiles[i] != kind or (kind == Tile.AIRPORT and not building_working(i)):
 			continue
 		var cx := i % w
 		var cy := i / w
@@ -2338,12 +2398,14 @@ func traffic_at(i: int) -> float:
 	return traffic[i]
 
 
-func road_capacity() -> float:
-	return Settings.ROAD_CAPACITY * _capacity_scale
+func road_capacity(kind: int = 0) -> float:
+	# Trips a day a road of this kind takes before it's full.
+	var cap: float = Settings.ROAD_CAPACITIES[kind]
+	return cap * _capacity_scale
 
 
 func traffic_congestion_at(i: int) -> float:
-	return traffic_at(i) / road_capacity()
+	return traffic_at(i) / road_capacity(road_kind[i])
 
 
 func traffic_band(i: int) -> int:
@@ -2380,6 +2442,10 @@ func traffic_fix(i: int) -> String:
 	# Honest, general advice for a heavy or jammed road ("" when it's fine).
 	if traffic_band(i) < 2:
 		return ""
+	if road_kind[i] == 0:
+		return "make it an avenue, add parallel roads, or a bus depot nearby"
+	if road_kind[i] == 1:
+		return "add parallel roads, a motorway round the town, or a bus depot nearby"
 	return "add parallel roads, or a bus depot nearby"
 
 
@@ -2456,7 +2522,26 @@ func _update_traffic() -> void:
 		g_works[g] += plot_works[k]
 		g_jobs[g] += plot_shop[k] + plot_works[k] + plot_office[k]
 
-	# --- 2. Flood the roads from each group: steps to it from every road node.
+	# --- 2. Flood the roads from each group: the driving time to it from every road
+	# node (a tile of avenue or motorway takes less time than a tile of road, so
+	# drivers go round by the quick way). Each node's time is settled the first
+	# time the flood touches it, as long as nodes are taken nearest first: one
+	# queue per kind of road keeps each queue in order.
+	var kinds: int = Settings.ROAD_STEPS.size()
+	var kind_of := PackedInt32Array()
+	var step_of := PackedInt32Array()
+	kind_of.resize(n)
+	step_of.resize(n)
+	for v: int in n:
+		kind_of[v] = road_kind[_road_tile[v]]
+		step_of[v] = Settings.ROAD_STEPS[kind_of[v]]
+	var road_step := float(Settings.ROAD_STEPS[0])
+	var queue := PackedInt32Array()
+	var q_head := PackedInt32Array()
+	var q_tail := PackedInt32Array()
+	queue.resize(kinds * n)
+	q_head.resize(kinds)
+	q_tail.resize(kinds)
 	var dist := PackedInt32Array()
 	var order := PackedInt32Array()
 	var reached := PackedInt32Array()
@@ -2468,23 +2553,37 @@ func _update_traffic() -> void:
 	for g: int in groups:
 		var base := g * n
 		var tail := base
+		for q: int in kinds:
+			q_head[q] = q * n
+			q_tail[q] = q * n
 		for k: int in plot_node.size():
 			if plot_group[k] == g and dist[base + plot_node[k]] < 0:
 				dist[base + plot_node[k]] = 0
-				order[tail] = plot_node[k]
-				tail += 1
-		var head := base
-		while head < tail:
-			var v := order[head]
-			head += 1
-			var dv := dist[base + v] + 1
+				queue[q_tail[0]] = plot_node[k]
+				q_tail[0] += 1
+		while true:
+			var pick := -1
+			var dv := 0x3fffffff
+			for q: int in kinds:
+				if q_head[q] < q_tail[q]:
+					var dq := dist[base + queue[q_head[q]]]
+					if dq < dv:
+						dv = dq
+						pick = q
+			if pick < 0:
+				break
+			var v := queue[q_head[pick]]
+			q_head[pick] += 1
+			order[tail] = v
+			tail += 1
 			var e := v * 4
 			for s: int in 4:
 				var u := next[e + s]
 				if u >= 0 and dist[base + u] < 0:
-					dist[base + u] = dv
-					order[tail] = u
-					tail += 1
+					dist[base + u] = dv + step_of[u]
+					var lane := kind_of[u]
+					queue[q_tail[lane]] = u
+					q_tail[lane] += 1
 		reached[g] = tail - base
 
 	# --- 3. Trips from homes (and the station and harbour), split between the groups.
@@ -2569,7 +2668,8 @@ func _update_traffic() -> void:
 				pull_shop[g] = 0.0
 				pull_lorry[g] = 0.0
 				continue
-			var d2 := float(d * d)
+			var ds := float(d) / road_step     # (in tiles of ordinary road)
+			var d2 := ds * ds
 			pull_work[g] = g_jobs[g] / (1.0 + d2 * work_r2)
 			pull_shop[g] = g_shop[g] / (1.0 + d2 * shop_r2)
 			pull_lorry[g] = g_works[g] / (1.0 + d2 * lorry_r2)
@@ -2607,15 +2707,16 @@ func _update_traffic() -> void:
 				continue                    # arrived (shared out to the plots below)
 			volume[v] += f
 			var e := v * 4
+			var nearer := dv - step_of[v]
 			var ways := 0
 			for s: int in 4:
 				var u := next[e + s]
-				if u >= 0 and dist[base + u] == dv - 1:
+				if u >= 0 and dist[base + u] == nearer:
 					ways += 1
 			var part := f / ways
 			for s: int in 4:
 				var u := next[e + s]
-				if u >= 0 and dist[base + u] == dv - 1:
+				if u >= 0 and dist[base + u] == nearer:
 					flow[base + u] += part
 	# Arrivals end on each plot's own road, shared by its size.
 	for k: int in plot_node.size():
@@ -2630,11 +2731,10 @@ func _update_traffic() -> void:
 	var total := 0.0
 	var jammed := 0.0
 	var jam_level: float = Settings.TRAFFIC_BANDS[Settings.TRAFFIC_BANDS.size() - 1]
-	var full := road_capacity() * jam_level
 	for v: int in n:
 		traffic[_road_tile[v]] = volume[v]
 		total += volume[v]
-		if volume[v] >= full:
+		if volume[v] >= road_capacity(kind_of[v]) * jam_level:
 			jammed += volume[v]
 	jammed_share = jammed / total if total > 0.0 else 0.0
 	traffic_ms = (Time.get_ticks_usec() - t0) / 1000.0
@@ -2644,13 +2744,13 @@ func _plot_roads(i: int) -> PackedInt32Array:
 	# The road nodes a plot's trips use: every road beside it, or else its nearest road.
 	var out := PackedInt32Array()
 	var x := i % w
-	if x < w - 1 and _road_node[i + 1] >= 0:
+	if x < w - 1 and is_street(i + 1):
 		out.append(_road_node[i + 1])
-	if x > 0 and _road_node[i - 1] >= 0:
+	if x > 0 and is_street(i - 1):
 		out.append(_road_node[i - 1])
-	if i < w * (h - 1) and _road_node[i + w] >= 0:
+	if i < w * (h - 1) and is_street(i + w):
 		out.append(_road_node[i + w])
-	if i >= w and _road_node[i - w] >= 0:
+	if i >= w and is_street(i - w):
 		out.append(_road_node[i - w])
 	if out.is_empty() and _access[i] >= 0:
 		out.append(_access[i])
@@ -2713,6 +2813,8 @@ func _build_road_graph() -> void:
 	for v: int in n:
 		var i := _road_tile[v]
 		_access[i] = v
+		if road_kind[i] == Settings.MOTORWAY:
+			continue                         # (nothing opens onto a motorway)
 		steps[i] = 0
 		queue[tail] = i
 		tail += 1
@@ -2726,7 +2828,7 @@ func _build_road_graph() -> void:
 		var x := i % w
 		for k: int in [i + 1 if x < w - 1 else -1, i - 1 if x > 0 else -1, i + w if i < w * (h - 1) else -1,
 				i - w if i >= w else -1]:
-			if k >= 0 and steps[k] == 255:
+			if k >= 0 and steps[k] == 255 and tiles[k] != Tile.ROAD:
 				steps[k] = d
 				_access[k] = _access[i]
 				queue[tail] = k
@@ -2744,7 +2846,7 @@ func _update_road_distance() -> void:
 	_road_dist.fill(255)
 	var queue: Array[int] = []
 	for i in w * h:
-		if tiles[i] == Tile.ROAD:
+		if is_street(i):                      # (plots can't open onto a motorway)
 			_road_dist[i] = 0
 			queue.append(i)
 	var head := 0
@@ -2785,6 +2887,7 @@ func to_save() -> Dictionary:
 		"levels": Array(levels),
 		"density": Array(density),
 		"district": Array(district),
+		"road_kind": Array(road_kind),
 		"decline": Array(decline),
 		"abandoned": Array(abandoned),
 		"funding": funding.duplicate(),
@@ -2808,8 +2911,15 @@ func from_save(data: Dictionary) -> void:
 		levels[i] = clampi(int(saved_levels[i]), 0, 8) if is_zone(tiles[i]) else 0
 	var saved_district: Array = data.get("district", [])
 	district.fill(0)
+	road_kind.fill(0)
 	for i in mini(saved_district.size(), district.size()):
 		district[i] = clampi(int(saved_district[i]), 0, 2)
+	# Kinds of road (saves from before avenues and motorways: all ordinary roads).
+	var saved_roads: Array = data.get("road_kind", [])
+	road_kind.fill(0)
+	for i in mini(saved_roads.size(), road_kind.size()):
+		if tiles[i] == Tile.ROAD:
+			road_kind[i] = clampi(int(saved_roads[i]), 0, Settings.ROAD_NAMES.size() - 1)
 	var saved_density: Array = data.get("density", [])
 	if saved_density.size() == density.size():
 		for i in density.size():

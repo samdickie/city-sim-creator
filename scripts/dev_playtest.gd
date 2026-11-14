@@ -22,7 +22,7 @@ const Traffic = preload("res://scripts/traffic.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")
 const Advisors = preload("res://scripts/advisors.gd")
 
-const WATCHDOG_SECONDS := 600.0
+const WATCHDOG_SECONDS := 900.0
 const PLAY_DISTANCE := 650.0          # a normal zoom while building
 # game3d.gd's Tool numbers.
 const ROAD := 0
@@ -108,6 +108,7 @@ func _run() -> void:
 	await _loans()
 	await _old_save()
 	await _traffic()
+	await _road_types()
 	await _services()
 	await _examples()
 	await _new_buildings()
@@ -1466,6 +1467,117 @@ func _town_state() -> int:
 	# Everything the rules decide, except traffic.
 	return hash([sim.tiles, sim.levels, sim.decline, sim.abandoned, sim.money, sim.population,
 		sim.land_value_map(), sim.happiness, sim.demand, sim.pollution_map()])
+
+
+func _road_types() -> void:
+	# Roads, avenues and motorways: the same two districts as the traffic test,
+	# joined by one road that jams. Widened into an avenue (with the mouse) it no
+	# longer does; with a second link beside it, drivers take the avenue; nothing
+	# opens onto a motorway; a save keeps the kinds and an old save has only roads.
+	var kinds := {}
+	for item: Dictionary in game.call("_menu_items"):
+		kinds[item["id"]] = item["price"]
+	check(kinds.has("avenue") and kinds.has("motorway") and String(kinds.get("motorway", "")).contains("120"),
+		"roads: avenue and motorway are in the Build menu (%s, %s)" % [kinds.get("avenue", "-"), kinds.get("motorway", "-")])
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(28, 13)
+	check(o.x >= 0 and _built_count() == 0, "roads: a new city with flat land for two districts at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	for side: int in [0, 19]:
+		_place("road", o + Vector2i(side + 4, 1), o + Vector2i(side + 4, 11))
+		for y: int in [1, 4, 7, 10]:
+			_place("road", o + Vector2i(side, y), o + Vector2i(side + 8, y))
+	for x: int in [24, 25, 26, 27]:
+		_place("coal", o + Vector2i(x, 12))
+	_place("homes_1", o + Vector2i(0, 0), o + Vector2i(8, 12))
+	_place("industry", o + Vector2i(19, 0), o + Vector2i(27, 8))
+	_place("shops_1", o + Vector2i(19, 9), o + Vector2i(27, 12))
+	_place("road", o + Vector2i(9, 4), o + Vector2i(18, 4))
+	_fill_plots(o, o + Vector2i(27, 12))
+	var link := o + Vector2i(13, 4)
+	var li := link.y * sim.w + link.x
+	var trips0 := _trips(link)
+	check(sim.traffic_band(li) == 3 and sim.road_kind_at(li) == 0 and String(game.call("_tile_text", li)).begins_with("Road — Jammed")
+		and sim.traffic_fix(li).contains("avenue"),
+		"roads: the one link road is jammed, and the advice is to widen it (%s)" % String(game.call("_tile_text", li)).replace("\n", " / "))
+
+	# Widen it into an avenue, with the mouse.
+	var money0: int = sim.money
+	var upkeep0: float = sim.road_upkeep
+	await _pick_item("roads", "avenue")
+	await _look_at(o + Vector2i(14, 6), PLAY_DISTANCE * 1.6, -40.0, 50.0, [o + Vector2i(8, 4), o + Vector2i(19, 4)])
+	await _drag(_screen_of(o + Vector2i(9, 4)), _screen_of(o + Vector2i(18, 4)))
+	var avenues := 0
+	for x: int in range(9, 19):
+		avenues += 1 if sim.road_kind_at((o.y + 4) * sim.w + o.x + x) == 1 else 0
+	check(avenues == 10 and _count(Simulation.Tile.ROAD, o + Vector2i(9, 4), o + Vector2i(18, 4)) == 10,
+		"roads: dragging the avenue over the road widened all 10 tiles (%d)" % avenues)
+	var paid: int = money0 - sim.money
+	check(paid >= 10 * int(Settings.ROAD_COSTS[1]) and paid < 14 * int(Settings.ROAD_COSTS[1]),
+		"roads: ...at the avenue's price (%s)" % Hud.money_text(paid))
+	sim.recount()
+	check(is_equal_approx(sim.road_upkeep - upkeep0, 10.0 * (float(Settings.ROAD_UPKEEPS[1]) - float(Settings.ROAD_UPKEEPS[0]))),
+		"roads: ...and it costs more to keep (%.1f -> %.1f a month for all the roads)" % [upkeep0, sim.road_upkeep])
+	var text: String = game.call("_tile_text", li)
+	print("[play] roads: the link as a road %d trips a day (jammed), as an avenue %d (%s)" % [roundi(trips0),
+		roundi(_trips(link)), sim.traffic_word(li)])
+	check(sim.traffic_band(li) < 3 and is_equal_approx(_trips(link), trips0),
+		"roads: the avenue takes the same traffic without jamming (%s)" % sim.traffic_word(li))
+	check(text.begins_with("Avenue — ") and text.contains("it takes 14,000"), "roads: its hover text (%s)" % text.replace("\n", " / "))
+	await _wait(1.0)
+	await _shot("p24_avenue")
+
+	# A second link, an ordinary road: most drivers still take the avenue.
+	_place("road", o + Vector2i(9, 10), o + Vector2i(18, 10))
+	var link2 := o + Vector2i(13, 10)
+	var avenue_share := _trips(link) / maxf(_trips(link) + _trips(link2), 1.0)
+	_place("road", o + Vector2i(9, 4), o + Vector2i(18, 4))          # (both ordinary roads, to compare)
+	var road_share := _trips(link) / maxf(_trips(link) + _trips(link2), 1.0)
+	_place("avenue", o + Vector2i(9, 4), o + Vector2i(18, 4))
+	check(sim.road_kind_at(li) == 1 and avenue_share > road_share + 0.05,
+		"roads: with a road beside it, more drivers take the avenue (%d%% of the two; %d%% when both are roads)" % [
+		roundi(avenue_share * 100.0), roundi(road_share * 100.0)])
+
+	# A motorway: quicker still, but nothing opens onto it.
+	var corner := o + Vector2i(0, 12)
+	var ci := corner.y * sim.w + corner.x
+	check(sim.has_road_access(ci), "roads: a home two plots from a side street has a road")
+	_place("motorway", o + Vector2i(0, 10), o + Vector2i(3, 10))
+	var blocked: Array = sim.call("_zone_check", ci)
+	var why: String = blocked[1]
+	check(sim.road_kind_at((o.y + 10) * sim.w + o.x) == 2 and not sim.has_road_access(ci) and why.contains("a motorway doesn't count"),
+		"roads: ...but not once that street is a motorway (%s)" % why)
+	check("road" in _tip_ids(), "roads: ...and the advisor counts it as a plot with no road")
+	_place("road", o + Vector2i(0, 10), o + Vector2i(3, 10))
+	check(sim.has_road_access(ci) and sim.road_kind_at((o.y + 10) * sim.w + o.x) == 0, "roads: back to a road, the home has its street again")
+	_place("motorway", o + Vector2i(9, 10), o + Vector2i(18, 10))
+	var motorway_share := _trips(link2) / maxf(_trips(link) + _trips(link2), 1.0)
+	check(motorway_share > 1.0 - avenue_share + 0.05 and String(game.call("_tile_text", link2.y * sim.w + link2.x)).begins_with("Motorway — "),
+		"roads: the second link as a motorway takes more than it did as a road (%d%% of the two, from %d%%)" % [
+		roundi(motorway_share * 100.0), roundi((1.0 - avenue_share) * 100.0)])
+	await _wait(1.0)
+	await _shot("p25_motorway")
+
+	# Saved and loaded; an old save (no kinds) has only ordinary roads; bulldozed and rebuilt it's a road.
+	var data := sim.to_save()
+	var saved: Dictionary = JSON.parse_string(JSON.stringify(data))
+	sim.from_save(saved)
+	check(sim.road_kind_at(li) == 1 and sim.road_kind_at(link2.y * sim.w + link2.x) == 2,
+		"roads: a save keeps the avenue and the motorway")
+	saved.erase("road_kind")
+	sim.from_save(saved)
+	check(sim.road_kind_at(li) == 0 and sim.road_kind_at(link2.y * sim.w + link2.x) == 0 and sim.traffic_band(li) < 3,
+		"roads: a save from before road kinds loads with ordinary roads")
+	sim.from_save(JSON.parse_string(JSON.stringify(data)))
+	_place("bulldoze", link, link)
+	_place("road", link, link)
+	check(sim.road_kind_at(li) == 0 and sim.road_kind_at(li + 1) == 1, "roads: a bulldozed avenue tile rebuilt with the Road tool is a road")
 
 
 func _traffic() -> void:

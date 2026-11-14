@@ -71,6 +71,12 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
+# By kind of road (sim.road_kind): road, avenue (two lanes each way, trees down the
+# middle), motorway (three lanes each way and hard shoulders). road.gdshader
+# paints each kind's lanes from the same widths.
+const ROAD_HALF_WIDTHS: Array[float] = [6.0, 10.0, 14.0]
+const ROAD_LAMP_OFFSETS: Array[float] = [5.4, 9.4, 0.0]   # lamp posts, metres from the middle
+const ROAD_ARM_END := 19.0     # metres along a junction's arm where it meets the open square (the give-way line)
 const SEA_FLOOR := -4.0        # how far the ground dips under the sea
 const KERB_HALF_WIDTH := 0.85  # pavement width at junctions, halved
 const ROAD_NORMAL := Vector2(0.0, 1.0)   # road texture: pavement, tarmac, pavement
@@ -1463,6 +1469,8 @@ func _plan_street_furniture(tiles: PackedByteArray) -> void:
 		if tiles[i] != Tile.ROAD:
 			continue
 		var tile := Vector2i(i % map_w, i / map_w)
+		var road: int = sim.road_kind[i]
+		var out_m: float = ROAD_HALF_WIDTHS[road] - ROAD_HALF_WIDTH    # how much wider than a plain road
 		for axis: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
 			if not (_is_road(tile + axis) and _is_road(tile - axis)):
 				continue
@@ -1472,10 +1480,20 @@ func _plan_street_furniture(tiles: PackedByteArray) -> void:
 			var c := tile_centre(tile)
 			var ax := Vector2(axis)
 			var nx := Vector2(normal_axis)
+			if road == Settings.MOTORWAY:
+				# A crash barrier down the middle and tall twin-headed lamps in it.
+				for k: int in 4:
+					_street_box(c + ax * (-18.75 + k * 12.5), Vector3(0.5 + absf(ax.x) * 12.0, 0.8, 0.5 + absf(ax.y) * 12.0),
+						CONCRETE)
+				for along: float in [0.0, -cell * 0.5 + 0.5]:
+					var at := c + ax * along
+					_street_box(at, Vector3(0.25, 11.0, 0.25), LAMP_GREY)
+					_street_box(at, Vector3(0.3 + absf(nx.x) * 4.4, 0.2, 0.3 + absf(nx.y) * 4.4), LAMP_GREY, 10.8)
+				continue
 			# Lamps: one side mid-tile, the other at the tile's ends (see road.gdshader).
 			var lamp_side := Vector2(-axis.y, axis.x)
 			for spot: Vector2 in [Vector2(0.0, 1.0), Vector2(-cell * 0.5 + 0.5, -1.0)]:
-				_lamp(c + ax * spot.x + lamp_side * spot.y * 5.4, -lamp_side * spot.y)
+				_lamp(c + ax * spot.x + lamp_side * spot.y * ROAD_LAMP_OFFSETS[road], -lamp_side * spot.y)
 			for side: int in [-1, 1]:
 				var beside: Vector2i = tile + normal_axis * side
 				if beside.x < 0 or beside.y < 0 or beside.x >= map_w or beside.y >= map_h:
@@ -1486,11 +1504,11 @@ func _plan_street_furniture(tiles: PackedByteArray) -> void:
 				var r := _field_rand(tile.x * 2 + (side + 1) / 2, tile.y, 301 + axis.x)
 				var out := nx * float(side)
 				if busy and r < 0.22:
-					_bus_shelter(c + ax * 8.0 + out * 5.35, -out, ax)
+					_bus_shelter(c + ax * 8.0 + out * (5.35 + out_m), -out, ax)
 				if busy and r > 0.5:
-					_street_box(c + ax * -6.0 + out * 5.5, Vector3(0.5, 0.9, 0.5), CHARCOAL)       # litter bin
+					_street_box(c + ax * -6.0 + out * (5.5 + out_m), Vector3(0.5, 0.9, 0.5), CHARCOAL)       # litter bin
 				if r > 0.93:
-					_street_box(c + ax * 14.0 + out * 5.4, Vector3(0.5, 1.4, 0.5), POST_BOX)
+					_street_box(c + ax * 14.0 + out * (5.4 + out_m), Vector3(0.5, 1.4, 0.5), POST_BOX)
 
 
 func _street_box(at: Vector2, size: Vector3, colour: Color, lift: float = 0.0) -> void:
@@ -2029,13 +2047,12 @@ func overlay_legend(kind: int) -> Array:
 				[OV_ORANGE, "Polluted"], [OV_RED, "Heavy"]]
 		Overlay.TRAFFIC:
 			# Bands match the hover text (simulation.gd traffic_band, Settings.TRAFFIC_BANDS).
-			var cap: float = sim.road_capacity()
 			var bands: Array = Settings.TRAFFIC_BANDS
 			return [[TRAFFIC_COLOURS[0], "Quiet"],
 				[TRAFFIC_COLOURS[1], "Free-flowing"],
-				[TRAFFIC_COLOURS[2], "Busy: over %s trips a day" % _trips_words(cap * float(bands[0]))],
-				[TRAFFIC_COLOURS[3], "Heavy: over %s" % _trips_words(cap * float(bands[1]))],
-				[TRAFFIC_COLOURS[4], "Jammed: over %s, more than a road takes" % _trips_words(cap * float(bands[2]))]]
+				[TRAFFIC_COLOURS[2], "Busy: over %d%% full" % roundi(float(bands[0]) * 100.0)],
+				[TRAFFIC_COLOURS[3], "Heavy: over %d%% full" % roundi(float(bands[1]) * 100.0)],
+				[TRAFFIC_COLOURS[4], "Jammed: more traffic than it takes"]]
 	return []
 
 
@@ -2388,18 +2405,23 @@ func _build_roads(tiles: PackedByteArray) -> void:
 	_ruv2.clear()
 	_ri.clear()
 	var half := cell * 0.5
-	var hw := ROAD_HALF_WIDTH
 	for y in map_h:
 		for x in map_w:
 			if tiles[y * map_w + x] != Tile.ROAD:
 				continue
 			var c := tile_centre(Vector2i(x, y))
+			# Each kind of road has its own width and markings (the shader reads the kind).
+			var kind: int = sim.road_kind[y * map_w + x]
+			var hw: float = ROAD_HALF_WIDTHS[kind]
+			_road_kind_now = kind
 			var links: Array[Vector2] = []
+			var link_kinds: Array[int] = []
 			for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 				var n: Vector2i = Vector2i(x, y) + d
 				if n.x >= 0 and n.y >= 0 and n.x < map_w and n.y < map_h \
 						and tiles[n.y * map_w + n.x] == Tile.ROAD:
 					links.append(Vector2(d))
+					link_kinds.append(mini(kind, sim.road_kind[n.y * map_w + n.x]))
 
 			if links.is_empty():
 				# A lone tile: a short stretch of road.
@@ -2420,14 +2442,31 @@ func _build_roads(tiles: PackedByteArray) -> void:
 				# pavement along any side without a road.
 				_road_path(_line_points(c - Vector2(hw, 0), c + Vector2(hw, 0)), hw, ROAD_PLAIN, 0.0)
 				var crossing := 1.0 if _busy_junction(x, y, tiles) else 0.5
+				# Where a side road meets a bigger one, the bigger one has the right of way.
+				var widest: int = link_kinds.max()
+				var mixed: bool = link_kinds.min() != widest
 				for d: Vector2 in [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]:
+					var side := Vector2(-d.y, d.x)
 					if d in links:
-						# Arm into the junction: a give-way line, and a zebra crossing
-						# just before it where the streets are busy.
-						_road_path(_line_points(c + d * half, c + d * hw), hw, ROAD_NORMAL, 1.0, 0.0, crossing)
-					else:
+						# Arm into the junction (as wide as the narrower of the two roads):
+						# a give-way line, and a zebra crossing just before it where the
+						# streets are busy.
+						var arm: int = link_kinds[links.find(d)]
+						var arm_hw: float = ROAD_HALF_WIDTHS[arm]
+						var give := 0.0 if arm == Settings.MOTORWAY or (mixed and arm == widest) else crossing
+						_road_kind_now = arm
+						_road_path(_line_points(c + d * half, c + d * hw), arm_hw, ROAD_NORMAL, 1.0, 0.0, give,
+							ROAD_ARM_END - (half - hw))
+						_road_kind_now = kind
+						if arm_hw < hw - 0.5 and kind != Settings.MOTORWAY:
+							# Kerbs along the square's edge either side of a narrower arm.
+							var edge := c + d * (hw - KERB_HALF_WIDTH)
+							for s: float in [-1.0, 1.0]:
+								_road_path(_line_points(edge + side * s * arm_hw, edge + side * s * hw), KERB_HALF_WIDTH,
+									ROAD_KERB, 0.0, 0.08)
+					elif kind != Settings.MOTORWAY:
 						var edge := c + d * (hw - KERB_HALF_WIDTH)
-						var along := Vector2(-d.y, d.x) * hw
+						var along := side * hw
 						_road_path(_line_points(edge - along, edge + along), KERB_HALF_WIDTH,
 							ROAD_KERB, 0.0, 0.08)   # raised kerb, sits on the tarmac
 
@@ -2489,14 +2528,21 @@ func _bend_points(c: Vector2, a: Vector2, b: Vector2) -> PackedVector2Array:
 	return pts
 
 
+var _road_kind_now := 0     # the kind of road _road_path is drawing (0 road, 1 avenue, 2 motorway)
+
+
 func _road_path(points: PackedVector2Array, half_width: float, across: Vector2,
-		centre_line: float, lift: float = 0.0, crossing: float = 0.0) -> void:
+		centre_line: float, lift: float = 0.0, crossing: float = 0.0, start_dist: float = 0.0) -> void:
 	# A ribbon of road along the points. "across" is the texture position at the
 	# left and right edges: (0, 1) = full road with pavements, (0.5, 0.5) = plain
-	# tarmac, (0, 0) = pavement only.
+	# tarmac, (0, 0) = pavement only. The kind of road goes to the shader with the
+	# centre line flag (UV2.x = centre line + 2 x kind).
 	var count := points.size()
 	var start := _rv.size()
-	var dist := 0.0
+	var dist := start_dist
+	# Wide roads are cut into strips across as well, so they follow the ground
+	# (two edges 28 m apart would let a rise in between poke through).
+	var strips := 1 if half_width <= ROAD_HALF_WIDTH else ceili(half_width / 2.5)
 	for k in count:
 		var dir: Vector2
 		if k == 0:
@@ -2509,15 +2555,18 @@ func _road_path(points: PackedVector2Array, half_width: float, across: Vector2,
 		if k > 0:
 			dist += points[k].distance_to(points[k - 1])
 		var side := Vector2(-dir.y, dir.x) * half_width
-		for s: float in [-1.0, 1.0]:
-			var q: Vector2 = points[k] + side * s
+		for n in strips + 1:
+			var s := float(n) / strips
+			var q: Vector2 = points[k] + side * (s * 2.0 - 1.0)
 			_rv.append(Vector3(q.x, maxf(height_at(q.x, q.y), 0.0) + 0.35 + lift, q.y))
 			_rn.append(Vector3.UP)
-			_ruv.append(Vector2(across.x if s < 0.0 else across.y, dist))
-			_ruv2.append(Vector2(centre_line, crossing))
+			_ruv.append(Vector2(lerpf(across.x, across.y, s), dist))
+			_ruv2.append(Vector2(centre_line + 2.0 * _road_kind_now, crossing))
+	var row := strips + 1
 	for k in count - 1:
-		var a := start + k * 2
-		_ri.append_array([a, a + 2, a + 1, a + 1, a + 2, a + 3])   # clockwise from above
+		for n in strips:
+			var a := start + k * row + n
+			_ri.append_array([a, a + row, a + 1, a + 1, a + row, a + row + 1])   # clockwise from above
 
 
 # -------------------------------------------------------------- power lines
@@ -2572,8 +2621,8 @@ func _frontage(i: int) -> Vector2i:
 	var x := i % map_w
 	var y := i / map_w
 	for d: Vector2i in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
-		if _is_road(Vector2i(x, y) + d):
-			return d
+		if _is_road(Vector2i(x, y) + d) and _road_kind(Vector2i(x, y) + d) != Settings.MOTORWAY:
+			return d                        # (nothing faces a motorway)
 	return Vector2i(0, 1)
 
 
@@ -2582,14 +2631,19 @@ func _is_road(t: Vector2i) -> bool:
 		and sim.tiles[t.y * map_w + t.x] == Tile.ROAD
 
 
+func _road_kind(t: Vector2i) -> int:
+	# 0 road, 1 avenue, 2 motorway (only ask about road tiles).
+	return sim.road_kind[t.y * map_w + t.x]
+
+
 func _street_reach(i: int, front: Vector2i) -> float:
 	# How far a plot's front can come forward into the road tile, so buildings
 	# sit by the pavement instead of behind a wide strip of grass. Only where the
 	# road runs straight past the plot (not on bends, where plots could collide).
 	var tile := Vector2i(i % map_w, i / map_w)
 	var road := tile + front
-	if not _is_road(road):
-		return 0.0
+	if not _is_road(road) or _road_kind(road) != 0:
+		return 0.0                          # (avenues and motorways fill more of their tile: plots keep to their own)
 	var along := Vector2i(front.y, -front.x)
 	if _is_road(road + along) and _is_road(road - along):
 		return cell * 0.5 - ROAD_HALF_WIDTH - 1.0
@@ -3352,6 +3406,8 @@ func _infill_kind(x: int, y: int) -> int:
 			if n.x < 0 or n.y < 0 or n.x >= map_w or n.y >= map_h:
 				continue
 			var nt: int = sim.tiles[n.y * map_w + n.x]
+			if nt == Tile.ROAD and sim.road_kind[n.y * map_w + n.x] == Settings.MOTORWAY:
+				continue                    # (a motorway isn't a street: nothing is squeezed in beside it)
 			if nt != Tile.EMPTY and nt != Tile.POWER_LINE and nt != Tile.WOODLAND:
 				built += 1
 			if nt == Tile.ROAD and absi(dx) + absi(dy) == 1:
@@ -5706,6 +5762,10 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 			var normal_axis := Vector2i(axis.y, axis.x)
 			if _is_road(tile + normal_axis) or _is_road(tile - normal_axis):
 				continue   # a junction, keep it clear
+			var road: int = sim.road_kind[i]
+			if road == Settings.MOTORWAY:
+				continue
+			var road_hw: float = ROAD_HALF_WIDTHS[road]
 			var c := tile_centre(tile)
 			# One species per street: the street's row (or column) picks it.
 			var line := tile.y if axis.x == 1 else tile.x + 1000
@@ -5715,17 +5775,22 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 				TreeKind.BIRCH, TreeKind.COPPER][street_rng.randi_range(0, 4)]
 			var rng := RandomNumberGenerator.new()
 			rng.seed = i * 17 + 5
+			if road == 1:
+				# An avenue: a row of small trees down the middle.
+				for k in 3:
+					var mid := c + Vector2(axis) * (-16.7 + k * 16.7 + rng.randf_range(-0.6, 0.6))
+					_add_tree(lists, _tree(mid, rng.randf_range(5.0, 6.5), TreeKind.ORNAMENTAL, rng, 0.6))
 			for side: int in [-1, 1]:
 				var normal: Vector2i = normal_axis * side
 				var beside: Vector2i = tile + normal
-				var offset := ROAD_HALF_WIDTH + 3.5    # open verge
+				var offset := road_hw + 3.5    # open verge
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
 							or bt == Tile.HARBOUR or bt == Tile.RECYCLING:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
-						offset = ROAD_HALF_WIDTH + 2.6   # in the pavement in front of the buildings
+						offset = road_hw + 2.6   # in the pavement in front of the buildings
 				for k in 4:
 					if rng.randf() < 0.12:
 						continue   # the odd gap

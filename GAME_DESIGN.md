@@ -193,14 +193,31 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Coal plant chimneys smoke (a few particle streams; looks only).
 - For a happiness score or advisors: `pollution_at(i)`, `pollution_band(i)`, `polluted_homes_share()`, `pollution_feeling()` (already in appeal), `air_word()` in `scripts/simulation.gd`. Numbers in the Pollution section of `scripts/settings.gd`.
 
+## Kinds of road (Roads in the Build menu)
+- Three kinds, laid with the same drag as a road; dragging one kind over another changes it (you pay the new kind's full price). The kind is kept per road tile (`sim.road_kind`: 0 road, 1 avenue, 2 motorway; numbers in `Settings.ROAD_*`). Old saves load as ordinary roads.
+
+| | Road | Avenue | Motorway |
+| --- | --- | --- | --- |
+| Cost a tile | £10 | £40 | £120 |
+| Upkeep a tile a month | £0.50 | £1.50 | £4 |
+| Trips a day before it's full | 5,000 | 14,000 | 40,000 |
+| Time to cross a tile (drivers take the quickest way) | 12 | 8 | 5 |
+| Width drawn | 12 m | 20 m | 28 m |
+
+- **Avenue**: two lanes each way, a planted strip with trees down the middle, wide pavements. Plots open onto it as onto a road, but keep to their own tile (they don't reach into its verge).
+- **Motorway**: three lanes each way, hard shoulders, a barrier and tall lamps down the middle; no pavements, trees, bus shelters or people. **Nothing opens onto it**: it doesn't count as "a road within 2 tiles" (the reason text says "a motorway doesn't count"), buildings don't face it and plots' trips don't start on it. It joins any road it touches (a flat junction: no slip roads or bridges yet). Noise: land value falls by up to 0.1 within 3 tiles.
+- At a junction of two kinds the bigger road has the right of way (give-way lines on the smaller arms only).
+- Cars keep to their lanes, go faster on avenues (x1.3) and motorways (x2.1), and wider roads show more of them.
+- Not done yet: slip roads and bridges, one-way streets, roundabouts, a speed or noise cost for avenues, bus lanes.
+
 ## Traffic
 - A light model, worked out each month and whenever the town changes (it takes about 20 ms in a town of 28,000); never saved (loading works it out again). No individual cars: just how many car trips a day use each road tile.
 - Trips: every working resident drives to work and back (2 trips a day), and everyone makes 0.6 trips a day to the shops. A station's visitors (3% of the population each, as for shop demand) drive between it and the shops, and a harbour's lorries (6 a day per port job) to the works. Plots with no road make no trips. Homes within reach of a working bus depot make 25% of their trips by bus, and near a station (600 m) 15% by train (together 40%).
 - Where to: shops and works are grouped into squares (8 tiles, doubled until there are at most 16 groups). Each home splits its trips between the groups by size x 1 / (1 + (distance / reach)^2), distance counted along the roads: work reach 30 tiles (1.5 km), shops 12 (600 m), lorries 40. So most people work and shop nearby, but a big estate across town still draws commuters.
-- Which way: always a shortest way along the roads, split evenly where two ways are equally short (like water draining downhill). A plot's trips start and end on the roads it fronts. So the roads between homes and jobs are busiest, back streets and dead ends quiet, and a single link between two parts of town carries everything between them. Drivers don't yet avoid jams.
-- A road tile takes 5,000 trips a day. Congestion = trips / 5,000: free-flowing (below 0.5; "quiet" below 0.1), busy (0.5), heavy (0.8), jammed (1 and over). In the demo town (28,000 people, about 38,000 car trips a day and 7,000 by bus or train) 96% of road tiles are free-flowing, 3% busy, 1% heavy and the link from town to the works jams (about 2% of driving is in jams).
+- Which way: always the quickest way along the roads (a tile of avenue takes two thirds of the time of a tile of road, a motorway under half; see Kinds of road), split evenly where two ways are equally quick (like water draining downhill). A plot's trips start and end on the roads it fronts. So the roads between homes and jobs are busiest, back streets and dead ends quiet, and a single link between two parts of town carries everything between them. Drivers don't yet avoid jams.
+- A road tile takes 5,000 trips a day (an avenue 14,000, a motorway 40,000). Congestion = trips / what it takes: free-flowing (below 0.5; "quiet" below 0.1), busy (0.5), heavy (0.8), jammed (1 and over). In the demo town (28,000 people, about 38,000 car trips a day and 7,000 by bus or train) 96% of road tiles are free-flowing, 3% busy, 1% heavy and the link from town to the works jams (about 2% of driving is in jams).
 - Traffic map view: roads only, coloured quiet (pale green), free-flowing (green), busy (yellow), heavy (orange), jammed (red); the road surface itself takes the colour and its whole tile is tinted (busier ones more strongly) so it reads from afar; everything else greyed out.
-- Hover a road: "Road — Busy: about 2,600 trips a day"; on heavy and jammed roads also "add parallel roads, or a bus depot nearby". City panel (Services): "Traffic: 2% of trips in jams · 37,800 car trips a day, 7,000 by bus or train". Advisors: from 8% of trips in jams (a warning from 20%); clicking it shows the Traffic view.
+- Hover a road: "Road — Busy: about 2,600 trips a day (it takes 5,000)"; on heavy and jammed roads also what to do ("make it an avenue, add parallel roads, or a bus depot nearby"). The map key gives the bands as how full the road is. City panel (Services): "Traffic: 2% of trips in jams · 37,800 car trips a day, 7,000 by bus or train". Advisors: from 8% of trips in jams (a warning from 20%); clicking it shows the Traffic view.
 - View only, for now: congestion doesn't affect growth, happiness, land value or pollution (a later decision). Hooks in `scripts/simulation.gd`: `traffic_at(i)`, `traffic_congestion_at(i)`, `traffic_band(i)`, `traffic_word(i)`, `traffic_fix(i)`, `traffic_jammed_share()`, `traffic_trips`, `transit_trips`. Numbers under Traffic in `scripts/settings.gd`.
 - Known weaknesses: no through traffic from beyond the map and no trips to schools, hospitals or landmarks; inside a group of shops or works the last stretch isn't routed (arrivals are shared out to each plot's own road); drivers always take a shortest way, so a jam never sends anyone round another way; trips stop at the edge of a road network that has no jobs.
 

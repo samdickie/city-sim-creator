@@ -451,6 +451,45 @@ def road():
     car(-6.0, 22.0, CAR_PAINT[0], across=True)
 
 
+def avenue():
+    """Two lanes each way, a planted strip down the middle (as road.gdshader draws kind 1)."""
+    ground(road=False)
+    slab(0.0, 15.0, 50.0, 20.0, (0.16, 0.16, 0.17), kind="tarmac")
+    slab(0.0, 15.0, 50.0, 2.2, PAVEMENT, 0.03)
+    slab(0.0, 32.8, 50.0, 2.2, PAVEMENT, 0.03)
+    slab(0.0, 23.5, 50.0, 3.0, (0.30, 0.44, 0.18), 0.05)
+    for back in (20.25, 29.55):
+        for k in range(5):
+            slab(-20 + k * 10, back, 4.0, 0.2, (0.9, 0.9, 0.86), 0.02)
+    for along in (-17, 0, 17):
+        tree(along, 25.0, 6.0)
+    for along in (-19, -6, 7, 20):
+        tree(along, 9.0, 8.0)
+    car(-8.0, 17.6, CAR_PAINT[0], across=True)
+    car(6.0, 20.9, CAR_PAINT[2], across=True)
+    car(-2.0, 30.2, CAR_PAINT[1], across=True)
+
+
+def motorway():
+    """Three lanes each way, hard shoulders and a barrier (as road.gdshader draws kind 2)."""
+    ground(road=False)
+    slab(0.0, 11.0, 50.0, 28.0, (0.16, 0.16, 0.17), kind="tarmac")
+    slab(0.0, 24.1, 50.0, 1.8, (0.50, 0.50, 0.48), 0.03)
+    box(0.0, 24.75, 50.0, 0.5, 0.8, (0.64, 0.64, 0.62))
+    for off in (1.35, 12.0):
+        for sign in (-1, 1):
+            slab(0.0, 25.0 + sign * off - 0.1, 50.0, 0.2, (0.9, 0.9, 0.86), 0.02)
+    for off in (5.0, 8.5):
+        for sign in (-1, 1):
+            for k in range(5):
+                slab(-20 + k * 10, 25.0 + sign * off - 0.1, 4.0, 0.2, (0.9, 0.9, 0.86), 0.02)
+    car(-10.0, 14.3, CAR_PAINT[0], across=True)
+    car(8.0, 17.8, CAR_PAINT[2], across=True)
+    car(-2.0, 21.2, CAR_PAINT[3], across=True)
+    car(12.0, 27.5, CAR_PAINT[1], across=True)
+    car(-14.0, 34.6, CAR_PAINT[4], across=True)
+
+
 def grid():
     ground()
     slab(0.0, 19.0, 50.0, 12.0, (0.16, 0.16, 0.17), kind="tarmac")
@@ -911,7 +950,7 @@ def normal():
 
 ITEMS = {
     "homes_0": homes_0, "homes_1": homes_1, "homes_2": homes_2, "shops_0": shops_0, "shops_1": shops_1,
-    "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "grid": grid, "bulldoze": bulldoze, "park": park,
+    "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "avenue": avenue, "motorway": motorway, "grid": grid, "bulldoze": bulldoze, "park": park,
     "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,

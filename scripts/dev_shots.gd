@@ -693,6 +693,24 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_school_gone},
 		{"name": "59_services_school_gap", "at": Vector2(SCHOOL_GONE), "yaw": -40.0, "pitch": 50.0, "dist": 1500.0,
 			"hud": true, "prep": _prep_place_school, "point_at_spot": true},
+		# Kinds of road (the prep widens two streets into avenues and lays a motorway
+		# round the east and south of the town, so these come after the standard shots;
+		# clear of 27's plots): an avenue through the old town, two avenues crossing,
+		# the motorway and where an avenue joins it, the Traffic view, night, the menu.
+		{"name": "71_avenue", "at": Vector2(52, 51), "yaw": -35.0, "pitch": 34.0, "dist": 260.0,
+			"prep": _prep_road_types, "drive": 20.0},
+		{"name": "72_avenue_crossing", "at": Vector2(52, 57), "yaw": -40.0, "pitch": 42.0, "dist": 190.0,
+			"prep": _prep_road_types, "drive": 20.0},
+		{"name": "73_motorway", "at": Vector2(90, 70), "yaw": -55.0, "pitch": 30.0, "dist": 420.0,
+			"prep": _prep_road_types, "drive": 20.0},
+		{"name": "74_motorway_junction", "at": Vector2(90, 57), "yaw": -40.0, "pitch": 42.0, "dist": 220.0,
+			"prep": _prep_road_types, "drive": 20.0},
+		{"name": "75_roads_traffic", "at": Vector2(64, 64), "yaw": -40.0, "pitch": 55.0, "dist": 3400.0,
+			"hud": true, "prep": _prep_road_types_traffic},
+		{"name": "76_roads_night", "at": Vector2(52, 57), "yaw": -40.0, "pitch": 36.0, "dist": 300.0,
+			"time": NIGHT, "prep": _prep_road_types, "drive": 10.0},
+		{"name": "77_roads_menu", "at": Vector2(88, 60), "yaw": -40.0, "pitch": 40.0, "dist": 700.0,
+			"hud": true, "prep": _prep_road_types_menu},
 		{"name": "27_empty_plots", "at": Vector2(43, 29), "yaw": -40.0, "pitch": 38.0, "dist": 230.0,
 			"prep": _prep_empty_plots},
 	]
@@ -733,6 +751,59 @@ func _prep_woodland() -> void:
 	sim.money = SHOWN_MONEY
 	game.call("_select_tool", 0)
 	game.call("_refresh_hud")
+
+
+var _road_types_done := false
+
+
+func _prep_road_types() -> void:
+	# Widen two streets into avenues and lay a motorway round the town, with the
+	# real Road tool (once). Far from 27's plots, so that shot is unchanged.
+	_hud_reset()
+	hud.set_build_open(false)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	traffic.set_enabled(true)
+	if _road_types_done:
+		return
+	_road_types_done = true
+	var busiest0 := 0.0
+	for i: int in sim.w * sim.h:
+		busiest0 = maxf(busiest0, sim.traffic_congestion_at(i) if sim.tiles[i] == Simulation.Tile.ROAD else 0.0)
+	var jams0 := sim.traffic_jammed_share()
+	var avenue := _build("avenue", Vector2i(52, 30), Vector2i(52, 96))
+	avenue += _build("avenue", Vector2i(34, 57), Vector2i(90, 57))
+	var motorway := _build("motorway", Vector2i(90, 28), Vector2i(90, 98))
+	motorway += _build("motorway", Vector2i(90, 98), Vector2i(67, 98))
+	_build("road", Vector2i(67, 99), Vector2i(67, 100))     # down to the airport road
+	_build("road", Vector2i(86, 72), Vector2i(89, 72))      # the works
+	_build("road", Vector2i(74, 28), Vector2i(89, 28))      # and round the north of the terraces
+	_build("road", Vector2i(73, 28), Vector2i(73, 30))
+	world.refresh_ground(true)
+	game.set("_layout_seen", sim.layout_version)
+	game.set("_ground_dirty", false)
+	var busiest := 0.0
+	var by_kind: Array[float] = [0.0, 0.0, 0.0]
+	for i: int in sim.w * sim.h:
+		if sim.tiles[i] == Simulation.Tile.ROAD:
+			busiest = maxf(busiest, sim.traffic_congestion_at(i))
+			by_kind[sim.road_kind[i]] = maxf(by_kind[sim.road_kind[i]], sim.traffic_at(i))
+	print("[shots]   kinds of road: %d avenue and %d motorway tiles; fullest road %.0f%% -> %.0f%% full; in jams %.0f%% -> %.0f%%; busiest road %d, avenue %d, motorway %d trips a day; %.1f ms" % [
+		avenue, motorway, busiest0 * 100.0, busiest * 100.0, jams0 * 100.0, sim.traffic_jammed_share() * 100.0,
+		roundi(by_kind[0]), roundi(by_kind[1]), roundi(by_kind[2]), sim.traffic_ms])
+	sim.money = SHOWN_MONEY
+	game.call("_select_tool", 0)
+	game.call("_refresh_hud")
+
+
+func _prep_road_types_traffic() -> void:
+	_prep_road_types()
+	game.call("_set_overlay", WorldView.Overlay.TRAFFIC)
+
+
+func _prep_road_types_menu() -> void:
+	_prep_road_types()
+	hud.set_build_open(true)
+	game.call("_choose_item", "motorway")
 
 
 func _prep_woodland_overlay() -> void:

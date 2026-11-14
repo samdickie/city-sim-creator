@@ -20,9 +20,12 @@ const WorldView = preload("res://scripts/world3d.gd")
 
 const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 const LINK_COUNT: Array[int] = [0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4]   # roads out of a tile, by bits
-const LANE := 2.3              # metres left of the road's centre line (keep left)
-const PAVEMENT := 5.1          # metres from the centre line to the middle of the pavement
-const JUNCTION_TURN := 6.0     # radius of a turn round the corner of a junction's open square
+# By kind of road (sim.road_kind: road, avenue, motorway), as world3d.gd and road.gdshader draw them:
+const LANES: Array = [[2.3], [3.1, 6.25], [3.25, 6.75, 10.25]]   # each lane's middle, metres left of the centre line (keep left)
+const PAVEMENTS: Array[float] = [5.1, 8.9, 13.2]     # metres from the centre line to the middle of the pavement
+const JUNCTION_TURNS: Array[float] = [6.0, 10.0, 14.0]   # radius of a turn round the corner of a junction's open square
+const KIND_SPEED: Array[float] = [1.0, 1.3, 2.1]     # how much faster cars go on each kind
+const LANE_CHANGE := 2.0       # metres a second sideways, moving to the lane of the next kind of road
 const ROAD_LIFT := 0.35        # road surface above the ground (as world3d.gd draws it)
 const CAR_SIZE := Vector3(1.8, 1.05, 4.2)
 const BUS_SIZE := Vector3(2.5, 2.9, 11.0)
@@ -120,6 +123,9 @@ var _v_limit := PackedFloat32Array()
 var _v_speed := PackedFloat32Array()
 var _v_paint := PackedColorArray()
 var _v_bus := PackedByteArray()
+var _v_lane := PackedByteArray()        # which lane it keeps to, where there's more than one
+var _v_off := PackedFloat32Array()      # metres left of the centre line right now (it eases over to its lane)
+var _kind := PackedByteArray()          # per map tile: the kind of road
 var _buses := 0
 
 # People: as above, plus which side of the street (signed offset) and looks.
@@ -276,6 +282,8 @@ func _resize_vehicles(n: int) -> void:
 	_v_speed.resize(n)
 	_v_paint.resize(n)
 	_v_bus.resize(n)
+	_v_lane.resize(n)
+	_v_off.resize(n)
 
 
 func _resize_people(n: int) -> void:
@@ -328,6 +336,7 @@ func _read_roads() -> void:
 	_layout_seen = sim.layout_version
 	var tiles: PackedByteArray = sim.tiles
 	var size := _w * _h
+	_kind = sim.road_kind
 	if _links.size() != size:
 		_links.resize(size)
 		_bus_area.resize(size)
@@ -434,8 +443,10 @@ func _measure(i: int) -> void:
 				walk += 30.0
 	if sim.district[i] == 2:
 		walk *= 1.5                     # the centre is busier on foot
-	_car_weight[i] = minf(trips / Settings.TRIPS_PER_CAR, Settings.CARS_PER_STREET)
-	_walk_weight[i] = minf(walk / Settings.PEOPLE_PER_WALKER, Settings.WALKERS_PER_STREET)
+	# (Wider roads have room for more cars; nobody walks along a motorway.)
+	_car_weight[i] = minf(trips / Settings.TRIPS_PER_CAR, Settings.CARS_PER_STREET * LANES[_kind[i]].size())
+	_walk_weight[i] = 0.0 if _kind[i] == Settings.MOTORWAY \
+		else minf(walk / Settings.PEOPLE_PER_WALKER, Settings.WALKERS_PER_STREET)
 
 
 func _mark_bus_area() -> void:
@@ -593,8 +604,31 @@ func _choose_exit(tile: int, entry: int, bus: bool, straight_bias: bool) -> int:
 func _turn_radius(tile: int) -> float:
 	# Corners follow the road's own quarter circle; junctions turn round the open square.
 	if LINK_COUNT[_links[tile]] >= 3:
-		return JUNCTION_TURN
+		return JUNCTION_TURNS[_kind[tile]]
 	return world.cell * 0.5
+
+
+func _way_kind(tile: int, entry: int, exit: int) -> int:
+	# The kind of road something crossing this tile is on: the tile's own, or at a
+	# junction the narrower of the roads it comes from and goes to.
+	var kind: int = _kind[tile]
+	if LINK_COUNT[_links[tile]] >= 3:
+		for d: int in [entry, exit]:
+			if ((_links[tile] >> d) & 1) == 1:
+				kind = mini(kind, _kind[tile + _steps[d]])
+	return kind
+
+
+func _lane_of(k: int, tile: int, entry: int, exit: int) -> int:
+	var lanes: Array = LANES[_way_kind(tile, entry, exit)]
+	return _v_lane[k] % lanes.size()
+
+
+func _lane_offset(k: int, tile: int, entry: int, exit: int) -> float:
+	# Metres left of the centre line for car k's lane across this tile.
+	var lanes: Array = LANES[_way_kind(tile, entry, exit)]
+	var offset: float = lanes[_v_lane[k] % lanes.size()]
+	return offset
 
 
 func _path_length(tile: int, entry: int, exit: int, offset: float) -> float:
@@ -711,6 +745,7 @@ func _add_vehicle(bus: bool) -> void:
 	var n := _v_tile.size()
 	_resize_vehicles(n + 1)
 	_v_bus[n] = 1 if bus else 0
+	_v_lane[n] = 0 if bus else _rng.randi_range(0, 5)     # (buses keep to the inside lane)
 	if bus:
 		_buses += 1
 		_v_paint[n] = BUS_PAINT
@@ -740,7 +775,8 @@ func _respawn_vehicle(n: int) -> void:
 	_v_tile[n] = tile
 	_v_entry[n] = entry
 	_v_exit[n] = exit
-	_v_len[n] = _path_length(tile, entry, exit, LANE)
+	_v_off[n] = _lane_offset(n, tile, entry, exit)
+	_v_len[n] = _path_length(tile, entry, exit, _v_off[n])
 	_v_dist[n] = _rng.randf() * _v_len[n]
 	_v_limit[n] = _limit_for(tile, entry, exit)
 	_v_speed[n] = minf(_v_cruise[n], _v_limit[n])
@@ -758,6 +794,8 @@ func _remove_vehicle(n: int) -> void:
 		_v_dist[n] = _v_dist[last]
 		_v_len[n] = _v_len[last]
 		_v_cruise[n] = _v_cruise[last]
+		_v_lane[n] = _v_lane[last]
+		_v_off[n] = _v_off[last]
 		_v_limit[n] = _v_limit[last]
 		_v_speed[n] = _v_speed[last]
 		_v_paint[n] = _v_paint[last]
@@ -773,7 +811,7 @@ func _drive(delta: float) -> void:
 		var lane_next := PackedInt32Array()
 		lane_next.resize(n)
 		for k: int in n:
-			var key := _v_tile[k] * 4 + _v_entry[k]
+			var key := (_v_tile[k] * 4 + _v_entry[k]) * 4 + _lane_of(k, _v_tile[k], _v_entry[k], _v_exit[k])
 			var first: int = lane_head.get(key, -1)
 			lane_next[k] = first
 			lane_head[key] = k
@@ -788,24 +826,31 @@ func _move_vehicle(k: int, delta: float, lane_head: Dictionary, lane_next: Packe
 	var my_half := _half_length(k)
 	var gap := 1.0e9
 	var leader_half := 0.0
-	var j: int = lane_head.get(_v_tile[k] * 4 + _v_entry[k], -1)
+	var here := _v_tile[k]
+	var j: int = lane_head.get((here * 4 + _v_entry[k]) * 4 + _lane_of(k, here, _v_entry[k], _v_exit[k]), -1)
 	while j != -1:
 		var g := _v_dist[j] - _v_dist[k]
 		if j != k and g > 0.0 and g < gap:
 			gap = g
 			leader_half = _half_length(j)
 		j = lane_next[j]
-	var limit := minf(_v_cruise[k], _v_limit[k])
+	var limit := minf(_v_cruise[k] * KIND_SPEED[_way_kind(here, _v_entry[k], _v_exit[k])], _v_limit[k])
+	_v_off[k] = move_toward(_v_off[k], _lane_offset(k, here, _v_entry[k], _v_exit[k]), LANE_CHANGE * delta)
 	var remain := _v_len[k] - _v_dist[k]
 	if remain < 25.0 and ((_links[_v_tile[k]] >> _v_exit[k]) & 1) == 1:
 		var ahead := _v_tile[k] + _steps[_v_exit[k]]
-		j = lane_head.get(ahead * 4 + (_v_exit[k] ^ 1), -1)
-		while j != -1:
-			var g := remain + _v_dist[j]
-			if g < gap:
-				gap = g
-				leader_half = _half_length(j)
-			j = lane_next[j]
+		# (Whoever is in the next tile on my side of the road, whichever lane: they may be merging.)
+		var ahead_lanes: int = LANES[_kind[ahead]].size()
+		for lane: int in ahead_lanes:
+			j = lane_head.get((ahead * 4 + (_v_exit[k] ^ 1)) * 4 + lane, -1)
+			if lane != _v_lane[k] % ahead_lanes and _kind[ahead] == _kind[here]:
+				continue                    # same kind of road on: only my own lane matters
+			while j != -1:
+				var g2 := remain + _v_dist[j]
+				if g2 < gap:
+					gap = g2
+					leader_half = _half_length(j)
+				j = lane_next[j]
 		# Ease off coming up to a junction, a bend or a dead end.
 		limit = minf(limit, _approach_speed(ahead) + remain * 0.6)
 	var v := _v_speed[k]
@@ -834,7 +879,7 @@ func _move_vehicle(k: int, delta: float, lane_head: Dictionary, lane_next: Packe
 		_v_tile[k] = next
 		_v_entry[k] = entry
 		_v_exit[k] = out
-		_v_len[k] = _path_length(next, entry, out, LANE)
+		_v_len[k] = _path_length(next, entry, out, _lane_offset(k, next, entry, out))
 		_v_limit[k] = _limit_for(next, entry, out)
 
 
@@ -856,9 +901,10 @@ func _half_length(k: int) -> float:
 
 
 func _draw_vehicle(k: int) -> void:
-	_locate(_v_tile[k], _v_entry[k], _v_exit[k], _v_dist[k], LANE)
-	var pos := _out_pos
+	var lane_at := _lane_offset(k, _v_tile[k], _v_entry[k], _v_exit[k])
+	_locate(_v_tile[k], _v_entry[k], _v_exit[k], _v_dist[k], lane_at)
 	var dir := _out_dir
+	var pos := _out_pos + Vector2(dir.y, -dir.x) * (_v_off[k] - lane_at)    # (still moving over to its lane)
 	var bus := _v_bus[k] == 1
 	var size := BUS_SIZE if bus else CAR_SIZE
 	# Tilt with the slope: ground under the front and back wheels.
@@ -935,7 +981,7 @@ func _respawn_person(n: int) -> void:
 	var exit := _choose_exit(tile, entry, false, false)
 	# Either pavement, not quite single file.
 	var side := 1.0 if _rng.randf() < 0.5 else -1.0
-	_p_offset[n] = side * (PAVEMENT + _rng.randf_range(-0.5, 0.5))
+	_p_offset[n] = side * (PAVEMENTS[_kind[tile]] + _rng.randf_range(-0.5, 0.5))
 	_p_tile[n] = tile
 	_p_entry[n] = entry
 	_p_exit[n] = exit
@@ -968,8 +1014,13 @@ func _walk(delta: float) -> void:
 						or _tile_distance(next) > minf(_radius, WALK_AREA) * 1.15:
 					_respawn_person(k)
 					break
+				if _kind[next] == Settings.MOTORWAY:
+					_respawn_person(k)          # (nobody walks along a motorway)
+					break
 				var entry := exit ^ 1
 				var out := _choose_exit(next, entry, false, false)
+				# Keep to the same pavement, wherever it is on this kind of road.
+				_p_offset[k] += signf(_p_offset[k]) * (PAVEMENTS[_kind[next]] - PAVEMENTS[_kind[tile]])
 				_p_tile[k] = next
 				_p_entry[k] = entry
 				_p_exit[k] = out

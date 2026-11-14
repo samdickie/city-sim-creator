@@ -281,8 +281,8 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 		_add(out, "traffic", WARNING if jams >= Settings.TRAFFIC_JAM_WARN else ADVICE,
 			"%d%% of trips are stuck in jams" % roundi(jams * 100.0),
 			"Some roads carry more traffic than they can take: the red ones on the Traffic map. "
-			+ "Build another road alongside (a second way between homes and work), or a bus "
-			+ "depot near the homes so fewer people drive.", WorldView.Overlay.TRAFFIC)
+			+ "Widen them into avenues (drag an avenue over the road), build another road "
+			+ "alongside, or a bus depot near the homes so fewer people drive.", WorldView.Overlay.TRAFFIC)
 
 	# --- Abandoned buildings ---
 	if sim.abandoned_count > 0:
