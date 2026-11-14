@@ -137,6 +137,17 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			"Services and most buildings need a road within %d tiles, and power. " % Settings.ROAD_REACH
 			+ "The Power view shows what's connected.", power_kind)
 
+	# --- Airport, offices ---
+	if sim.count_of(Simulation.Tile.AIRPORT) > 0 and sim.airports_open == 0:
+		_add(out, "airport", ADVICE, "The airport isn't open yet",
+			"An airport needs a straight run of %d m for the runway, %d tiles in all, and a road by one side for the terminal. Point at it to see what's missing."
+			% [Settings.AIRPORT_MIN_RUNWAY * 50, Settings.AIRPORT_MIN_TILES], NO_OVERLAY)
+	if sim.count_of(Simulation.Tile.OFFICES) == 0 and sim.population >= Settings.OFFICE_START_POP * 3 \
+			and sim.demand_bar(Simulation.Tile.OFFICES) > 0.3:
+		_add(out, "offices", ADVICE, "The town is big enough for offices: zone some",
+			"Offices give clean, well-paid jobs (more tax than shops or industry). They suit a bigger town with schools near its homes.",
+			growth_kind)
+
 	# --- Water ---
 	var water_unlinked := _n(stuck, "water_link")
 	var water_full := _n(stuck, "water_full")
@@ -328,6 +339,8 @@ static func _survey(sim: Simulation) -> Dictionary:
 			# A closed service (0% funding) is the player's choice, not a fault.
 			if sim.service_status(i).begins_with("not working"):
 				broken.append(i)
+		elif t == Simulation.Tile.AIRPORT:
+			pass    # (an airport that isn't open has its own tip, not one per tile)
 		elif sim.is_building(t) and not sim.building_working(i):
 			broken.append(i)
 	return {"stuck": stuck, "zones": zones, "broken": broken}

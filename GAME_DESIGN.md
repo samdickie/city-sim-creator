@@ -152,7 +152,19 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Bus depot (from 500 people): plots within 700 m can grow 3 tiles from a road instead of 2.
 - Railway station (2,000): visitors add shop demand (3% of the population each, up to two stations); raises land value.
 - Harbour (1,000, by the sea): ships bring trade, +80 industry demand each.
+- Airport (5,000): dragged out as a box, £200 a tile, £2 a tile a month. The game lays it out: the runway is the longest straight run of tiles (several as long: the one five tiles back from the road side), with a taxiway beside it, stands with airliners, and a terminal (two tiles), control tower and hangars on the tile nearest a road. It opens with a runway of 800 m, 40 tiles in all and a road within 2 tiles of the terminal (it needs no mains power); the hover text says what's missing. Open, it adds shop demand (visitors, 3% of the population), 20% more office demand and +120 industry demand, brings half as many tourists again to the landmarks, and its noise lowers land value round it (capped) with a little pollution. Only one airport counts.
 - All the numbers for these buildings are in `Settings.BUILDINGS`.
+
+## Offices (a zone of their own)
+- Low, medium and high density like shops (£70 / £90 / £140 a tile): small offices and chambers, office blocks, glass towers, skyscrapers in a CBD.
+- Demand: a share of the workers who aren't in shops want office work: none under 800 people, rising to half at 12,000; half of that share only counts where homes have a school nearby. Only offices that are built take workers from industry, so a town with no office zone runs as before (and when offices arrive, industry shrinks).
+- Offices are clean, pay 25% more tax per job, add a little land value, and want police cover like shops. Shops' tall stages are now big stores and hotels.
+- Visitors' shopping (stations, the airport, landmarks) is extra shop demand: it no longer takes workers from offices or industry.
+
+## Landmarks (their own Build menu category)
+- Eight famous buildings, one of each, unlocked by population: Big Ben (2,000), Colosseum (4,000), Great Pyramid (6,000), Statue of Liberty (8,000, by the sea), Taj Mahal (10,000), Sydney Opera House (14,000, by the sea), Eiffel Tower (18,000), Empire State Building (25,000). £12,000 to £45,000.
+- Each raises land value round it and appeal (within the leisure cap), and brings tourists: shop demand, 0.4-0.8% of the population each, 5% at most together, half as much again with an open airport.
+- Models are made by `tools/make_buildings.py` (scaled to fit one plot); looks and colours are in `LANDMARKS` in world3d.gd.
 
 ## Services
 - Services tool (0), then pick one (Tab or the buttons): police station £1,500, fire station £1,500, school £2,000, hospital £4,000. One tile each; they need a road and power (3 units) to work.
@@ -163,6 +175,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - A Services map view shows how many of the four cover each area, or one service at a time (see Map views).
 - Hovering any zone plot shows Police / Fire / School / Hospital with a tick (covered) or a cross (red when the plot needs it: police for homes and shops, fire for every plot, schools and hospitals for homes). Hovering a service building says how far it reaches at its funding, how many plots and people it covers, and how many of those no other building of its kind reaches.
 - Placing a service: the Services view switches to that service (and back to the view before when you pick another tool), a soft disc round the mouse shows how far it would reach, and the card says what it would add: "would reach 14 homes with no school (420 people), 9 held back now".
+- Small versions for villages: police office £500, small fire station £500, clinic £1,200 (upkeep £22 / £22 / £50; reach 400 m / 350 m / 500 m; 1 unit of power). They share the big ones' funding, cover and map view; there is no small school.
 - Advisor tips about one service (a school, police, a hospital, fire) open the Services view on that service; the general "services are poor" and tax tips open it on all four.
 
 ## Map views (overlays)

@@ -146,8 +146,10 @@ func _build_village() -> void:
 	_build("water_tower", Vector2i(53, 55))
 	_build("water_pump", Vector2i(59, 55))
 	_build("school", Vector2i(47, 46))
-	_build("police", Vector2i(50, 46))
-	_build("fire", Vector2i(50, 52))
+	_build("police_office", Vector2i(50, 46))      # the small services suit a village
+	_build("fire_small", Vector2i(50, 52))
+	_build("clinic", Vector2i(50, 43))
+	_build("police_office", Vector2i(44, 49))
 	_build("park", Vector2i(47, 52), Vector2i(48, 53))
 	_build("park", Vector2i(41, 49), Vector2i(42, 50))
 	_build("park", Vector2i(44, 43), Vector2i(45, 44))
@@ -172,6 +174,7 @@ func _build_harbour_town() -> void:
 		["shops_1", Vector2i(53, 46), Vector2i(57, 56)],
 		["shops_1", Vector2i(59, 52), Vector2i(72, 56)],
 		["shops_1", Vector2i(59, 43), Vector2i(72, 44)],
+		["offices_1", Vector2i(68, 52), Vector2i(72, 56)],
 		["industry", Vector2i(80, 40), Vector2i(90, 56)],
 	]:
 		_build(z[0], z[1], z[2])
@@ -200,6 +203,7 @@ func _build_harbour_town() -> void:
 		_build("park", r[0], r[1])
 	_later("library", Vector2i(59, 50))
 	_later("town_hall", Vector2i(62, 50))
+	_later("big_ben", Vector2i(65, 50))
 	_later("bus_depot", Vector2i(53, 44))
 	_later("harbour", _harbour, _harbour, true)
 	_later("gas", Vector2i(86, 55))
@@ -305,7 +309,7 @@ func _finish_example() -> void:
 
 func _report_example(id: String) -> void:
 	print("[examples] %s: %s, %d people, %d jobs, happiness %d%%, money %d, income %d, upkeep %d, balance %+d a month, tax %d%%" % [
-		id, sim.date_text(), sim.population, sim.shop_jobs + sim.industry_jobs, roundi(sim.happiness * 100.0), sim.money, sim.last_income,
+		id, sim.date_text(), sim.population, sim.jobs(), roundi(sim.happiness * 100.0), sim.money, sim.last_income,
 		sim.last_upkeep, sim.last_balance(), roundi(sim.tax_rate * 100.0)])
 	var parts: Array[String] = []
 	for key: Variant in sim.happiness_parts:

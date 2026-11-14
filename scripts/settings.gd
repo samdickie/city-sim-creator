@@ -230,47 +230,47 @@ const BUILDINGS := {
 		"value": -0.02, "radius": 3, "port_jobs": 80, "about": "Ships bring trade: more demand for industry"},
 	# Landmarks: famous buildings, one of each. They raise land value and appeal
 	# and bring tourists ("visitors": shop demand, as a share of the population).
-	"big_ben": {"name": "Big Ben", "cost": 12000, "upkeep": 80, "uses_power": 2, "unlock": 2000, "only_one": true,
-		"landmark": true, "value": 0.08, "radius": 6, "appeal": 0.03, "visitors": 0.01,
+	"big_ben": {"name": "Big Ben", "cost": 12000, "upkeep": 40, "uses_power": 2, "unlock": 2000, "only_one": true,
+		"landmark": true, "value": 0.08, "radius": 6, "appeal": 0.03, "visitors": 0.004,
 		"about": "The great clock tower. Tourists come to see it: more demand for shops, higher land value and appeal"},
-	"colosseum": {"name": "Colosseum", "cost": 18000, "upkeep": 100, "uses_power": 2, "unlock": 4000, "only_one": true,
-		"landmark": true, "value": 0.08, "radius": 7, "appeal": 0.03, "visitors": 0.012,
+	"colosseum": {"name": "Colosseum", "cost": 18000, "upkeep": 50, "uses_power": 2, "unlock": 4000, "only_one": true,
+		"landmark": true, "value": 0.08, "radius": 7, "appeal": 0.03, "visitors": 0.005,
 		"about": "The ancient amphitheatre. Tourists come to see it: more demand for shops, higher land value and appeal"},
-	"great_pyramid": {"name": "Great Pyramid", "cost": 20000, "upkeep": 60, "uses_power": 1, "unlock": 6000, "only_one": true,
-		"landmark": true, "value": 0.06, "radius": 7, "appeal": 0.03, "visitors": 0.012,
+	"great_pyramid": {"name": "Great Pyramid", "cost": 20000, "upkeep": 30, "uses_power": 1, "unlock": 6000, "only_one": true,
+		"landmark": true, "value": 0.06, "radius": 7, "appeal": 0.03, "visitors": 0.005,
 		"about": "A wonder of the ancient world. Tourists come to see it: more demand for shops, higher land value and appeal"},
-	"liberty": {"name": "Statue of Liberty", "cost": 22000, "upkeep": 100, "uses_power": 2, "unlock": 8000, "only_one": true,
-		"landmark": true, "near_sea": true, "value": 0.10, "radius": 7, "appeal": 0.04, "visitors": 0.015,
+	"liberty": {"name": "Statue of Liberty", "cost": 22000, "upkeep": 50, "uses_power": 2, "unlock": 8000, "only_one": true,
+		"landmark": true, "near_sea": true, "value": 0.10, "radius": 7, "appeal": 0.04, "visitors": 0.006,
 		"about": "Torch held high over the harbour. Tourists come to see it: more demand for shops, higher land value and appeal"},
-	"taj_mahal": {"name": "Taj Mahal", "cost": 28000, "upkeep": 140, "uses_power": 2, "unlock": 10000, "only_one": true,
-		"landmark": true, "value": 0.12, "radius": 8, "appeal": 0.04, "visitors": 0.015,
+	"taj_mahal": {"name": "Taj Mahal", "cost": 28000, "upkeep": 70, "uses_power": 2, "unlock": 10000, "only_one": true,
+		"landmark": true, "value": 0.12, "radius": 8, "appeal": 0.04, "visitors": 0.006,
 		"about": "White marble domes and minarets. Tourists come to see it: more demand for shops, higher land value and appeal"},
-	"opera_house": {"name": "Sydney Opera House", "cost": 32000, "upkeep": 220, "uses_power": 5, "unlock": 14000, "only_one": true,
-		"landmark": true, "near_sea": true, "value": 0.12, "radius": 8, "appeal": 0.05, "visitors": 0.015,
+	"opera_house": {"name": "Sydney Opera House", "cost": 32000, "upkeep": 110, "uses_power": 5, "unlock": 14000, "only_one": true,
+		"landmark": true, "near_sea": true, "value": 0.12, "radius": 8, "appeal": 0.05, "visitors": 0.006,
 		"about": "White sails by the water. A night out and a sight to see: shop demand, land value and appeal"},
-	"eiffel": {"name": "Eiffel Tower", "cost": 36000, "upkeep": 180, "uses_power": 4, "unlock": 18000, "only_one": true,
-		"landmark": true, "value": 0.12, "radius": 9, "appeal": 0.05, "visitors": 0.02,
+	"eiffel": {"name": "Eiffel Tower", "cost": 36000, "upkeep": 90, "uses_power": 4, "unlock": 18000, "only_one": true,
+		"landmark": true, "value": 0.12, "radius": 9, "appeal": 0.05, "visitors": 0.008,
 		"about": "The iron tower, seen from all over town. The biggest draw for tourists: shop demand, land value and appeal"},
-	"empire_state": {"name": "Empire State Building", "cost": 45000, "upkeep": 250, "uses_power": 8, "unlock": 25000, "only_one": true,
-		"landmark": true, "value": 0.10, "radius": 8, "appeal": 0.04, "visitors": 0.015,
+	"empire_state": {"name": "Empire State Building", "cost": 45000, "upkeep": 120, "uses_power": 8, "unlock": 25000, "only_one": true,
+		"landmark": true, "value": 0.10, "radius": 8, "appeal": 0.04, "visitors": 0.006,
 		"about": "The art deco skyscraper, the tallest thing in town. Tourists come to see it: shop demand, land value and appeal"},
-	"airport": {"name": "Airport", "cost": 200, "upkeep": 4, "area": true, "unlock": 5000,
+	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 800 m long for the runway, with room beside it and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }
 # --- Airport (dragged out like a golf course; the layout is worked out from its shape) ---
 # The runway is the longest straight run of airport tiles; the terminal goes on
-# the tile nearest a road. It opens once it has all of these and power.
+# the tile nearest a road. It opens once it has the runway, the room and the road.
 const AIRPORT_MIN_RUNWAY := 16      # tiles in a straight line (800 m)
 const AIRPORT_MIN_TILES := 40       # in all, so there's room for a terminal and apron
 const AIRPORT_APRON_ROWS := 5       # the runway likes to be this many tiles from the road side (terminal, stands, taxiway)
-const AIRPORT_VISITORS := 0.05      # extra shop demand, as a share of the population
+const AIRPORT_VISITORS := 0.03      # extra shop demand, as a share of the population
 const AIRPORT_OFFICE_BOOST := 0.2   # this much more demand for offices
 const AIRPORT_FREIGHT := 120        # extra demand for industry, in jobs
 const AIRPORT_NOISE := 0.03         # land value lost per airport tile within AIRPORT_NOISE_RADIUS...
 const AIRPORT_NOISE_RADIUS := 4
 const AIRPORT_NOISE_MAX := 0.15     # ...up to this much, however big the airport
 const AIRPORT_TRIPS := 2.0          # car trips a day per visitor (there and back), from the terminal
-const TOURISM_MAX := 0.1          # all the landmarks together bring at most this share of the population as visitors
+const TOURISM_MAX := 0.05         # all the landmarks together bring at most this share of the population as visitors
 const AIRPORT_TOURISM := 1.5      # an open airport brings this many times the landmarks' visitors
 const LEISURE_APPEAL_MAX := 0.3   # all the leisure buildings together add at most this much appeal
 const RUBBISH_START_POP := 400    # below this the town's rubbish isn't a problem

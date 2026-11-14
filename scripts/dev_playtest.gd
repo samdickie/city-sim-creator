@@ -110,8 +110,108 @@ func _run() -> void:
 	await _traffic()
 	await _services()
 	await _examples()
+	await _new_buildings()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
+
+
+func _new_buildings() -> void:
+	# Offices, the small services, the airport and the landmarks, in the example
+	# city (loaded just before): in the menu, working, and kept by a save.
+	var T := Simulation.Tile
+	var ids := {}
+	for item: Dictionary in game.call("_menu_items"):
+		ids[item["id"]] = item["locked"]
+	var wanted := ["offices_0", "offices_1", "offices_2", "police_office", "fire_small", "clinic", "airport",
+		"big_ben", "colosseum", "great_pyramid", "liberty", "taj_mahal", "opera_house", "eiffel", "empire_state"]
+	var missing: Array[String] = []
+	for id: String in wanted:
+		if not ids.has(id) or bool(ids[id]):
+			missing.append(id)
+	check(missing.is_empty(), "new buildings: all in the Build menu and unlocked in the city %s" % [missing])
+	# Offices: jobs, demand and hover text.
+	var office := -1
+	for i: int in sim.w * sim.h:
+		if sim.tiles[i] == T.OFFICES and sim.levels[i] > 0:
+			office = i
+			break
+	check(office >= 0 and sim.office_jobs > 0 and sim.jobs() == sim.shop_jobs + sim.industry_jobs + sim.office_jobs,
+		"offices: the city has offices (%d office jobs), counted with the other jobs" % sim.office_jobs)
+	check(sim.office_share() > 0.2 and sim.demand.has(T.OFFICES), "offices: a city this size wants office work (share %.2f)" % sim.office_share())
+	if office >= 0:
+		var words: String = game.call("_tile_text", office)
+		check(words.begins_with("Offices") and words.contains("office"), "offices: the hover text says what's there (%s)" % words.get_slice("\n", 0))
+	# A clinic: a small hospital, cheaper and with less reach, placed from the menu.
+	check(sim.service_of(T.CLINIC) == Simulation.Service.HOSPITAL and sim.service_small(T.CLINIC) and not sim.service_small(T.HOSPITAL)
+		and sim.service_reach_m(3, 50.0, true) < sim.service_reach_m(3, 50.0),
+		"small services: a clinic is a small hospital (reaches %d m, a hospital %d m)" % [
+		sim.service_reach_m(3, 50.0, true), sim.service_reach_m(3, 50.0)])
+	game.call("_choose_item", "clinic")
+	var spot := Vector2i(-1, -1)
+	for i: int in sim.w * sim.h:
+		var p := Vector2i(i % sim.w, i / sim.w)
+		if sim.tiles[i] == T.EMPTY and sim.near_road(i) and String(game.call("_why_cant_build", p)) == "":
+			spot = p
+			break
+	var hospitals: int = sim.services[3]
+	var upkeep := sim.service_upkeep()
+	_place("clinic", spot)
+	var clinic := spot.y * sim.w + spot.x
+	check(spot.x >= 0 and sim.tiles[clinic] == T.CLINIC and int(sim.services[3]) == hospitals + 1 and int(sim.small_services[3]) >= 1,
+		"small services: a clinic placed from the menu counts as a hospital service")
+	var dearer := sim.service_upkeep() - upkeep
+	check(dearer > 0 and dearer < int(Settings.SERVICE_UPKEEP[3]), "small services: it costs less to run than a hospital (+%d a month)" % dearer)
+	check(String(game.call("_tile_text", clinic)).begins_with("Clinic"), "small services: its hover text names it")
+	# The airport: open, with a runway and a terminal; cut the runway and it closes.
+	var terminals: PackedInt32Array = sim.get("_airport_terminals")
+	check(sim.airports_open == 1 and terminals.size() == 1, "airport: the city's airport is open")
+	if terminals.size() == 1:
+		var terminal: int = terminals[0]     # (the sim's own list is cleared when the airport closes)
+		check(sim.building_status(terminal).begins_with("open") and sim.airport_role_at(terminal) == Simulation.AirportRole.TERMINAL,
+			"airport: its terminal says so (%s)" % sim.building_status(terminal))
+		var runway: Array[int] = []
+		for i: int in sim.w * sim.h:
+			if sim.tiles[i] == T.AIRPORT and sim.airport_role_at(i) == Simulation.AirportRole.RUNWAY:
+				runway.append(i)
+		check(runway.size() >= Settings.AIRPORT_MIN_RUNWAY, "airport: a runway of %d m" % (runway.size() * 50))
+		var shops_before := sim.demand_for(T.SHOPS)
+		# (Cut right across the airfield: with only one strip cut, the next becomes the runway.)
+		var cut: int = runway[runway.size() / 2]
+		var top := cut
+		var bottom := cut
+		var across: int = 1 if sim.airport_role[cut] & 8 != 0 else sim.w
+		while sim.tiles[top - across] == T.AIRPORT:
+			top -= across
+		while sim.tiles[bottom + across] == T.AIRPORT:
+			bottom += across
+		_place("bulldoze", Vector2i(top % sim.w, top / sim.w), Vector2i(bottom % sim.w, bottom / sim.w))
+		check(sim.airports_open == 0 and sim.building_status(terminal).contains("runway needs")
+			and sim.demand_for(T.SHOPS) < shops_before,
+			"airport: with the runway cut it closes and its visitors go (%s)" % sim.building_status(terminal))
+		var tips: Array[Dictionary] = Advisors.tips(sim)
+		var told := false
+		for tip: Dictionary in tips:
+			if tip["id"] == "airport":
+				told = true
+		check(told, "airport: the advisors say it isn't open")
+		_place("airport", Vector2i(top % sim.w, top / sim.w), Vector2i(bottom % sim.w, bottom / sim.w))
+		check(sim.airports_open == 1, "airport: mended, it opens again")
+	# Landmarks: one of each, bringing tourists.
+	var all := true
+	for t: int in [T.BIG_BEN, T.COLOSSEUM, T.GREAT_PYRAMID, T.LIBERTY, T.TAJ_MAHAL, T.OPERA_HOUSE, T.EIFFEL, T.EMPIRE_STATE]:
+		if sim.count_of(t) != 1:
+			all = false
+	check(all and sim.tourism > 0.0, "landmarks: the city has all eight, and tourists (%.1f%% of its people)" % (sim.tourism * 100.0))
+	check(sim.can_build_here(T.EIFFEL, clinic).contains("only build one"), "landmarks: only one of each (%s)" % sim.can_build_here(T.EIFFEL, clinic))
+	# A save keeps them all.
+	var before := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.EIFFEL),
+		sim.population, sim.office_jobs, sim.airports_open]
+	sim.from_save(sim.to_save())
+	var after := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.EIFFEL),
+		sim.population, sim.office_jobs, sim.airports_open]
+	check(before == after, "new buildings: saving and loading keeps them (%s)" % [after])
+	world.refresh_all()
+	await _shot("p24_new_buildings")
 
 
 func _examples() -> void:
@@ -900,8 +1000,8 @@ func _woodland() -> void:
 	# better land, bulldozing, saving and loading, and a big forest's cost.
 	var o := _origin
 	var wood := Simulation.Tile.WOODLAND
-	check(Simulation.Tile.HARBOUR == 28 and wood == 29 and Simulation.LAST_TILE == wood,
-		"woodland is a new tile number on the end (old saves' tiles keep their numbers)")
+	check(Simulation.Tile.HARBOUR == 28 and wood == 29 and Simulation.Tile.OFFICES == 30 and Simulation.LAST_TILE > wood,
+		"woodland and the tiles added since are new numbers on the end (old saves' tiles keep their numbers)")
 	game.call("_set_speed", 0)
 	var a := o + Vector2i(7, 8)
 	var b := o + Vector2i(12, 9)
@@ -1671,10 +1771,10 @@ func _services() -> void:
 	# From another view: the Police shows the Services view, and putting it down goes back.
 	game.call("_set_overlay", WorldView.Overlay.POLLUTION)
 	await _key(KEY_0)
-	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == int(game.call("_target_tile")) - Simulation.Tile.POLICE,
+	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == sim.service_of(int(game.call("_target_tile"))),
 		"services: the Services tool (0) shows its own service (%d)" % world.service_filter)
 	await _key(KEY_TAB)
-	check(world.service_filter == int(game.call("_target_tile")) - Simulation.Tile.POLICE,
+	check(world.service_filter == sim.service_of(int(game.call("_target_tile"))),
 		"services: Tab to the next service shows that one (%d)" % world.service_filter)
 	await _key(KEY_1)
 	check(world.overlay == WorldView.Overlay.POLLUTION, "services: ...and the Road goes back to the Pollution view")

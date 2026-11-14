@@ -951,6 +951,8 @@ func can_build_here(t: int, i: int) -> String:
 	var unlock: int = d.get("unlock", 0)
 	if population < unlock:
 		return "%s needs a town of %d people (you have %d)." % [d["name"], unlock, population]
+	if bool(d.get("landmark", false)) and count_of(t) > 0:
+		return "You can only build one %s." % d["name"]
 	if bool(d.get("only_one", false)) and count_of(t) > 0:
 		return "The town already has a %s." % String(d["name"]).to_lower()
 	if bool(d.get("near_sea", false)) and not _beside_sea(i):
@@ -1078,8 +1080,8 @@ func airport_role_at(i: int) -> int:
 
 func _update_airports() -> void:
 	# Group the airport tiles, lay each group out (runway, taxiway, apron,
-	# terminal, tower, hangars, grass) and say whether it can open.
-	# (Power must be up to date.)
+	# terminal, tower, hangars, grass) and say whether it can open. (It makes its
+	# own power: all it needs is the runway, the room and a road.)
 	airport_role.resize(w * h)
 	airport_role.fill(0)
 	_airport_group.resize(w * h)
@@ -1157,10 +1159,7 @@ func _lay_out_airport(g: int, members: Array[int]) -> String:
 	var mid := Vector2((best_start % w), (best_start / w)) + Vector2(step % w, step / w) * (best_len - 1) * 0.5
 	var terminal := -1
 	var terminal_score := INF
-	var powered_any := false
 	for i in members:
-		if powered[i] == 1:
-			powered_any = true
 		if airport_role[i] & 7 == AirportRole.RUNWAY:
 			continue
 		var score: float = _road_dist[i] * 1000.0 + Vector2(i % w, i / w).distance_to(mid)
@@ -1202,8 +1201,6 @@ func _lay_out_airport(g: int, members: Array[int]) -> String:
 			Settings.AIRPORT_MIN_TILES, members.size()]
 	if _road_dist[terminal] > Settings.ROAD_REACH:
 		return "it needs a road within %d tiles of one side, for the terminal" % Settings.ROAD_REACH
-	if not powered_any:
-		return "no power"
 	if airports_open == 0:
 		_airport_terminals.append(terminal)
 	return ""
@@ -2153,8 +2150,11 @@ func _update_demand() -> void:
 	# happier town), plus people coming for spare jobs (or put off by unemployment).
 	var homes := (Settings.TOWN_PULL + population * Settings.REGION_GROWTH) * a \
 		+ spare_jobs * Settings.JOB_PULL
-	# Shops and offices follow residents; industry employs the workers they don't.
+	# Shops follow residents; offices and industry employ the workers they don't.
+	# (Visitors' shopping is extra: it adds jobs for more residents to come for,
+	# and takes nothing from offices or industry.)
 	var shop_target := population * Settings.SHOP_JOBS_PER_PERSON
+	var local_shops := shop_target
 	demand[Tile.HOMES] = homes
 	# Railway stations bring visitors (shop demand); harbours bring trade (industry).
 	var stations := mini(_working_count(Tile.STATION), 2)
@@ -2175,9 +2175,9 @@ func _update_demand() -> void:
 	# Offices: a share of the workers who aren't in shops (see office_share). Only
 	# offices that are built take workers from industry, so a town with no office
 	# zone runs exactly as before.
-	var office_target := maxf(workers - shop_target, 0.0) * minf(office_share() * office_boost, 1.0)
+	var office_target := maxf(workers - local_shops, 0.0) * minf(office_share() * office_boost, 1.0)
 	demand[Tile.OFFICES] = _business_demand(office_target - office_jobs, office_jobs, b)
-	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - office_jobs - industry_jobs + trade,
+	demand[Tile.INDUSTRY] = _business_demand(workers - local_shops - office_jobs - industry_jobs + trade,
 		industry_jobs, b)
 
 
