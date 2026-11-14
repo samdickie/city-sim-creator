@@ -253,6 +253,16 @@ func _build_town() -> void:
 	_later("stadium", Vector2i(59, 68))
 	_later("nuclear", Vector2i(83, 73))
 	_later("airport", Vector2i(60, 102), Vector2i(84, 108))
+	# Landmarks: two in the civic quarter, three in the seafront park, two by the
+	# sea and the skyscraper in the CBD's office core.
+	_later("big_ben", Vector2i(71, 53))
+	_later("colosseum", Vector2i(71, 50))
+	_later("great_pyramid", Vector2i(38, 80))
+	_later("taj_mahal", Vector2i(38, 74))
+	_later("eiffel", Vector2i(38, 62))
+	_later("empire_state", Vector2i(50, 64))
+	_later("liberty", Vector2i(36, 70), Vector2i(36, 70), true)
+	_later("opera_house", Vector2i(36, 60), Vector2i(36, 60), true)
 
 
 func _build(id: String, from: Vector2i, to: Vector2i = Vector2i(-1, -1)) -> int:
@@ -652,6 +662,12 @@ func _shot_list() -> Array[Dictionary]:
 		# The airport south-east of the links: all of it, the terminal and stands, the Build menu's card.
 		{"name": "65_airport", "at": Vector2(72, 105), "yaw": -40.0, "pitch": 38.0, "dist": 1300.0},
 		{"name": "66_airport_terminal", "at": Vector2(64, 103.5), "yaw": -60.0, "pitch": 30.0, "dist": 330.0},
+		# Landmarks: the seafront (Eiffel Tower, Taj Mahal, Great Pyramid and the two by
+		# the sea), the civic quarter (Big Ben, Colosseum), the skyline with the Empire State.
+		{"name": "67_landmarks_seafront", "at": Vector2(39, 70), "yaw": -70.0, "pitch": 28.0, "dist": 1100.0},
+		{"name": "68_landmarks_civic", "at": Vector2(70, 51.5), "yaw": -30.0, "pitch": 30.0, "dist": 330.0},
+		{"name": "69_landmarks_skyline", "at": Vector2(47, 64), "yaw": -20.0, "pitch": 16.0, "dist": 900.0},
+		{"name": "70_landmarks_night", "at": Vector2(42, 66), "yaw": -60.0, "pitch": 22.0, "dist": 1000.0, "time": NIGHT},
 		{"name": "32_towers_night", "at": Vector2(46, 63), "yaw": -40.0, "pitch": 22.0, "dist": 620.0,
 			"time": NIGHT},
 		{"name": "33_abandoned", "at": Vector2(54, 51), "yaw": -35.0, "pitch": 38.0, "dist": 230.0,

@@ -25,9 +25,10 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }   # same order as simulation.gd
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
-	DISTRICT, OFFICES }
+	DISTRICT, OFFICES, LANDMARK }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -44,6 +45,7 @@ const TOOL_NAMES := {
 	Tool.TRANSPORT: "Transport",
 	Tool.DISTRICT: "Districts",
 	Tool.OFFICES: "Offices",
+	Tool.LANDMARK: "Landmarks",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
@@ -63,6 +65,8 @@ const GROUPS := {
 	Tool.SERVICE: [Tile.POLICE_OFFICE, Tile.POLICE, Tile.FIRE_SMALL, Tile.FIRE, Tile.SCHOOL, Tile.CLINIC, Tile.HOSPITAL],
 	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
 	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR, Tile.AIRPORT],
+	Tool.LANDMARK: [Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE,
+		Tile.EIFFEL, Tile.EMPIRE_STATE],
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -88,6 +92,7 @@ const TOOL_COLOURS := {
 	Tool.TRANSPORT: Color(0.95, 0.55, 0.25),
 	Tool.DISTRICT: Color(0.62, 0.38, 0.92),
 	Tool.OFFICES: Color(0.10, 0.72, 0.68),
+	Tool.LANDMARK: Color(0.95, 0.78, 0.30),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -839,7 +844,7 @@ func _set_item(index: int, announce: bool = true) -> void:
 # Categories down the side of the Build menu: [id, name].
 const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"], ["power", "Power"],
 	["utilities", "Utilities"], ["services", "Services"], ["leisure", "Leisure"],
-	["transport", "Transport"], ["districts", "Districts"]]
+	["transport", "Transport"], ["landmarks", "Landmarks"], ["districts", "Districts"]]
 # One-line descriptions for the menu (the hover tooltip has the full story).
 const SHORT := {
 	"homes_0": "Villas and terraces", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
@@ -858,7 +863,10 @@ const SHORT := {
 	"library": "Books, and better land", "museum": "A big draw for visitors", "stadium": "A football ground",
 	"marina": "Yachts by the shore", "town_hall": "The heart of the town",
 	"bus_depot": "Plots can sit further from roads", "station": "Visitors arrive by train",
-	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
+	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade",
+	"big_ben": "The great clock tower", "colosseum": "The ancient amphitheatre", "great_pyramid": "A wonder of the ancient world",
+	"liberty": "Torch held high, by the sea", "taj_mahal": "White marble domes", "opera_house": "White sails by the water",
+	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
 
@@ -877,7 +885,7 @@ func _menu_entries() -> Array:
 	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
 	out.append(["bulldoze", "roads", Tool.BULLDOZE, -1, -1, Tile.EMPTY])
 	var group_cats := {Tool.POWER: "power", Tool.UTILITY: "utilities", Tool.SERVICE: "services",
-		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport"}
+		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport", Tool.LANDMARK: "landmarks"}
 	for tool_id: int in group_cats:
 		if tool_id == Tool.LEISURE:
 			out.append(["park", "leisure", Tool.PARK, -1, -1, Tile.PARK])

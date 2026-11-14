@@ -10,7 +10,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -19,8 +20,10 @@ const BUILDING_KEYS := {
 	Tile.LIBRARY: "library", Tile.MUSEUM: "museum", Tile.STADIUM: "stadium", Tile.MARINA: "marina",
 	Tile.TOWN_HALL: "town_hall", Tile.BUS_DEPOT: "bus_depot", Tile.STATION: "station",
 	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland", Tile.AIRPORT: "airport",
+	Tile.BIG_BEN: "big_ben", Tile.COLOSSEUM: "colosseum", Tile.GREAT_PYRAMID: "great_pyramid", Tile.LIBERTY: "liberty",
+	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
 }
-const LAST_TILE := Tile.AIRPORT   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.EMPIRE_STATE   # (new tiles go on the end, so saved tile numbers never change)
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -72,6 +75,7 @@ var water_supply := 0                 # zone levels the pumps and towers can sup
 var water_used := 0
 var rubbish_made := 0                 # in residents' worth
 var rubbish_capacity := 0
+var tourism := 0.0                    # visitors the working landmarks bring, as a share of the population
 var leisure_appeal := 0.0             # extra appeal from leisure buildings and landmarks
 # How residents feel, 0 (furious) to 1 (delighted): the single summary of taxes,
 # services, leisure, rubbish, jobs, housing, power and water. It sets how many
@@ -1040,13 +1044,22 @@ func rubbish_word() -> String:
 func _measure_leisure() -> void:
 	# Leisure buildings and landmarks that are working add appeal (up to a limit).
 	var total := 0.0
+	var tourists := 0.0
 	for i in w * h:
 		var t: int = tiles[i]
 		if is_building(t):
 			var a: float = info(t).get("appeal", 0.0)
 			if a > 0.0 and building_working(i):
 				total += a
+				if is_landmark(t):
+					var v: float = info(t).get("visitors", 0.0)
+					tourists += v
 	leisure_appeal = minf(total, Settings.LEISURE_APPEAL_MAX)
+	tourism = minf(tourists, Settings.TOURISM_MAX)
+
+
+func is_landmark(t: int) -> bool:
+	return bool(info(t).get("landmark", false))
 
 
 # ------------------------------------------------------------- airport
@@ -2149,6 +2162,8 @@ func _update_demand() -> void:
 	shop_target += population * visitors * stations
 	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
+	# Landmarks bring tourists (more of them with an airport to fly in to).
+	shop_target += population * tourism * (Settings.AIRPORT_TOURISM if airports_open > 0 else 1.0)
 	# An airport brings visitors, business and freight.
 	var office_boost := 1.0
 	if airports_open > 0:

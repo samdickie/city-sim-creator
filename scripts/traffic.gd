@@ -429,7 +429,7 @@ func _measure(i: int) -> void:
 				walk += 6.0
 			elif t == Simulation.Tile.WOODLAND:
 				walk += 2.0             # the odd dog walker (and not a landmark, below)
-			elif sim.is_service(t) or (t >= Simulation.Tile.LIBRARY and t < Simulation.Tile.WOODLAND):
+			elif sim.is_service(t) or (t >= Simulation.Tile.LIBRARY and t < Simulation.Tile.WOODLAND) or sim.is_landmark(t):
 				# Schools, hospitals, landmarks, stations: staff and visitors.
 				walk += 30.0
 	if sim.district[i] == 2:

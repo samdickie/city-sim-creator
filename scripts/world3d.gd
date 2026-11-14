@@ -43,6 +43,11 @@ const MODEL_DIMS := {
 	"crown_slope": Vector4(21.0, 13.0, 10.6, 0.0),
 	# More industry: an old works with a sawtooth roof, and a modern warehouse.
 	"works": Vector4(34.0, 28.0, 6.0, 3.2), "warehouse": Vector4(40.0, 30.0, 11.75, 0.0),
+	# Landmarks (tools/make_buildings.py), placed at their built size.
+	"eiffel": Vector4(44.0, 44.0, 139.7, 0.0), "big_ben": Vector4(36.0, 16.0, 98.0, 0.0),
+	"empire_state": Vector4(40.0, 28.0, 196.7, 0.0), "liberty": Vector4(34.0, 34.0, 85.6, 0.0),
+	"opera_house": Vector4(46.0, 38.0, 24.4, 0.0), "taj_mahal": Vector4(46.0, 46.0, 39.2, 0.0),
+	"colosseum": Vector4(46.0, 38.0, 19.6, 0.0), "great_pyramid": Vector4(46.0, 46.0, 29.8, 0.0),
 }
 # Other designs with the same size as a model above; one is picked for each building.
 const MODEL_VARIANTS := {
@@ -61,7 +66,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }   # same order as simulation.gd
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1559,15 +1565,16 @@ func _plan_lots() -> void:
 			kind = LOT_CAR_PARK
 		else:
 			match t:
-				Tile.POLICE, Tile.LIBRARY, Tile.MUSEUM, Tile.TOWN_HALL, Tile.STATION, Tile.STADIUM, Tile.MARINA:
+				Tile.BIG_BEN, Tile.COLOSSEUM, Tile.OPERA_HOUSE, Tile.EMPIRE_STATE, Tile.EIFFEL, Tile.LIBERTY, \
+						Tile.POLICE, Tile.LIBRARY, Tile.MUSEUM, Tile.TOWN_HALL, Tile.STATION, Tile.STADIUM, Tile.MARINA:
 					kind = LOT_CIVIC
 				Tile.SCHOOL:
 					kind = LOT_SCHOOL
-				Tile.HOSPITAL, Tile.CLINIC, Tile.POLICE_OFFICE:
+				Tile.HOSPITAL, Tile.CLINIC, Tile.POLICE_OFFICE, Tile.TAJ_MAHAL:
 					kind = LOT_HOSPITAL
 				Tile.GOLF:
 					kind = LOT_GOLF
-				Tile.WIND, Tile.SOLAR:
+				Tile.WIND, Tile.SOLAR, Tile.GREAT_PYRAMID:
 					kind = LOT_MEADOW
 				Tile.WOODLAND:
 					kind = LOT_WOODS
@@ -4554,6 +4561,9 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_prop(i, front, -19.0 + k * 6.5, depth - 10.0, 2.6, 6.0, 2.4, skips[k % 4])
 		Tile.AIRPORT:
 			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
+		Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE, \
+				Tile.EIFFEL, Tile.EMPIRE_STATE:
+			_plan_landmark(i, t, front, wall_list, roof_list)
 		Tile.GOLF:
 			# Fairway (the ground colour), a green with its flag, bunkers, a tee and
 			# a few trees in the rough.
@@ -4702,6 +4712,37 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_prop(i, front, 6.0 + (k % 4) * 4.0, 8.0 + (k / 4) * 7.0, 2.5, 6.1, 2.6 * (1 + k % 2),
 					CONTAINERS[k % CONTAINERS.size()])
 			_plan_on_water(i, rng, true)
+
+
+# The landmarks: [model, first colour (stone, render), second colour (roofs, accents),
+# metres back from the plot's front]. The two by the sea face the water.
+const LANDMARKS := {
+	Tile.BIG_BEN: ["big_ben", Color(0.74, 0.62, 0.42), Color(0.20, 0.22, 0.25), 16.0],
+	Tile.COLOSSEUM: ["colosseum", Color(0.80, 0.72, 0.58), Color(0.78, 0.68, 0.48), 6.0],
+	Tile.GREAT_PYRAMID: ["great_pyramid", Color(0.82, 0.72, 0.50), Color(0.78, 0.68, 0.48), 2.0],
+	Tile.LIBERTY: ["liberty", Color(0.70, 0.66, 0.58), Color(0.42, 0.68, 0.60), 8.0],
+	Tile.TAJ_MAHAL: ["taj_mahal", Color(0.95, 0.94, 0.91), Color(0.95, 0.94, 0.91), 2.0],
+	Tile.OPERA_HOUSE: ["opera_house", Color(0.70, 0.56, 0.48), Color(0.95, 0.94, 0.91), 6.0],
+	Tile.EIFFEL: ["eiffel", Color(0.44, 0.35, 0.27), Color(0.30, 0.25, 0.20), 3.0],
+	Tile.EMPIRE_STATE: ["empire_state", Color(0.74, 0.72, 0.67), Color(0.30, 0.32, 0.35), 10.0],
+}
+
+
+func _plan_landmark(i: int, t: int, front: Vector2i, wall_list: Array, roof_list: Array) -> void:
+	var look: Array = LANDMARKS[t]
+	var model_name: String = look[0]
+	var dims: Vector4 = MODEL_DIMS[model_name]
+	var facing := front
+	if bool(sim.info(t).get("near_sea", false)):
+		var sea := _sea_side(i)
+		if sea != Vector2i.ZERO:
+			facing = sea
+	var spot := _place(i, facing, 0.0, look[3], dims.x, dims.y)
+	if _models.has(model_name):
+		_add_model(model_name, spot, dims.x, dims.y, dims.z + dims.w, look[1], look[2])
+	else:
+		# No model file: a plain block of the right size and colour.
+		_add_block(spot, dims.x * 0.6, dims.y * 0.6, dims.z, look[1], STYLE_CLASSICAL, 0.0, SLATE, wall_list, roof_list)
 
 
 # Airport roles, as simulation.gd AirportRole (the runway, taxiway, apron and grass are

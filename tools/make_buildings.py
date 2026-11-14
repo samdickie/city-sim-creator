@@ -1568,6 +1568,400 @@ def water_tower():
         f.slab(mb, -0.25, 0.25, 28.2, 33.8, -0.05, 0.18, "render")                # fluting
     return mb, (w, d, 35.8, 0.0)
 
+# ------------------------------------------------------------- landmarks
+# Famous buildings, scaled to fit one 50 m plot (the tall ones keep their look
+# rather than their true height). Colours come from the game: "render" and
+# "stone" take the first colour, "accent" and "roof" the second.
+
+def frustum(mb, x, y, hx0, hy0, hx1, hy1, z0, z1, mat):
+    """A box that tapers from half-size (hx0, hy0) at z0 to (hx1, hy1) at z1."""
+    mb.hexa([(x - hx0, y - hy0, z0), (x + hx0, y - hy0, z0), (x + hx0, y + hy0, z0), (x - hx0, y + hy0, z0),
+             (x - hx1, y - hy1, z1), (x + hx1, y - hy1, z1), (x + hx1, y + hy1, z1), (x - hx1, y + hy1, z1)], mat)
+
+
+def eiffel():
+    # Four splayed iron legs, arches between them, two platforms, a tapering
+    # lattice shaft, the top cabin and its mast.
+    w = d = 44.0
+    mb = Builder()
+    iron = "render"
+    rings = [(0.0, 19.5, 5.0), (9.0, 16.2, 4.4), (18.0, 13.4, 3.8), (26.0, 11.4, 3.4),
+             (38.0, 8.2, 2.8), (50.0, 5.8, 2.2)]
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            for (z0, r0, t0), (z1, r1, t1) in zip(rings, rings[1:]):
+                beam(mb, (sx * r0, sy * r0, z0), (sx * r1, sy * r1, z1), (t0 + t1) / 2, iron)
+            mb.box(sx * 19.5 - 3.6, sx * 19.5 + 3.6, sy * 19.5 - 3.6, sy * 19.5 + 3.6, -0.3, 1.2, "stone")
+    # Arches under the first platform, and cross-bracing on each side.
+    for turn in range(4):
+        c, s = (1, 0, -1, 0)[turn], (0, 1, 0, -1)[turn]
+
+        def pt(a, out, z):
+            return (a * -s + out * c, a * c + out * s, z)
+        arch = [(-14.5, 12.0), (-10.0, 18.5), (-4.0, 22.5), (4.0, 22.5), (10.0, 18.5), (14.5, 12.0)]
+        for (a0, z0), (a1, z1) in zip(arch, arch[1:]):
+            out0 = 19.5 - (19.5 - 11.4) * z0 / 26.0
+            out1 = 19.5 - (19.5 - 11.4) * z1 / 26.0
+            beam(mb, pt(a0, out0, z0), pt(a1, out1, z1), 1.0, iron)
+        for z0, r0, z1, r1 in ((28.5, 10.6, 38.0, 8.2), (38.0, 8.2, 48.0, 6.2)):
+            beam(mb, pt(-r0, r0, z0), pt(r1, r1, z1), 0.6, iron)
+            beam(mb, pt(r0, r0, z0), pt(-r1, r1, z1), 0.6, iron)
+    mb.box(-13.6, 13.6, -13.6, 13.6, 24.6, 27.4, iron)                 # first platform
+    mb.box(-14.2, 14.2, -14.2, 14.2, 27.4, 28.4, "lead")
+    mb.box(-7.4, 7.4, -7.4, 7.4, 49.0, 51.4, iron)                     # second platform
+    mb.box(-7.9, 7.9, -7.9, 7.9, 51.4, 52.2, "lead")
+    # The shaft: four corner members, rings and diagonals.
+    levels = [(52.2, 5.4), (64.0, 4.3), (76.0, 3.4), (88.0, 2.7), (100.0, 2.1), (112.0, 1.6), (122.0, 1.3)]
+    for (z0, r0), (z1, r1) in zip(levels, levels[1:]):
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                beam(mb, (sx * r0, sy * r0, z0), (sx * r1, sy * r1, z1), 0.9, iron)
+        for turn in range(4):
+            c, s = (1, 0, -1, 0)[turn], (0, 1, 0, -1)[turn]
+            beam(mb, (-r0 * -s + r0 * c, -r0 * c + r0 * s, z0), (r1 * -s + r1 * c, r1 * c + r1 * s, z1), 0.4, iron)
+            beam(mb, (r0 * -s + r0 * c, r0 * c + r0 * s, z0), (-r1 * -s + r1 * c, -r1 * c + r1 * s, z1), 0.4, iron)
+        mb.box(-r1 - 0.2, r1 + 0.2, -r1 - 0.2, r1 + 0.2, z1 - 0.3, z1 + 0.3, iron)
+    mb.box(-2.4, 2.4, -2.4, 2.4, 122.0, 126.0, iron)                   # the top cabin
+    mb.box(-2.9, 2.9, -2.9, 2.9, 126.0, 126.6, "lead")
+    revolve(mb, 0.0, 0.0, [(1.4, 126.6, "lamp"), (1.1, 130.0, "lamp"), (0.3, 131.5, "lamp")], 8)
+    mb.box(-0.15, 0.15, -0.15, 0.15, 131.5, 139.0, "metal")
+    beacon(mb, 0.0, 0.0, 139.0)
+    return mb, (w, d, 139.7, 0.0)
+
+
+def clock_face(mb, face_out, at, z, r, c=0.0):
+    """A round white dial with dark hands on a wall facing (0, 1), (0, -1), (1, 0) or (-1, 0);
+    c: where its centre is along the wall."""
+    ring = [(r * math.cos(2 * math.pi * k / 16), r * math.sin(2 * math.pi * k / 16)) for k in range(16)]
+    ox, oy = face_out
+    if oy != 0:
+        y0, y1 = sorted((at, at + oy * 0.25))
+        mb.extrude_y([(c + a, z + b) for a, b in ring], y0, y1, "frame")
+        y0, y1 = sorted((at + oy * 0.25, at + oy * 0.33))
+        mb.box(c - 0.15, c + 0.15, y0, y1, z, z + r * 0.82, "metal")
+        mb.box(c - 0.15, c + r * 0.55, y0, y1, z - 0.15, z + 0.15, "metal")
+    else:
+        x0, x1 = sorted((at, at + ox * 0.25))
+        mb.extrude_x([(c + a, z + b) for a, b in ring], x0, x1, "frame")
+        x0, x1 = sorted((at + ox * 0.25, at + ox * 0.33))
+        mb.box(x0, x1, c - 0.15, c + 0.15, z, z + r * 0.82, "metal")
+        mb.box(x0, x1, c - 0.15, c + r * 0.55, z - 0.15, z + 0.15, "metal")
+
+
+def big_ben():
+    # The clock tower: a ribbed stone shaft, four dials, the belfry, and a steep
+    # slate roof with a lantern and spire. A stretch of the palace beside it.
+    w, d = 36.0, 16.0
+    mb = Builder()
+    tx = -10.0                                 # the tower's centre
+    h = 6.0                                    # half its width
+    mb.box(tx - h - 0.5, tx + h + 0.5, -h - 0.5, h + 0.5, -0.3, 2.0, "stone")
+    mb.box(tx - h, tx + h, -h, h, 2.0, 55.0, "stone")
+    for k in range(5):                         # ribs and tall slit windows on each side
+        a = -4.8 + k * 2.4
+        for y in (-h, h):
+            mb.box(tx + a - 0.35, tx + a + 0.35, y - 0.3, y + 0.3, 2.0, 55.0, "stone")
+        for x in (tx - h, tx + h):
+            mb.box(x - 0.3, x + 0.3, a - 0.35, a + 0.35, 2.0, 55.0, "stone")
+    for k in range(4):
+        a = -3.6 + k * 2.4
+        for z in range(6, 52, 7):
+            for y in (-h - 0.05, h + 0.05):
+                mb.box(tx + a - 0.45, tx + a + 0.45, y - 0.05, y + 0.05, z, z + 4.6, "glass")
+            for x in (tx - h - 0.05, tx + h + 0.05):
+                mb.box(x - 0.05, x + 0.05, a - 0.45, a + 0.45, z, z + 4.6, "glass")
+    mb.box(tx - h - 0.7, tx + h + 0.7, -h - 0.7, h + 0.7, 55.0, 56.2, "stone")   # the clock stage
+    mb.box(tx - h - 0.4, tx + h + 0.4, -h - 0.4, h + 0.4, 56.2, 68.0, "stone")
+    clock_face(mb, (0, 1), h + 0.4, 62.0, 4.4, tx)
+    clock_face(mb, (0, -1), -h - 0.4, 62.0, 4.4, tx)
+    clock_face(mb, (1, 0), tx + h + 0.4, 62.0, 4.4)
+    clock_face(mb, (-1, 0), tx - h - 0.4, 62.0, 4.4)
+    mb.box(tx - h - 0.9, tx + h + 0.9, -h - 0.9, h + 0.9, 68.0, 69.2, "stone")
+    mb.box(tx - h + 0.4, tx + h - 0.4, -h + 0.4, h - 0.4, 69.2, 75.0, "stone")   # the belfry
+    for k in range(4):
+        a = -3.6 + k * 2.4
+        for y in (-h + 0.35, h - 0.35):
+            mb.box(tx + a - 0.5, tx + a + 0.5, y - 0.06, y + 0.06, 69.8, 74.2, "metal")
+        for x in (tx - h + 0.35, tx + h - 0.35):
+            mb.box(x - 0.06, x + 0.06, a - 0.5, a + 0.5, 69.8, 74.2, "metal")
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            pyramid(mb, tx + sx * (h - 0.2), sy * (h - 0.2), 0.8, 68.0, 78.0, "stone")   # pinnacles
+    frustum(mb, tx, 0.0, h - 0.2, h - 0.2, 3.2, 3.2, 75.0, 84.0, "roof")
+    mb.box(tx - 3.0, tx + 3.0, -3.0, 3.0, 84.0, 87.0, "lamp")                      # the lantern
+    pyramid(mb, tx, 0.0, 3.3, 87.0, 95.0, "roof")
+    mb.box(tx - 0.12, tx + 0.12, -0.12, 0.12, 95.0, 98.0, "lamp")
+    # The palace wing: stone, tall windows, a slate roof with pinnacles.
+    x0, x1 = tx + h, w / 2
+    mb.box(x0, x1, -6.5, 6.5, -0.3, 15.0, "stone")
+    n = 9
+    for k in range(n):
+        a = x0 + 1.4 + k * (x1 - x0 - 2.8) / (n - 1)
+        for y in (-6.5, 6.5):
+            mb.box(a - 0.55, a + 0.55, y - 0.06, y + 0.06, 2.0, 6.5, "glass")
+            mb.box(a - 0.55, a + 0.55, y - 0.06, y + 0.06, 8.5, 13.0, "glass")
+        if k % 2 == 0:
+            for y in (-6.5, 6.5):
+                pyramid(mb, a + 1.1, y, 0.45, 15.0, 19.5, "stone")
+    mb.box(x0, x1, -6.9, 6.9, 15.0, 15.8, "stone")
+    mb.extrude_x([(-6.3, 15.8), (6.3, 15.8), (0.0, 21.0)], x0, x1 - 0.3, "roof")
+    return mb, (w, d, 98.0, 0.0)
+
+
+def empire_state():
+    # The art deco skyscraper: a wide base, setbacks, a long shaft with window
+    # strips, the stepped crown and its mast.
+    w, d = 40.0, 28.0
+    mb = Builder()
+    tiers = [(20.0, 14.0, 0.0, 14.0), (15.5, 11.0, 14.0, 26.0), (13.0, 9.5, 26.0, 40.0),
+             (11.0, 8.2, 40.0, 138.0), (9.0, 6.8, 138.0, 148.0), (7.0, 5.4, 148.0, 156.0)]
+    for hx, hy, z0, z1 in tiers:
+        mb.box(-hx, hx, -hy, hy, z0 - (0.3 if z0 == 0 else 0), z1, "stone")
+        nx = int(hx * 2 / 2.6)
+        ny = int(hy * 2 / 2.6)
+        for k in range(nx):
+            a = -hx + (k + 0.5) * hx * 2 / nx
+            for y in (-hy - 0.06, hy + 0.06):
+                mb.box(a - 0.5, a + 0.5, y - 0.06, y + 0.06, z0 + (4.5 if z0 == 0 else 0.8), z1 - 1.0, "office")
+        for k in range(ny):
+            a = -hy + (k + 0.5) * hy * 2 / ny
+            for x in (-hx - 0.06, hx + 0.06):
+                mb.box(x - 0.06, x + 0.06, a - 0.5, a + 0.5, z0 + (4.5 if z0 == 0 else 0.8), z1 - 1.0, "office")
+    for y in (-14.06, 14.06):                              # entrances
+        mb.box(-3.0, 3.0, y - 0.1, y + 0.1, 0.0, 4.2, "glass")
+    # Wings up the long faces of the shaft, as the real one has.
+    for x in (-11.0, 11.0):
+        mb.box(x - 1.6, x + 1.6, -5.4, 5.4, 40.0, 128.0, "stone")
+    mb.box(-5.0, 5.0, -4.2, 4.2, 156.0, 163.0, "lamp")     # the crown, floodlit
+    mb.box(-3.6, 3.6, -3.2, 3.2, 163.0, 168.0, "lamp")
+    revolve(mb, 0.0, 0.0, [(2.6, 168.0, "lead"), (2.2, 176.0, "lead"), (1.2, 180.0, "lead"), (0.5, 182.0, "lead")], 10)
+    mb.box(-0.2, 0.2, -0.2, 0.2, 182.0, 196.0, "metal")
+    beacon(mb, 0.0, 0.0, 196.0)
+    return mb, (w, d, 196.7, 0.0)
+
+
+def liberty():
+    # The statue on its pedestal on a star-shaped fort: robed figure, crown,
+    # tablet, and the torch held high (all in the second colour, weathered copper).
+    w = d = 34.0
+    mb = Builder()
+    star = []
+    for k in range(22):
+        a = 2 * math.pi * k / 22
+        r = 16.5 if k % 2 == 0 else 11.5
+        star.append((r * math.cos(a), r * math.sin(a)))
+    mb.prism(star, -0.3, 4.0, "stone")
+    mb.box(-9.5, 9.5, -9.5, 9.5, 4.0, 8.5, "stone")
+    frustum(mb, 0.0, 0.0, 6.6, 6.6, 5.4, 5.4, 8.5, 12.0, "stone")
+    frustum(mb, 0.0, 0.0, 5.2, 5.2, 4.3, 4.3, 12.0, 34.0, "stone")
+    for turn in range(4):                                     # the pedestal's loggia
+        c, s = (1, 0, -1, 0)[turn], (0, 1, 0, -1)[turn]
+        f = Face((4.75 * c, 4.75 * s, 0), (-s, c, 0), (c, s, 0))
+        f.slab(mb, -2.6, 2.6, 22.0, 29.0, -0.3, 0.12, "metal")
+        for a in (-1.7, 0.0, 1.7):
+            f.slab(mb, a - 0.28, a + 0.28, 22.0, 29.0, 0.05, 0.4, "stone")
+    mb.box(-5.2, 5.2, -5.2, 5.2, 34.0, 35.4, "stone")
+    c = "accent"
+    revolve(mb, 0.0, 0.0, [(3.3, 35.4, c), (3.0, 44.0, c), (2.5, 53.0, c), (2.3, 60.0, c), (2.6, 64.0, c),
+                           (1.2, 66.0, c), (1.0, 67.0, c), (1.6, 68.6, c), (1.7, 70.4, c), (1.2, 72.0, c),
+                           (0.3, 72.6, c)], 12)
+    for k in range(7):                                        # the crown's rays
+        a = math.pi * (0.1 + 0.8 * k / 6)
+        beam(mb, (1.4 * math.cos(a), 0.5, 71.4), (3.4 * math.cos(a), 0.9, 71.4 + 2.6 * math.sin(a)), 0.35, c)
+    beam(mb, (-2.2, 0.0, 63.5), (-4.0, 0.6, 72.0), 1.5, c)   # the raised arm...
+    beam(mb, (-4.0, 0.6, 72.0), (-4.3, 0.8, 80.5), 1.2, c)
+    revolve(mb, -4.3, 0.8, [(0.5, 80.5, c), (1.3, 81.6, c), (1.3, 82.0, c), (0.5, 82.2, c)], 8)
+    revolve(mb, -4.3, 0.8, [(0.7, 82.2, "lamp"), (0.9, 83.4, "lamp"), (0.2, 85.6, "lamp")], 8)   # ...and its torch
+    beam(mb, (2.3, 0.0, 62.5), (3.0, 1.6, 56.5), 1.4, c)     # the other arm, holding the tablet
+    mb.hexa([(2.2, 1.2, 55.0), (4.0, 1.2, 55.0), (4.0, 2.0, 55.4), (2.2, 2.0, 55.4),
+             (2.0, 0.6, 60.0), (3.8, 0.6, 60.0), (3.8, 1.4, 60.4), (2.0, 1.4, 60.4)], c)
+    return mb, (w, d, 85.6, 0.0)
+
+
+def sail(mb, x_back, y, length, height, half, facing=1, mat="frame", glass=True):
+    """A shell roof: a ridge rising in a curve from the ground at its back to its
+    mouth, with curved sides down to the podium, and glass across the mouth."""
+    n = 7
+    ridge, left, right = [], [], []
+    for k in range(n + 1):
+        t = k / n
+        x = x_back + facing * length * t
+        z = height * math.sin(t * math.pi / 2) ** 0.8
+        hw = half * (t ** 0.75)
+        ridge.append((x + facing * 0.12 * z, y, z))
+        left.append((x, y - hw, 0.0))
+        right.append((x, y + hw, 0.0))
+    base = len(mb.verts)
+    mb.verts.extend(ridge + left + right)
+    for k in range(n):
+        r0, r1 = base + k, base + k + 1
+        l0, l1 = base + n + 1 + k, base + n + 2 + k
+        g0, g1 = base + 2 * n + 2 + k, base + 2 * n + 3 + k
+        for face in ([r0, r1, l1, l0], [r1, r0, g0, g1]):
+            mb.faces.append(face)
+            mb.mats.append(MAT_INDEX[mat])
+    if glass:
+        mb.faces.append([base + n, base + 3 * n + 2, base + 2 * n + 1])
+        mb.mats.append(MAT_INDEX["glass"])
+
+
+def opera_house():
+    # White shells in two rows on a stone podium by the water, with broad steps.
+    w, d = 46.0, 38.0
+    mb = Builder()
+    mb.box(-23.0, 23.0, -19.0, 19.0, -0.3, 3.4, "stone")
+    for k in range(5):                                  # broad steps down to the front
+        mb.box(-13.0, 13.0, 19.0 + k * 0.5, 19.5 + k * 0.5, 3.4 - (k + 1) * 0.68, 3.4 - k * 0.68, "stone")
+    shells = Builder()
+    for y, scale in ((-8.5, 1.0), (8.0, 0.86)):
+        sail(shells, -4.0, y, 17.0 * scale, 21.0 * scale, 7.6 * scale)
+        sail(shells, -11.0, y, 13.0 * scale, 16.0 * scale, 6.4 * scale)
+        sail(shells, -16.5, y, 9.0 * scale, 11.0 * scale, 5.0 * scale)
+        sail(shells, -8.0, y, 11.0 * scale, 12.5 * scale, 5.6 * scale, facing=-1)
+    sail(shells, 14.0, 12.0, 7.0, 8.0, 3.8, facing=-1)   # the small restaurant shells
+    sail(shells, 15.0, 12.0, 5.5, 6.0, 3.2)
+    base = len(mb.verts)
+    mb.verts.extend((x, y, z + 3.4) for x, y, z in shells.verts)
+    for f, m in zip(shells.faces, shells.mats):
+        mb.faces.append([base + k for k in f])
+        mb.faces.append([base + k for k in f][::-1])     # (both sides, so the shells are solid from any angle)
+        mb.mats.extend([m, m])
+    return mb, (w, d, 24.4, 0.0)
+
+
+def onion_dome(mb, x, y, r, z0, mat="render", finial=True):
+    revolve(mb, x, y, [(r * 0.95, z0, mat), (r * 1.08, z0 + r * 0.45, mat), (r * 1.02, z0 + r * 0.95, mat),
+                       (r * 0.78, z0 + r * 1.4, mat), (r * 0.4, z0 + r * 1.78, mat), (r * 0.06, z0 + r * 2.1, mat)], 16)
+    if finial:
+        mb.box(x - 0.1, x + 0.1, y - 0.1, y + 0.1, z0 + r * 2.1, z0 + r * 2.1 + r * 0.5, "lamp")
+
+
+def pointed_arch(a, z0, w, h):
+    """The outline of a pointed arch as [(across, z), ...]."""
+    return [(a - w / 2, z0), (a + w / 2, z0), (a + w / 2, z0 + h * 0.6), (a + w * 0.3, z0 + h * 0.85),
+            (a, z0 + h), (a - w * 0.3, z0 + h * 0.85), (a - w / 2, z0 + h * 0.6)]
+
+
+def taj_mahal():
+    # White marble on a wide plinth: a square tomb with cut corners and a great
+    # arched portal on every side, the onion dome with four small ones round it,
+    # and a minaret at each corner of the plinth.
+    w = d = 46.0
+    mb = Builder()
+    mb.box(-23.0, 23.0, -23.0, 23.0, -0.3, 2.6, "render")
+    h, cut = 11.5, 3.6
+    plan = [(-h + cut, -h), (h - cut, -h), (h, -h + cut), (h, h - cut), (h - cut, h), (-h + cut, h),
+            (-h, h - cut), (-h, -h + cut)]
+    mb.prism(plan, 2.6, 17.0, "render")
+    mb.prism([(x * 1.02, y * 1.02) for x, y in plan], 17.0, 17.8, "render")
+    for turn in range(4):
+        c, s = (1, 0, -1, 0)[turn], (0, 1, 0, -1)[turn]
+        if s != 0:
+            y0, y1 = sorted((s * h, s * (h + 0.9)))
+            mb.box(-4.6, 4.6, y0, y1, 2.6, 19.6, "render")                       # the portal's frame
+            y0, y1 = sorted((s * (h + 0.9), s * (h + 1.0)))
+            mb.extrude_y(pointed_arch(0.0, 2.6, 6.4, 13.5), y0, y1, "metal")
+            for a in (-7.4, 7.4):
+                for z in (3.4, 10.4):
+                    mb.extrude_y(pointed_arch(a, z, 2.6, 5.4), min(s * h, s * (h + 0.1)), max(s * h, s * (h + 0.1)), "metal")
+        else:
+            x0, x1 = sorted((c * h, c * (h + 0.9)))
+            mb.box(x0, x1, -4.6, 4.6, 2.6, 19.6, "render")
+            x0, x1 = sorted((c * (h + 0.9), c * (h + 1.0)))
+            mb.extrude_x(pointed_arch(0.0, 2.6, 6.4, 13.5), x0, x1, "metal")
+            for a in (-7.4, 7.4):
+                for z in (3.4, 10.4):
+                    mb.extrude_x(pointed_arch(a, z, 2.6, 5.4), min(c * h, c * (h + 0.1)), max(c * h, c * (h + 0.1)), "metal")
+    revolve(mb, 0.0, 0.0, [(6.2, 17.8, "render"), (6.2, 22.5, "render")], 16)     # the drum
+    onion_dome(mb, 0.0, 0.0, 6.4, 22.5)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            cx, cy = sx * 7.6, sy * 7.6
+            for k in range(6):                                                    # a small domed kiosk
+                a = 2 * math.pi * k / 6
+                mb.box(cx + 1.7 * math.cos(a) - 0.18, cx + 1.7 * math.cos(a) + 0.18,
+                       cy + 1.7 * math.sin(a) - 0.18, cy + 1.7 * math.sin(a) + 0.18, 17.8, 20.6, "render")
+            revolve(mb, cx, cy, [(2.3, 20.6, "render"), (2.3, 21.0, "render")], 12)
+            onion_dome(mb, cx, cy, 2.0, 21.0)
+            mx, my = sx * 20.8, sy * 20.8                                         # a minaret
+            revolve(mb, mx, my, [(1.5, 2.6, "render"), (1.15, 28.0, "render")], 12)
+            for z in (11.0, 19.5, 28.0):
+                revolve(mb, mx, my, [(1.9, z, "render"), (1.9, z + 0.5, "render")], 12)
+            for k in range(6):
+                a = 2 * math.pi * k / 6
+                mb.box(mx + 1.2 * math.cos(a) - 0.14, mx + 1.2 * math.cos(a) + 0.14,
+                       my + 1.2 * math.sin(a) - 0.14, my + 1.2 * math.sin(a) + 0.14, 28.5, 30.6, "render")
+            revolve(mb, mx, my, [(1.6, 30.6, "render"), (1.6, 30.9, "render")], 12)
+            onion_dome(mb, mx, my, 1.35, 30.9)
+    return mb, (w, d, 39.2, 0.0)
+
+
+def ellipse_ring(mb, a0, b0, a1, b1, z0, z1, mat, n, k0=0, k1=None):
+    """Part of a ring between two ellipses (outer a0 x b0, inner a1 x b1), as n wedges."""
+    k1 = n if k1 is None else k1
+    for k in range(k0, k1):
+        t0, t1 = 2 * math.pi * k / n, 2 * math.pi * (k + 1) / n
+        mb.hexa([(a1 * math.cos(t0), b1 * math.sin(t0), z0), (a0 * math.cos(t0), b0 * math.sin(t0), z0),
+                 (a0 * math.cos(t1), b0 * math.sin(t1), z0), (a1 * math.cos(t1), b1 * math.sin(t1), z0),
+                 (a1 * math.cos(t0), b1 * math.sin(t0), z1), (a0 * math.cos(t0), b0 * math.sin(t0), z1),
+                 (a0 * math.cos(t1), b0 * math.sin(t1), z1), (a1 * math.cos(t1), b1 * math.sin(t1), z1)], mat)
+
+
+def colosseum():
+    # The oval amphitheatre: three tiers of arches and an attic, the outer wall
+    # fallen away round half of it, the seating stepping down to the arena.
+    w, d = 46.0, 38.0
+    mb = Builder()
+    n = 48
+    a, b = 22.6, 18.6
+    ellipse_ring(mb, a, b, a - 2.4, b - 2.4, -0.3, 19.0, "stone", n, 0, 26)         # the full-height outer wall
+    ellipse_ring(mb, a - 0.2, b - 0.2, a - 2.4, b - 2.4, 19.0, 19.6, "stone", n, 0, 26)
+    ellipse_ring(mb, a - 2.4, b - 2.4, a - 5.0, b - 5.0, -0.3, 13.4, "stone", n)    # the inner wall, all the way round
+    for k in range(n):
+        t = 2 * math.pi * (k + 0.5) / n
+        outer = k < 26
+        ra, rb = (a, b) if outer else (a - 2.4, b - 2.4)
+        px, py = ra * math.cos(t), rb * math.sin(t)
+        nx, ny = math.cos(t) / ra, math.sin(t) / rb
+        ln = math.hypot(nx, ny)
+        f = Face((px, py, 0), (-ny / ln, nx / ln, 0), (nx / ln, ny / ln, 0))
+        half = math.hypot(ra * math.sin(t), rb * math.cos(t)) * math.pi / n * 0.55
+        for tier in range(3 if outer else 2):
+            z = 0.8 + tier * 4.6 if outer else 0.6 + tier * 6.2
+            arch_h = 3.4 if outer else 4.6
+            f.slab(mb, -half, half, z, z + arch_h * 0.7, -0.4, 0.06, "metal")
+            f.slab(mb, -half * 0.6, half * 0.6, z + arch_h * 0.7, z + arch_h, -0.4, 0.06, "metal")
+        if outer and k % 2 == 0:
+            f.slab(mb, -0.4, 0.4, 15.2, 17.2, -0.3, 0.06, "metal")                   # attic windows
+    for tier in range(1, 4):                                                        # string courses
+        z = 0.2 + tier * 4.6
+        ellipse_ring(mb, a + 0.25, b + 0.25, a - 0.2, b - 0.2, z, z + 0.45, "stone", n, 0, 26)
+    steps = 6                                                                       # the seating
+    for k in range(steps):
+        r0 = 5.0 + k * 1.5
+        ellipse_ring(mb, a - r0, b - r0, a - r0 - 1.5, b - r0 - 1.5, -0.3, 11.5 - k * 1.8, "stone", n)
+    mb.prism([((a - 14.0) * math.cos(2 * math.pi * k / n), (b - 14.0) * math.sin(2 * math.pi * k / n))
+              for k in range(n)], -0.3, 0.7, "accent")                              # the arena's sand
+    return mb, (w, d, 19.6, 0.0)
+
+
+def great_pyramid():
+    # The great pyramid with two small ones at its foot, in sandy stone, its
+    # capstone catching the light.
+    w = d = 46.0
+    mb = Builder()
+    x, y, half, top = -2.5, -2.5, 19.5, 29.0
+    courses = 14
+    for k in range(courses):
+        t0, t1 = k / courses, (k + 1) / courses
+        frustum(mb, x, y, half * (1 - t0), half * (1 - t0), half * (1 - t1) + 0.25, half * (1 - t1) + 0.25,
+                top * t0 - (0.3 if k == 0 else 0), top * t1, "stone")
+    pyramid(mb, x, y, 0.9, top * (courses - 0.6) / courses, top + 0.8, "lamp")
+    for px, py, ph in ((18.5, 17.5, 4.2), (18.5, 7.5, 3.4)):
+        pyramid(mb, px, py, ph, -0.3, ph * 1.35, "stone")
+    mb.box(-23.0, -2.5, 17.0, 19.0, -0.3, 0.5, "stone")                             # the causeway
+    return mb, (w, d, 29.8, 0.0)
+
 
 MODELS = {
     "villa": villa, "villa_b": lambda: villa("b"), "villa_c": lambda: villa("c"),
@@ -1587,6 +1981,8 @@ MODELS = {
     "crown_plant": crown_plant, "crown_deco": crown_deco, "crown_spire": crown_spire, "crown_slope": crown_slope,
     "coal_plant": coal_plant, "gas_plant": gas_plant, "nuclear_plant": nuclear_plant,
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
+    "eiffel": eiffel, "big_ben": big_ben, "empire_state": empire_state, "liberty": liberty,
+    "opera_house": opera_house, "taj_mahal": taj_mahal, "colosseum": colosseum, "great_pyramid": great_pyramid,
 }
 for _n in range(2, 8):
     MODELS["classical%d" % _n] = (lambda n: lambda: classical(n, "plain"))(_n)

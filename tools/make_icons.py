@@ -291,6 +291,7 @@ rail = {
     'services': line("<path d='M12 3 L19 6 V11.5 C19 16 16 19.5 12 21 C8 19.5 5 16 5 11.5 V6 Z'/><path d='M12 8.5 V15.5'/><path d='M8.5 12 H15.5'/>"),
     'leisure': line("<path d='M12 21 V13'/><circle cx='12' cy='9' r='5'/><path d='M8 21 H16'/>"),
     'transport': line("<rect x='5' y='3.5' width='14' height='14' rx='3'/><path d='M5 11 H19'/><circle cx='9' cy='14.5' r='0.6'/><circle cx='15' cy='14.5' r='0.6'/><path d='M8 17.5 L6.5 20.5'/><path d='M16 17.5 L17.5 20.5'/>"),
+    'landmarks': line("<path d='M12 3 L9.5 14 H14.5 Z'/><path d='M9.5 14 L6 21'/><path d='M14.5 14 L18 21'/><path d='M8 18 H16'/><path d='M10.4 10 H13.6'/>"),
     'districts': line("<path d='M12 3.5 L20.5 8 L12 12.5 L3.5 8 Z'/><path d='M3.5 12 L12 16.5 L20.5 12'/><path d='M3.5 16 L12 20.5 L20.5 16'/>"),
     'build': line("<path d='M14.5 4 L20 9.5 L17.5 12 L12 6.5 Z'/><path d='M13.5 9.5 L5 18 A1.8 1.8 0 0 0 7.5 20.5 L16 12'/>"),
     'bulldoze': line("<path d='M4 18 H15'/><rect x='5' y='11' width='9' height='5' rx='1'/><path d='M7 11 V7.5 H11.5 L13 11'/><path d='M15 15 L20 12 V19 H15'/>"),

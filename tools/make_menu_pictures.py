@@ -867,6 +867,21 @@ def airport():
         box(along, 26.6, 0.3, 2.3, 2.8, tail, 2.8)
 
 
+def _landmark(name, wall, second, back, w, d, kind="plain", colour=PAVEMENT, sea=False):
+    ground(colour if kind == "plain" else "grass", sea=sea)
+    model(name, 0.0, back, w, d, None, wall, second)
+
+
+def big_ben(): _landmark("big_ben", (0.74, 0.62, 0.42), (0.20, 0.22, 0.25), 16.0, 36.0, 16.0)
+def colosseum(): _landmark("colosseum", (0.80, 0.72, 0.58), (0.78, 0.68, 0.48), 6.0, 46.0, 38.0)
+def great_pyramid(): _landmark("great_pyramid", (0.82, 0.72, 0.50), (0.78, 0.68, 0.48), 2.0, 46.0, 46.0, colour=(0.74, 0.66, 0.48))
+def liberty(): _landmark("liberty", (0.70, 0.66, 0.58), (0.42, 0.68, 0.60), 8.0, 34.0, 34.0, kind="grass")
+def taj_mahal(): _landmark("taj_mahal", (0.95, 0.94, 0.91), (0.95, 0.94, 0.91), 2.0, 46.0, 46.0, kind="grass")
+def opera_house(): _landmark("opera_house", (0.70, 0.56, 0.48), (0.95, 0.94, 0.91), 6.0, 46.0, 38.0)
+def eiffel(): _landmark("eiffel", (0.44, 0.35, 0.27), (0.30, 0.25, 0.20), 3.0, 44.0, 44.0, kind="grass")
+def empire_state(): _landmark("empire_state", (0.74, 0.72, 0.67), (0.30, 0.32, 0.35), 10.0, 40.0, 28.0)
+
+
 def _district(colour, tall):
     ground()
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
@@ -902,11 +917,14 @@ ITEMS = {
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,
     "police": police, "police_office": police_office, "fire_small": fire_small, "clinic": clinic, "fire": fire, "school": school, "hospital": hospital, "golf": golf, "library": library,
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
-    "station": station, "harbour": harbour, "airport": airport, "cbd": cbd, "conservation": conservation, "normal": normal,
+    "station": station, "harbour": harbour, "airport": airport,
+    "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
+    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,
-        "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6}
+        "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6,
+        "big_ben": 2.3, "liberty": 2.1, "eiffel": 2.9, "empire_state": 4.0, "taj_mahal": 1.2}
 
 
 # ------------------------------------------------------------------ render
