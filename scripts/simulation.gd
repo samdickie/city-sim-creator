@@ -10,7 +10,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND }
+	WOODLAND, OFFICES }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -20,14 +20,14 @@ const BUILDING_KEYS := {
 	Tile.TOWN_HALL: "town_hall", Tile.BUS_DEPOT: "bus_depot", Tile.STATION: "station",
 	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland",
 }
-const LAST_TILE := Tile.WOODLAND   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.OFFICES   # (new tiles go on the end, so saved tile numbers never change)
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
 	"taxes": ["taxes too high for the services", "lower the tax rate, or build services near homes"],
 	"services": ["not enough police, fire, schools or hospitals", "build services near homes, or fund them more"],
 	"rubbish": ["rubbish piling up", "build a landfill or recycling centre"],
-	"jobs": ["not enough jobs", "zone more shops or industry"],
+	"jobs": ["not enough jobs", "zone more shops, offices or industry"],
 	"housing": ["homes too dear (housing shortage)", "zone more homes, or zone them denser"],
 	"power": ["homes without power", "build another power plant, or link the homes to one"],
 	"water": ["homes without water", "build a water pump or tower"],
@@ -60,6 +60,7 @@ var debt_peak := 0                    # the most owed since the balance was last
 var population := 0
 var shop_jobs := 0
 var industry_jobs := 0
+var office_jobs := 0
 var road_tiles := 0
 var plants := 0                       # anything that makes power
 var park_tiles := 0
@@ -81,7 +82,7 @@ var happiness_parts := {}
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
 # Negative means too many already.
-var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
+var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
 var last_income := 0
 var last_upkeep := 0
 var last_loan := 0                    # loan payment last month (interest and repayment together)
@@ -94,7 +95,7 @@ var run_down_count := 0               # built plots in decline long enough to be
 var land_value := PackedFloat32Array() # 0 (worst) to 1 (best) for every tile
 # How short of space each zone type is: 0 = plenty of low-rise room left,
 # 1 = demand well beyond what low-rise plots can take (so plots build upwards).
-var shortage := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
+var shortage := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
 var average_home_price := 0
 var _sea_near := PackedFloat32Array() # 1 by the sea, fading to 0 inland
 var pollution := PackedFloat32Array() # 0 (clean air) to 1 (heavy) for every tile; worked out with land value
@@ -190,7 +191,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	_coverage_dirty = true
 	_traffic_dirty = true
 	layout_version += 1
-	shortage = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
+	shortage = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
 	_rng.randomize()
 	recount()
 
@@ -296,6 +297,8 @@ func abandoned_reason(i: int) -> String:
 				return "waiting for more customers (the town needs more residents)"
 			Tile.INDUSTRY:
 				return "waiting for more workers (the town needs more residents)"
+			Tile.OFFICES:
+				return "waiting for more office workers (a bigger town with schools near homes)"
 	return "it should be done up soon"
 
 
@@ -355,6 +358,8 @@ func _zone_check(i: int) -> Array:
 				return [Growth.WAITING, "waiting, the town needs more residents first"]
 			Tile.INDUSTRY:
 				return [Growth.WAITING, "waiting, the town needs more workers first"]
+			Tile.OFFICES:
+				return [Growth.WAITING, _office_wait()]
 	if next_stage >= 7:
 		var sky_why := _skyscraper_problem(i)
 		if sky_why != "":
@@ -436,6 +441,8 @@ func units_at_stage(t: int, s: int) -> int:
 			n = Settings.SHOP_JOBS_AT_STAGE[s]
 		Tile.INDUSTRY:
 			n = Settings.INDUSTRY_JOBS_AT_STAGE[s]
+		Tile.OFFICES:
+			n = Settings.OFFICE_JOBS_AT_STAGE[s]
 	return n
 
 
@@ -506,7 +513,7 @@ func _grow() -> void:
 			decline[i] = maxi(decline[i] - Settings.DECLINE_RECOVERY, 0)
 
 	# How much more the plots that can grow freely (road + power) could still take.
-	var room: Dictionary = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0}
+	var room: Dictionary = {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
 	for i in zones:
 		if not _connected(i) or powered[i] == 0 or abandoned[i] == 1:
 			continue
@@ -516,7 +523,7 @@ func _grow() -> void:
 		if extra > 0:
 			room[t] = float(room[t]) + extra
 	# Short of space when demand is more than that room can take.
-	for t: int in [Tile.HOMES, Tile.SHOPS, Tile.INDUSTRY]:
+	for t: int in [Tile.HOMES, Tile.SHOPS, Tile.INDUSTRY, Tile.OFFICES]:
 		var unit: float = float(_capacity_per_level(t))
 		var gap: float = float(wanted[t]) - float(room[t])
 		shortage[t] = clampf(gap / (unit * 20.0), 0.0, 1.0)
@@ -635,6 +642,8 @@ func _decline_reason(i: int, want: float) -> String:
 				return "too few customers for all the shops"
 			Tile.INDUSTRY:
 				return "too few workers for all the industry"
+			Tile.OFFICES:
+				return "too few office workers for all the offices"
 	return ""
 
 
@@ -644,7 +653,7 @@ func _collect_taxes() -> void:
 	var taxable := 0.0
 	for i in w * h:
 		if is_zone(tiles[i]) and levels[i] > 0:
-			taxable += units(i) * (0.6 + 0.8 * land_value[i])
+			taxable += units(i) * (0.6 + 0.8 * land_value[i]) * (Settings.OFFICE_TAX if tiles[i] == Tile.OFFICES else 1.0)
 	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
 	# Every running cost is scaled by the difficulty (x1 on Normal).
 	last_upkeep = roundi((road_tiles * Settings.ROAD_UPKEEP + park_tiles * Settings.PARK_UPKEEP
@@ -783,6 +792,7 @@ func recount() -> void:
 	population = 0
 	shop_jobs = 0
 	industry_jobs = 0
+	office_jobs = 0
 	road_tiles = 0
 	plants = 0
 	park_tiles = 0
@@ -821,6 +831,8 @@ func recount() -> void:
 				shop_jobs += units(i)
 			Tile.INDUSTRY:
 				industry_jobs += units(i)
+			Tile.OFFICES:
+				office_jobs += units(i)
 	_update_power()
 	_update_water()
 	_measure_rubbish()
@@ -838,7 +850,7 @@ func recount() -> void:
 
 
 func is_zone(t: int) -> bool:
-	return t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
+	return t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY or t == Tile.OFFICES
 
 
 func is_service(t: int) -> bool:
@@ -1214,7 +1226,7 @@ func _service_factor(i: int) -> float:
 	var t: int = tiles[i]
 	if t == Tile.HOMES:
 		f *= _pollution_factor(i)
-	if (t == Tile.HOMES or t == Tile.SHOPS) and population >= Settings.POLICE_NEEDED_POP \
+	if (t == Tile.HOMES or t == Tile.SHOPS or t == Tile.OFFICES) and population >= Settings.POLICE_NEEDED_POP \
 			and not covered(Service.POLICE, i):
 		f *= 0.5
 	if t == Tile.HOMES and population >= Settings.HOSPITAL_NEEDED_POP \
@@ -1227,7 +1239,7 @@ func _missing_services(i: int) -> String:
 	# Which services are slowing this plot down, in words ("" = none).
 	var t: int = tiles[i]
 	var words: Array[String] = []
-	if (t == Tile.HOMES or t == Tile.SHOPS) and population >= Settings.POLICE_NEEDED_POP \
+	if (t == Tile.HOMES or t == Tile.SHOPS or t == Tile.OFFICES) and population >= Settings.POLICE_NEEDED_POP \
 			and not covered(Service.POLICE, i):
 		words.append("police station")
 	if t == Tile.HOMES and population >= Settings.HOSPITAL_NEEDED_POP \
@@ -1292,7 +1304,7 @@ func service_matters(s: int, i: int) -> bool:
 		return false
 	match s:
 		Service.POLICE:
-			return t == Tile.HOMES or t == Tile.SHOPS
+			return t == Tile.HOMES or t == Tile.SHOPS or t == Tile.OFFICES
 		Service.FIRE:
 			return true
 	return t == Tile.HOMES
@@ -1489,6 +1501,9 @@ func _update_land_value() -> void:
 					_spread(i, 3, Settings.SHOP_BONUS * stage(i))
 			Tile.INDUSTRY:
 				_spread(i, 4, -Settings.INDUSTRY_PENALTY * maxi(stage(i), 1))
+			Tile.OFFICES:
+				if levels[i] > 0:
+					_spread(i, 3, Settings.OFFICE_BONUS * stage(i))
 			_:
 				if is_building(t):
 					var amount: float = info(t).get("value", 0.0)
@@ -1747,7 +1762,7 @@ func _join_network(n: int, net: int, members: Array[int]) -> void:
 
 
 func jobs() -> int:
-	return shop_jobs + industry_jobs
+	return shop_jobs + industry_jobs + office_jobs
 
 
 func appeal() -> float:
@@ -1933,7 +1948,44 @@ func _update_demand() -> void:
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
 	var b := business_appeal()
 	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, b)
-	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - industry_jobs + trade, industry_jobs, b)
+	# Offices: a share of the workers who aren't in shops (see office_share). Only
+	# offices that are built take workers from industry, so a town with no office
+	# zone runs exactly as before.
+	var office_target := maxf(workers - shop_target, 0.0) * office_share()
+	demand[Tile.OFFICES] = _business_demand(office_target - office_jobs, office_jobs, b)
+	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - office_jobs - industry_jobs + trade,
+		industry_jobs, b)
+
+
+func office_share() -> float:
+	# The share of non-shop workers who want office work: none in a village, up
+	# to OFFICE_SHARE_MAX in a city, and less where homes have no school nearby.
+	var size := clampf(float(population - Settings.OFFICE_START_POP)
+		/ float(Settings.OFFICE_FULL_POP - Settings.OFFICE_START_POP), 0.0, 1.0)
+	return Settings.OFFICE_SHARE_MAX * size * lerpf(1.0 - Settings.OFFICE_SCHOOL_SHARE, 1.0, schooled_share())
+
+
+func schooled_share() -> float:
+	# 0-1: the share of residents with a school nearby.
+	_update_coverage()
+	var people := 0
+	var schooled := 0
+	for i in w * h:
+		if tiles[i] == Tile.HOMES and levels[i] > 0:
+			var n := units(i)
+			people += n
+			if covered(Service.SCHOOL, i):
+				schooled += n
+	return float(schooled) / people if people > 0 else 0.0
+
+
+func _office_wait() -> String:
+	# Why offices aren't wanted yet, in plain English.
+	if population < Settings.OFFICE_START_POP:
+		return "waiting, offices need a town of %d people" % Settings.OFFICE_START_POP
+	if schooled_share() < 0.5:
+		return "waiting, the town needs more office workers first (schools near homes bring them)"
+	return "waiting, the town needs more office workers first (more residents)"
 
 
 func _business_demand(gap: float, jobs_now: int, a: float) -> float:
@@ -2000,6 +2052,8 @@ func demand_bar(t: int) -> float:
 	var size := float(population) * 0.5
 	if t == Tile.SHOPS:
 		size = shop_jobs
+	elif t == Tile.OFFICES:
+		size = office_jobs
 	elif t == Tile.INDUSTRY:
 		size = industry_jobs
 	var scale := float(_capacity_per_level(t)) * 10.0 + size * 0.1
@@ -2133,11 +2187,12 @@ func _update_traffic() -> void:
 	var plot_node := PackedInt32Array()     # every working shop or works plot: its road node...
 	var plot_group := PackedInt32Array()    # ...its group...
 	var plot_shop := PackedFloat32Array()   # ...its shop jobs (customers go by these)...
-	var plot_works := PackedFloat32Array()  # ...and its works jobs
+	var plot_works := PackedFloat32Array()  # ...its works jobs (the harbour's lorries go by these)...
+	var plot_office := PackedFloat32Array() # ...and its office jobs
 	var plot_tile := PackedInt32Array()
 	for i: int in w * h:
 		var t: int = tiles[i]
-		if (t == Tile.SHOPS or t == Tile.INDUSTRY) and _access[i] >= 0 and _connected(i):
+		if (t == Tile.SHOPS or t == Tile.INDUSTRY or t == Tile.OFFICES) and _access[i] >= 0 and _connected(i):
 			var u := units(i)
 			if u > 0:
 				# (One entry per road the plot fronts, sharing its jobs.)
@@ -2147,6 +2202,7 @@ func _update_traffic() -> void:
 					plot_tile.append(i)
 					plot_shop.append(float(u) / ways.size() if t == Tile.SHOPS else 0.0)
 					plot_works.append(float(u) / ways.size() if t == Tile.INDUSTRY else 0.0)
+					plot_office.append(float(u) / ways.size() if t == Tile.OFFICES else 0.0)
 	var size: int = Settings.TRAFFIC_GROUP_TILES
 	var group_of := {}
 	while true:
@@ -2174,7 +2230,7 @@ func _update_traffic() -> void:
 		plot_group[k] = g
 		g_shop[g] += plot_shop[k]
 		g_works[g] += plot_works[k]
-		g_jobs[g] += plot_shop[k] + plot_works[k]
+		g_jobs[g] += plot_shop[k] + plot_works[k] + plot_office[k]
 
 	# --- 2. Flood the roads from each group: steps to it from every road node.
 	var dist := PackedInt32Array()
@@ -2537,7 +2593,7 @@ func from_save(data: Dictionary) -> void:
 		for i in density.size():
 			var old: int = levels[i]
 			density[i] = 1
-			if tiles[i] == Tile.HOMES or tiles[i] == Tile.SHOPS:
+			if tiles[i] == Tile.HOMES or tiles[i] == Tile.SHOPS:   # (offices came long after)
 				if old >= 1 and old <= 2:
 					density[i] = 0                    # villas / small shops: low
 				elif old >= 5:

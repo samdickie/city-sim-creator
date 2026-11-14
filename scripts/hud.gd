@@ -492,9 +492,9 @@ func _build_status() -> void:
 		_meters.append(m)
 	row.add_child(_vline())
 
-	# Demand for homes, shops and industry.
+	# Demand for homes, shops, offices and industry.
 	demand_box = Control.new()
-	demand_box.custom_minimum_size = Vector2(66, 38)
+	demand_box.custom_minimum_size = Vector2(84, 38)
 	demand_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	demand_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	demand_box.draw.connect(_draw_demand)
@@ -1674,7 +1674,7 @@ func _draw_happy_bar() -> void:
 
 
 func _draw_demand() -> void:
-	# Three bars round a zero line (up: wanted, down: too many), labelled H S I.
+	# A bar per zone round a zero line (up: wanted, down: too many), labelled H S O I.
 	if _sim == null:
 		return
 	var size := demand_box.size

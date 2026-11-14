@@ -39,6 +39,7 @@ const REASONS := [
 	["town needs more jobs", "jobs"],
 	["town needs more residents", "residents"],
 	["town needs more workers", "workers"],
+	["needs more office workers", "office_workers"],
 	["railway station or bus depot", "sky_transit"],
 	["waiting for a school", "school"],
 	["land value too low", "land_value"],
@@ -245,11 +246,11 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 	# --- Jobs and workers ---
 	var want_jobs := _n(stuck, "jobs")
 	if want_jobs >= 10 and (sim.demand_for(Simulation.Tile.INDUSTRY) > 0.0
-			or sim.demand_for(Simulation.Tile.SHOPS) > 0.0):
-		_add(out, "jobs", ADVICE, "Homes are waiting for jobs: zone industry or shops",
+			or sim.demand_for(Simulation.Tile.SHOPS) > 0.0 or sim.demand_for(Simulation.Tile.OFFICES) > 0.0):
+		_add(out, "jobs", ADVICE, "Homes are waiting for jobs: zone industry, shops or offices",
 			"People won't move in until there's work. The demand bars show what's wanted.",
 			growth_kind)
-	var want_people := _n(stuck, "residents") + _n(stuck, "workers")
+	var want_people := _n(stuck, "residents") + _n(stuck, "workers") + _n(stuck, "office_workers")
 	if want_people >= 10 and sim.demand_for(Simulation.Tile.HOMES) > 0.0:
 		_add(out, "people", ADVICE, "Businesses are waiting for people: zone more homes",
 			"Shops need residents and industry needs workers before they grow.", growth_kind)

@@ -13,6 +13,7 @@ uniform float street_reach = 18.0;          // how far a plot's front reaches in
 uniform vec3 zone_homes : source_color = vec3(0.86, 0.36, 0.30);
 uniform vec3 zone_shops : source_color = vec3(0.26, 0.58, 0.92);
 uniform vec3 zone_industry : source_color = vec3(0.96, 0.70, 0.15);
+uniform vec3 zone_offices : source_color = vec3(0.10, 0.72, 0.68);
 
 const int K_ROAD = 1;
 const int K_VILLAS = 2;
@@ -182,7 +183,7 @@ vec3 earth(Ctx c, vec2 q) {
 }
 
 vec3 zone_colour(int zone) {
-	return zone == 1 ? zone_homes : (zone == 2 ? zone_shops : zone_industry);
+	return zone == 1 ? zone_homes : (zone == 2 ? zone_shops : (zone == 3 ? zone_industry : zone_offices));
 }
 
 // --- Plot layouts. along: metres along the street from the plot's middle;

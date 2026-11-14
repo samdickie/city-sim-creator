@@ -75,6 +75,16 @@ const ABANDONED_RADIUS := 2             # ...out to this many tiles
 const WORKER_SHARE := 0.5         # share of residents who work
 # Shop and office jobs a town supports per resident (industry employs the rest of the workers).
 const SHOP_JOBS_PER_PERSON := 0.2
+# Offices (their own zone): as a town grows, more of the workers who aren't in
+# shops want office work rather than industry. The share starts at OFFICE_START_POP
+# and reaches OFFICE_SHARE_MAX at OFFICE_FULL_POP; part of it (OFFICE_SCHOOL_SHARE)
+# only counts where homes have a school nearby (offices want schooled workers).
+# Offices only take workers when they're zoned: with none, industry employs them all.
+const OFFICE_START_POP := 800
+const OFFICE_FULL_POP := 12000
+const OFFICE_SHARE_MAX := 0.5
+const OFFICE_SCHOOL_SHARE := 0.5   # this much of the office share depends on school cover
+const OFFICE_TAX := 1.25           # an office job pays this much more tax than other jobs
 const TOWN_PULL := 100            # people who'd like to move to even a brand-new town
 const REGION_GROWTH := 0.04       # plus this share of the population, each month, from the region
 const JOB_PULL := 1.5             # each spare job draws this many residents (each jobless worker deters as many)
@@ -309,6 +319,7 @@ const SEA_BONUS := 0.30           # right by the sea (fades out over SEA_VIEW_TI
 const SEA_VIEW_TILES := 6
 const PARK_BONUS := 0.07          # per park tile within 3 tiles
 const SHOP_BONUS := 0.012         # per level of shops within 3 tiles
+const OFFICE_BONUS := 0.005       # per level of offices within 3 tiles (smart, but less of a draw than shops)
 const INDUSTRY_PENALTY := 0.015   # per level of industry within 4 tiles (its smoke is in Pollution above)
 const BASE_HOME_PRICE := 160000   # £ for a home on average land with no shortage
 const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this much
@@ -316,7 +327,8 @@ const SHORTAGE_PRICE_EFFECT := 0.8 # a severe shortage pushes prices up by this 
 # --- Zoning density ---
 # A plot's building "stage" = its level + the density's head start:
 #   stage 1 villas · 2 two rows of villas / terraces · 3 tenements
-#   stage 4 mansion flats · 5 modern flats · 6 towers   (shops: parades up to an office tower)
+#   stage 4 mansion flats · 5 modern flats · 6 towers   (shops: parades up to big stores and hotels;
+#   offices: small offices up to an office tower)
 # Low density: levels 1-2 (stages 1-2). Medium: levels 1-3 (stages 2-4).
 # High: levels 1-4 (stages 3-6). Industry has one density (stages 1-3).
 const DENSITY_NAMES := ["low", "medium", "high"]
@@ -327,7 +339,9 @@ const FREE_STAGE := 3                     # up to here, plots grow whenever ther
 # Stages 7 and 8 are skyscrapers, only in a CBD district (see below).
 const HOMES_AT_STAGE := [0, 20, 40, 60, 100, 150, 220, 350, 500]
 const SHOP_JOBS_AT_STAGE := [0, 8, 16, 24, 40, 60, 90, 160, 260]
+const OFFICE_JOBS_AT_STAGE := [0, 10, 20, 32, 55, 85, 130, 240, 400]
 const INDUSTRY_JOBS_AT_STAGE := [0, 15, 30, 45]
 # Zoning cost per tile for low / medium / high density.
 const HOMES_COSTS := [40, 60, 100]
 const SHOPS_COSTS := [60, 80, 120]
+const OFFICES_COSTS := [70, 90, 140]

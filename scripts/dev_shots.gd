@@ -32,6 +32,7 @@ const NIGHT := 0.95
 # Minimum plots of each building stage wanted in the shots (stage 1 to 8).
 const WANT_HOMES := [0, 3, 3, 3, 3, 3, 3, 4, 2]
 const WANT_SHOPS := [0, 3, 3, 3, 3, 3, 3, 4, 2]
+const WANT_OFFICES := [0, 3, 3, 3, 3, 3, 3, 3, 1]
 const WANT_INDUSTRY := [0, 3, 3, 3]
 
 # The street grids, [from, to]: streets every third tile, all lined up (so plots
@@ -181,7 +182,10 @@ func _build_town() -> void:
 		["shops_1", Vector2i(53, 46), Vector2i(57, 56)],     # ...and its shop parade
 		["shops_1", Vector2i(59, 52), Vector2i(72, 56)],     # civic quarter (buildings go on top)
 		["homes_2", Vector2i(35, 58), Vector2i(57, 72)],     # CBD: high-density homes...
-		["shops_2", Vector2i(41, 58), Vector2i(51, 69)],     # ...round an office core
+		["shops_2", Vector2i(41, 58), Vector2i(45, 69)],     # ...round big stores...
+		["offices_2", Vector2i(47, 58), Vector2i(51, 69)],   # ...and an office core
+		["offices_1", Vector2i(53, 52), Vector2i(57, 56)],   # office chambers at the foot of the high street
+		["offices_0", Vector2i(71, 58), Vector2i(72, 66)],   # small offices facing the works
 		["homes_0", Vector2i(35, 73), Vector2i(57, 81)],
 		["homes_0", Vector2i(35, 82), Vector2i(57, 95)],     # south suburb by the links
 		["park", Vector2i(35, 58), Vector2i(40, 83)],        # seafront park (there are jobs for fewer homes)
@@ -376,9 +380,9 @@ func _showcase() -> void:
 	# land first, from plots that could legally grow that tall.
 	var values := sim.land_value_map()
 	var taken := {}
-	for t: int in [Simulation.Tile.HOMES, Simulation.Tile.SHOPS, Simulation.Tile.INDUSTRY]:
+	for t: int in [Simulation.Tile.HOMES, Simulation.Tile.SHOPS, Simulation.Tile.INDUSTRY, Simulation.Tile.OFFICES]:
 		var want: Array = WANT_INDUSTRY if t == Simulation.Tile.INDUSTRY else (
-			WANT_HOMES if t == Simulation.Tile.HOMES else WANT_SHOPS)
+			WANT_HOMES if t == Simulation.Tile.HOMES else (WANT_SHOPS if t == Simulation.Tile.SHOPS else WANT_OFFICES))
 		for s: int in range(want.size() - 1, 0, -1):
 			var need: int = want[s]
 			var have := _count_stage(t, s)
@@ -407,7 +411,8 @@ func _showcase() -> void:
 
 
 func _zone_word(t: int) -> String:
-	return {Simulation.Tile.HOMES: "homes", Simulation.Tile.SHOPS: "shops", Simulation.Tile.INDUSTRY: "industry"}[t]
+	return {Simulation.Tile.HOMES: "homes", Simulation.Tile.SHOPS: "shops", Simulation.Tile.INDUSTRY: "industry",
+		Simulation.Tile.OFFICES: "offices"}[t]
 
 
 func _finish_town() -> void:
@@ -629,6 +634,11 @@ func _shot_list() -> Array[Dictionary]:
 		{"name": "29_works", "at": Vector2(80, 70), "yaw": -50.0, "pitch": 34.0, "dist": 330.0},
 		{"name": "30_high_street", "at": Vector2(54, 50), "yaw": -60.0, "pitch": 18.0, "dist": 170.0},
 		{"name": "31_civic_close", "at": Vector2(62, 51), "yaw": -30.0, "pitch": 32.0, "dist": 260.0},
+		# Offices: the CBD's office core, the chambers by the high street, the small
+		# offices by the works, and the Build menu's Zones list with the demand bars.
+		{"name": "60_offices_core", "at": Vector2(49, 63), "yaw": -40.0, "pitch": 26.0, "dist": 520.0},
+		{"name": "61_offices_chambers", "at": Vector2(55, 54), "yaw": -35.0, "pitch": 36.0, "dist": 230.0},
+		{"name": "62_offices_small", "at": Vector2(71, 62), "yaw": -50.0, "pitch": 38.0, "dist": 260.0},
 		{"name": "32_towers_night", "at": Vector2(46, 63), "yaw": -40.0, "pitch": 22.0, "dist": 620.0,
 			"time": NIGHT},
 		{"name": "33_abandoned", "at": Vector2(54, 51), "yaw": -35.0, "pitch": 38.0, "dist": 230.0,

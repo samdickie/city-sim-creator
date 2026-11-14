@@ -400,6 +400,36 @@ def shops_2():
     box(0.0, 28.0, 40.0, 19.0, 9.0, CONCRETE)
 
 
+def offices_0():
+    ground()
+    model("classical2", -12.5, 3.0, 21.0, 13.0, 13.1, BLONDE_SANDSTONE, r=0.3)
+    model("classical2", 12.5, 3.0, 21.0, 13.0, 13.1, HONEY_STONE, r=0.6)
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    slab(0.0, 22.0, 44.0, 26.0, CAR_PARK)
+    for k in range(7):
+        car(-17 + k * 6, 26.0, CAR_PAINT[(k + 1) % 5])
+    for along in (-23.4, 23.4):
+        tree(along, 26.0, 7.0)
+
+
+def offices_1():
+    ground()
+    model("classical4", -12.5, 3.0, 23.0, 18.0, 19.9, HONEY_STONE, r=0.5)
+    modern_block(12.5, 3.0, 23.0, 18.0, 6, (0.80, 0.81, 0.80), glassy=True)
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    slab(0.0, 25.0, 44.0, 23.0, CAR_PARK)
+    for k in range(7):
+        car(-17 + k * 6, 30.0, CAR_PAINT[(k + 3) % 5])
+
+
+def offices_2():
+    ground()
+    modern_block(-12.5, 3.0, 23.0, 18.0, 13, (0.30, 0.36, 0.44), glassy=True)
+    modern_block(12.5, 3.0, 23.0, 18.0, 10, (0.78, 0.80, 0.82), glassy=True)
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    box(0.0, 28.0, 40.0, 19.0, 9.0, CONCRETE)
+
+
 def industry():
     ground(YARD)
     model("shed", 0.0, 6.0, 34.0, 28.0, 10.2, SHED_METAL, (0.44, 0.46, 0.50))
@@ -799,7 +829,7 @@ def normal():
 
 ITEMS = {
     "homes_0": homes_0, "homes_1": homes_1, "homes_2": homes_2, "shops_0": shops_0, "shops_1": shops_1,
-    "shops_2": shops_2, "industry": industry, "road": road, "grid": grid, "bulldoze": bulldoze, "park": park,
+    "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "grid": grid, "bulldoze": bulldoze, "park": park,
     "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,
@@ -809,7 +839,7 @@ ITEMS = {
 }
 TALL = {"coal": 1.9, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,
-        "hospital": 1.1, "shops_2": 1.15}
+        "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6}
 
 
 # ------------------------------------------------------------------ render

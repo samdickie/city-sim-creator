@@ -413,7 +413,7 @@ func _measure(i: int) -> void:
 				continue
 			var k := ny * _w + nx
 			var t: int = tiles[k]
-			if t == Simulation.Tile.HOMES or t == Simulation.Tile.SHOPS or t == Simulation.Tile.INDUSTRY:
+			if sim.is_zone(t):
 				if levels[k] == 0:
 					continue
 				var u := float(sim.units(k))
@@ -421,13 +421,15 @@ func _measure(i: int) -> void:
 					walk += u * 0.25
 				elif t == Simulation.Tile.SHOPS:
 					walk += u * 3.0
+				elif t == Simulation.Tile.OFFICES:
+					walk += u * 0.6
 				else:
 					walk += u * 0.2
 			elif t == Simulation.Tile.PARK or t == Simulation.Tile.GOLF:
 				walk += 6.0
 			elif t == Simulation.Tile.WOODLAND:
 				walk += 2.0             # the odd dog walker (and not a landmark, below)
-			elif sim.is_service(t) or t >= Simulation.Tile.LIBRARY:
+			elif sim.is_service(t) or (t >= Simulation.Tile.LIBRARY and t < Simulation.Tile.WOODLAND):
 				# Schools, hospitals, landmarks, stations: staff and visitors.
 				walk += 30.0
 	if sim.district[i] == 2:

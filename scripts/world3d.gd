@@ -61,7 +61,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND }   # same order as simulation.gd
+	WOODLAND, OFFICES }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -78,6 +78,7 @@ const ZONE_TINTS := {
 	Tile.HOMES: Color(0.86, 0.36, 0.30),
 	Tile.SHOPS: Color(0.26, 0.58, 0.92),
 	Tile.INDUSTRY: Color(0.96, 0.70, 0.15),
+	Tile.OFFICES: Color(0.10, 0.72, 0.68),
 }
 
 # Troon's building materials.
@@ -185,7 +186,7 @@ const INFILL_CAR_PARK := 3
 #   G = bits 0-1 the side facing the street (0 = +y, 1 = -y, 2 = +x, 3 = -x, as
 #       _frontage), bits 3-7 a detail (building stage; park layout)
 #   B = bits 0-3 which neighbours are the same kind (+x, -x, +y, -y); on empty
-#       zoned plots bits 4-5 the zone (1 homes, 2 shops, 3 industry), bits 6-7 density
+#       zoned plots bits 4-5 the zone (1 homes, 2 shops, 3 industry, 0 offices), bits 6-7 density
 #   A = bit 0 abandoned, bit 1 in the CBD, bits 4-7 the sides whose road verge the
 #       plot reaches into (+x, -x, +y, -y; see _street_reach)
 # Keep the kinds and layouts in step with the shader.
@@ -523,6 +524,7 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 	terrain_material.set_shader_parameter("zone_homes", ZONE_TINTS[Tile.HOMES])
 	terrain_material.set_shader_parameter("zone_shops", ZONE_TINTS[Tile.SHOPS])
 	terrain_material.set_shader_parameter("zone_industry", ZONE_TINTS[Tile.INDUSTRY])
+	terrain_material.set_shader_parameter("zone_offices", ZONE_TINTS[Tile.OFFICES])
 	terrain_material.set_shader_parameter("warn_map", warn_texture)
 	terrain_material.set_shader_parameter("overlay_map", overlay_texture)
 	var grass := _optional_texture("grass")
@@ -1537,6 +1539,10 @@ func _plan_lots() -> void:
 			var s: int = sim.stage(i)
 			detail = s
 			kind = LOT_PLAZA if s >= 4 else LOT_SHOPS
+		elif t == Tile.OFFICES:
+			var s: int = sim.stage(i)
+			detail = s
+			kind = LOT_PLAZA if s >= 3 else LOT_SHOPS
 		elif t == Tile.INDUSTRY:
 			kind = LOT_INDUSTRY
 			detail = sim.stage(i)
@@ -1592,7 +1598,7 @@ func _write_lots() -> void:
 					if _street_reach(i, SIDES[s]) > 0.0:
 						a |= 16 << s
 				if kind == LOT_EMPTY or kind == LOT_SITE:
-					var zone: int = sim.tiles[i] - Tile.HOMES + 1
+					var zone: int = 0 if sim.tiles[i] == Tile.OFFICES else sim.tiles[i] - Tile.HOMES + 1
 					b |= (zone << 4) | (int(sim.density[i]) << 6)
 				if ZONE_TINTS.has(sim.tiles[i]) and sim.is_abandoned(i):
 					a |= 1
@@ -2145,7 +2151,7 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 	var none := Color(0, 0, 0, 0)
 	if water[i] == 1:
 		return none
-	var zone := t == Tile.HOMES or t == Tile.SHOPS or t == Tile.INDUSTRY
+	var zone := ZONE_TINTS.has(t)
 	var service := t >= Tile.POLICE and t <= Tile.HOSPITAL
 	match overlay:
 		Overlay.LAND_VALUE:
@@ -2437,7 +2443,7 @@ func _busy_junction(x: int, y: int, tiles: PackedByteArray) -> bool:
 				continue
 			var k := ny * map_w + nx
 			var t: int = tiles[k]
-			if t == Tile.SHOPS or (t >= Tile.POLICE and t <= Tile.HOSPITAL) or (t >= Tile.LIBRARY and t <= Tile.STATION):
+			if t == Tile.SHOPS or t == Tile.OFFICES or (t >= Tile.POLICE and t <= Tile.HOSPITAL) or (t >= Tile.LIBRARY and t <= Tile.STATION):
 				return true
 			if t == Tile.HOMES and (sim.density[k] >= 1 or sim.district[k] == 2):
 				return true
@@ -3104,6 +3110,8 @@ func _plan_zone(i: int, t: int, lv: int, wall_list: Array, roof_list: Array, chi
 			_plan_shops(i, lv, front, rng, wall_list, roof_list)
 		Tile.INDUSTRY:
 			_plan_industry(i, lv, front, rng, wall_list, roof_list, chimney_list)
+		Tile.OFFICES:
+			_plan_offices(i, lv, front, rng, wall_list, roof_list)
 	if t == Tile.INDUSTRY:
 		return
 	# Corner and through plots: line every other road they touch as well, in
@@ -3155,6 +3163,13 @@ func _plan_frontage_row(i: int, t: int, lv: int, side: Vector2i, rng: RandomNumb
 			else:
 				_modern_block(spot, 21.0, 13.0, rng.randi_range(6, 8) + roundi(value * 2.0),
 					_modern_cladding(rng), value >= 0.6, wall_list, roof_list)
+		return
+	if t == Tile.OFFICES:
+		# Sandstone chambers along this street too.
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, side, along, 3.0, 21.0, 13.0)
+			_classical_block(spot, 21.0, 13.0, clampi(lv + 1, 2, 4), _classical_stone(rng),
+				false, false, wall_list, roof_list)
 		return
 	# Flats or shops along the street: storeys follow the plot's level.
 	var storeys := 3
@@ -4058,6 +4073,70 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	_parking_bays(i, front, park_at + 1.0, park_at + park_depth - 0.5, 0.55, rng)
 	_prop(i, front, 0.0, park_at + park_depth - 2.2, 4.0, 1.6, 2.2, BALCONY_GLASS)
 	_prop(i, front, 0.0, park_at + park_depth - 2.3, 4.4, 1.9, 0.1, CHARCOAL, 2.2)
+	for along: float in [-23.4, 23.4]:
+		for k in 2:
+			_plant(i, front, along, park_at + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),
+				TreeKind.BROADLEAF, rng)
+
+
+func _plan_offices(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
+		wall_list: Array, roof_list: Array) -> void:
+	# Offices, by stage: 1 small two-storey offices, 2 three-storey chambers,
+	# 3 a sandstone block beside a modern one, 4 taller blocks, 5 two glass
+	# blocks, 6 a glass tower over a glass podium, 7-8 skyscrapers (CBD only).
+	# Each plot is old (sandstone) or new (glass and cladding) at the low stages.
+	var depth := _depth(i, front)
+	var value := _values[i] if i < _values.size() else 0.3
+	if lv >= 7:
+		_plan_skyscraper(i, lv, front, depth, value, true, rng, wall_list, roof_list, _spire_items)
+		return
+	var extra: int = roundi(value * 2.0)
+	var modern: bool = rng.randf() < 0.45
+	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+	_street_furniture(i, front, false)
+	if lv >= 6:
+		var podium := _place(i, front, 0.0, 3.0, 46.0, 22.0)
+		_add_block(podium, 46.0, 22.0, 9.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+		var tower := _place(i, front, rng.randf_range(-6.0, 6.0), 5.0, 24.0, 16.0)
+		var tower_pos: Vector3 = tower["pos"]
+		tower["pos"] = tower_pos + Vector3.UP * 9.0
+		_modern_block(tower, 24.0, 16.0, rng.randi_range(13, 16) + extra * 2, _modern_cladding(rng),
+			true, wall_list, roof_list)
+	elif lv == 5:
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, front, along, 3.0, 23.0, 18.0)
+			_modern_block(spot, 23.0, 18.0, rng.randi_range(8, 11) + extra, _modern_cladding(rng),
+				true, wall_list, roof_list)
+	elif lv >= 3:
+		var classical_left: bool = rng.randf() < 0.5
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, front, along, 3.0, 23.0, 18.0)
+			if (along < 0.0) == classical_left:
+				_classical_block(spot, 23.0, 18.0, lv + rng.randi_range(1, 2), _classical_stone(rng),
+					false, false, wall_list, roof_list)
+			else:
+				_modern_block(spot, 23.0, 18.0, lv * 2 - 1 + rng.randi_range(0, 1) + extra, _modern_cladding(rng),
+					lv == 4 or value >= 0.5, wall_list, roof_list)
+	elif modern:
+		# A business park pair: low glass-fronted offices in pale cladding.
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, front, along, 6.0, 21.0, 13.0)
+			_modern_block(spot, 21.0, 13.0, lv + 2, _modern_cladding(rng), false, wall_list, roof_list)
+			_prop(i, front, along, 4.4, 20.0, 0.8, 0.9, HEDGE_GREEN)
+	else:
+		# Sandstone offices: a bank, a solicitor's, an insurance company.
+		for along: float in [-12.5, 12.5]:
+			var spot := _place(i, front, along, 3.0, 21.0, 13.0)
+			_classical_block(spot, 21.0, 13.0, lv + 1, _classical_stone(rng), false, false, wall_list, roof_list)
+	# Behind: a car park with marked bays and trees (a multi-storey for the big ones).
+	if lv >= 4:
+		var deck := _place(i, front, 0.0, 28.0, 40.0, depth - 31.0)
+		_add_block(deck, 40.0, depth - 31.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+		return
+	var park_at := 25.0 if lv >= 3 else 22.0
+	var park_depth := depth - park_at - 1.6
+	_slab(i, front, 0.0, park_at, 44.0, park_depth, CAR_PARK)
+	_parking_bays(i, front, park_at + 1.0, park_at + park_depth - 0.5, 0.7, rng)
 	for along: float in [-23.4, 23.4]:
 		for k in 2:
 			_plant(i, front, along, park_at + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),

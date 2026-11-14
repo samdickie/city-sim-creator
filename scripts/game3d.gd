@@ -25,9 +25,9 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND }   # same order as simulation.gd
+	WOODLAND, OFFICES }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
-	DISTRICT }
+	DISTRICT, OFFICES }
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -43,6 +43,7 @@ const TOOL_NAMES := {
 	Tool.LEISURE: "Leisure",
 	Tool.TRANSPORT: "Transport",
 	Tool.DISTRICT: "Districts",
+	Tool.OFFICES: "Offices",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
@@ -68,6 +69,7 @@ const TOOL_TO_TILE := {
 	Tool.HOMES: Tile.HOMES,
 	Tool.SHOPS: Tile.SHOPS,
 	Tool.INDUSTRY: Tile.INDUSTRY,
+	Tool.OFFICES: Tile.OFFICES,
 	Tool.PARK: Tile.PARK,
 	Tool.GRID: Tile.ROAD,
 }
@@ -85,6 +87,7 @@ const TOOL_COLOURS := {
 	Tool.LEISURE: Color(0.86, 0.55, 0.86),
 	Tool.TRANSPORT: Color(0.95, 0.55, 0.25),
 	Tool.DISTRICT: Color(0.62, 0.38, 0.92),
+	Tool.OFFICES: Color(0.10, 0.72, 0.68),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -92,6 +95,7 @@ const TILE_NAMES := {
 	Tile.HOMES: "Homes",
 	Tile.SHOPS: "Shops",
 	Tile.INDUSTRY: "Industry",
+	Tile.OFFICES: "Offices",
 	Tile.POWER_PLANT: "Power plant",
 	Tile.POWER_LINE: "Power line",
 	Tile.PARK: "Park",
@@ -171,6 +175,7 @@ func _ready() -> void:
 	hud.build(BUILD_CATEGORIES, {
 		Tile.HOMES: [TOOL_COLOURS[Tool.HOMES], "Homes"],
 		Tile.SHOPS: [TOOL_COLOURS[Tool.SHOPS], "Shops"],
+		Tile.OFFICES: [TOOL_COLOURS[Tool.OFFICES], "Offices"],
 		Tile.INDUSTRY: [TOOL_COLOURS[Tool.INDUSTRY], "Industry"],
 	}, sim)
 	hud.tool_chosen.connect(_select_tool)
@@ -725,6 +730,9 @@ func _base_cost(tool_id: int) -> int:
 		Tool.SHOPS:
 			var shops_cost: int = Settings.SHOPS_COSTS[current_density]
 			return shops_cost
+		Tool.OFFICES:
+			var offices_cost: int = Settings.OFFICES_COSTS[current_density]
+			return offices_cost
 		Tool.INDUSTRY:
 			return Settings.INDUSTRY_COST
 		Tool.BULLDOZE:
@@ -831,7 +839,8 @@ const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"
 # One-line descriptions for the menu (the hover tooltip has the full story).
 const SHORT := {
 	"homes_0": "Villas and terraces", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
-	"shops_0": "Corner shops", "shops_1": "Parades, shops with flats", "shops_2": "Offices and shopping",
+	"shops_0": "Corner shops", "shops_1": "Parades, shops with flats", "shops_2": "Big stores and hotels",
+	"offices_0": "Small offices", "offices_1": "Office blocks", "offices_2": "Office towers",
 	"industry": "Works and factories", "road": "Joined-up streets", "grid": "Streets in 100 m blocks",
 	"bulldoze": "Clear anything", "park": "Trees and open space",
 	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
@@ -856,6 +865,8 @@ func _menu_entries() -> Array:
 		out.append(["homes_%d" % d, "zones", Tool.HOMES, d, -1, Tile.HOMES])
 	for d in 3:
 		out.append(["shops_%d" % d, "zones", Tool.SHOPS, d, -1, Tile.SHOPS])
+	for d in 3:
+		out.append(["offices_%d" % d, "zones", Tool.OFFICES, d, -1, Tile.OFFICES])
 	out.append(["industry", "zones", Tool.INDUSTRY, -1, -1, Tile.INDUSTRY])
 	out.append(["road", "roads", Tool.ROAD, -1, -1, Tile.ROAD])
 	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
@@ -896,13 +907,20 @@ func _menu_items() -> Array:
 		var about := ""
 		var price := ""
 		var locked := false
-		if tool_id == Tool.HOMES or tool_id == Tool.SHOPS:
+		if tool_id == Tool.HOMES or tool_id == Tool.SHOPS or tool_id == Tool.OFFICES:
 			var level_word: String = ["Low-density", "Medium-density", "High-density"][density]
-			item_name = "%s %s" % [level_word, "homes" if tool_id == Tool.HOMES else "shops"]
+			item_name = "%s %s" % [level_word, "homes" if tool_id == Tool.HOMES else (
+				"shops" if tool_id == Tool.SHOPS else "offices")]
 			about = ["Villas and corner shops; never more than 2 storeys",
 				"Terraces and tenements; mansion flats when space runs short",
-				"Flats, towers and offices, as high as land value allows (skyscrapers in a CBD)"][density]
+				"Flats, towers and big stores, as high as land value allows (skyscrapers in a CBD)"][density]
 			var costs: Array = Settings.HOMES_COSTS if tool_id == Tool.HOMES else Settings.SHOPS_COSTS
+			if tool_id == Tool.OFFICES:
+				about = ["Small offices, two storeys at most",
+					"Office blocks; taller when space runs short",
+					"Office towers, as high as land value allows (skyscrapers in a CBD)"][density] \
+					+ ". Clean, well-paid jobs for a bigger town with schools near its homes; offices take workers from industry"
+				costs = Settings.OFFICES_COSTS
 			price = Hud.money_text(costs[density])
 		elif tool_id == Tool.DISTRICT:
 			item_name = ["CBD", "Conservation area", "Normal district"][e[4]]
@@ -1007,7 +1025,7 @@ func _funding_text() -> String:
 
 
 func _has_density() -> bool:
-	return current_tool == Tool.HOMES or current_tool == Tool.SHOPS
+	return current_tool == Tool.HOMES or current_tool == Tool.SHOPS or current_tool == Tool.OFFICES
 
 
 func _set_density(d: int) -> void:
@@ -1408,7 +1426,9 @@ func _stage_words(t: int, s: int) -> String:
 	# What the buildings on a plot are, for the hover text.
 	var homes := ["", "villas", "villas and terraces", "tenements", "mansion flats", "modern flats", "towers",
 		"skyscraper apartments", "landmark tower"]
-	var shops := ["", "corner shops", "shop parade", "shops with flats", "offices over shops", "office blocks",
+	var shops := ["", "corner shops", "shop parade", "shops with flats", "big stores", "department stores",
+		"shopping centre and hotel", "hotel skyscraper", "landmark hotel tower"]
+	var offices := ["", "small offices", "offices", "office chambers", "office blocks", "modern offices",
 		"office tower", "office skyscraper", "landmark office tower"]
 	var works := ["", "small works", "factory", "large factory"]
 	var words: String = ""
@@ -1419,6 +1439,8 @@ func _stage_words(t: int, s: int) -> String:
 			words = shops[s]
 		Tile.INDUSTRY:
 			words = works[s]
+		Tile.OFFICES:
+			words = offices[s]
 	return "" if words == "" else " (" + words + ")"
 
 
