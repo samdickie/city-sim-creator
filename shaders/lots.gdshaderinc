@@ -34,6 +34,7 @@ const int K_GOLF = 16;
 const int K_YARD = 17;
 const int K_HOSPITAL = 18;
 const int K_MEADOW = 19;
+const int K_AIRPORT = 21;        // detail: role (1 runway, 2 taxiway, 4 grass, the rest concrete), +8 north-south, +16 runway end
 const int K_WOODS = 20;          // planted woodland (its own ground is the terrain's woods floor)
 const vec3 WOODS_FLOOR = vec3(0.20, 0.27, 0.12);   // = terrain.gdshader WOOD_FLOOR
 
@@ -544,6 +545,49 @@ vec3 school(Ctx c, float along, float back, float depth) {
 	return mix(col, lin(vec3(0.92, 0.92, 0.88)), max(outline, max(halfway, circle)) * 0.9);
 }
 
+vec3 airport(Ctx c, ivec2 o, int detail) {
+	// A runway (tarmac, white edge lines, centre dashes, threshold bars at its
+	// ends), a taxiway (a tarmac strip with a yellow line through mown grass),
+	// concrete aprons, and mown grass for the rest. The roles come from
+	// simulation.gd _lay_out_airport.
+	vec2 r = c.p - (vec2(o) + 0.5) * tile_metres;
+	int role = detail & 7;
+	bool turned = (detail & 8) != 0;
+	float u = turned ? r.y : r.x;      // along the runway
+	float v = turned ? r.x : r.y;      // across it
+	float soft = max(c.px * 0.6, 0.05);
+	vec3 grass = lawn(c, 1.1, v * 0.25);
+	vec3 white = lin(vec3(0.90, 0.90, 0.86));
+	if (role == 1) {
+		vec3 col = tarmac(c) * 0.82;
+		col = mix(col, tarmac(c) * 0.55, 0.5 * band(v, 5.0, 3.0) * c.nC.r);          // rubber down the middle
+		col = mix(col, white, band(abs(v) - 20.0, 0.45, soft));                       // edge lines
+		float dash = step(fract(u / 25.0 + 0.5), 0.6);
+		if ((detail & 16) != 0) {
+			// Threshold bars across the end, in place of the centre line.
+			float bars = step(abs(fract(v / 3.6) - 0.5), 0.3) * step(abs(v), 18.0) * band(u, 9.0, soft);
+			col = mix(col, white, bars);
+		} else {
+			col = mix(col, white, band(v, 0.45, soft) * dash);
+		}
+		return mix(col, grass, smoothstep(22.0, 22.6, abs(v)));
+	}
+	if (role == 2) {
+		vec3 beside = (detail & 16) != 0 ? concrete(c, r, 6.25) : grass;     // concrete beside the stands
+		vec3 col = mix(tarmac(c) * 0.95, beside, smoothstep(9.0, 9.6, abs(v)));
+		return mix(col, lin(vec3(0.85, 0.70, 0.12)), band(v, 0.25, soft));
+	}
+	if (role == 4 || role == 0) {
+		return grass;
+	}
+	vec3 col = concrete(c, r, 6.25);
+	if (role == 3) {
+		// Stand markings: a yellow lead-in line across the apron.
+		col = mix(col, lin(vec3(0.85, 0.70, 0.12)), band(u, 0.2, soft) * step(abs(v), 22.0));
+	}
+	return col;
+}
+
 vec3 golf(Ctx c, ivec2 o, int same, float along, float back, float depth) {
 	// Fairway striped by the mower, rough along the edges of the course; a green
 	// (its flag is a prop), sand bunkers round it and a tee, placed as in
@@ -648,6 +692,11 @@ bool lot_ground(Ctx c, out vec3 col, out float shine) {
 		float out_m = dot(orel, f) - tile_metres * 0.5;    // metres out from the woodland
 		vec3 woods_floor = lin(WOODS_FLOOR) * (0.75 + 0.5 * c.nD.r);
 		col = mix(woods_floor, lawn(c, 0.55, along), smoothstep(8.0, 11.0, out_m + (c.nD.g - 0.5) * 5.0));
+		return true;
+	}
+	if (kind == K_AIRPORT) {
+		// (A road's verge beside the airfield is mown grass.)
+		col = owner == tile ? airport(c, owner, detail) : lawn(c, 0.7, along);
 		return true;
 	}
 	if (back < 0.0 && kind != K_PARK) {

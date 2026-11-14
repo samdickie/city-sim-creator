@@ -170,6 +170,7 @@ func _build_town() -> void:
 	# The golf links' lane and a road along them.
 	_build("road", Vector2i(49, 96), Vector2i(49, 102))
 	_build("road", Vector2i(45, 100), Vector2i(58, 100))
+	_build("road", Vector2i(58, 100), Vector2i(66, 100))  # ...and on to the airport
 
 	# Zones, west to east and north to south. Later ones paint over earlier ones.
 	# Each box starts on a plot, not a street (a drag that starts on a road zones
@@ -223,6 +224,10 @@ func _build_town() -> void:
 		_build("school", p)
 	for p: Vector2i in [Vector2i(62, 53), Vector2i(53, 94), Vector2i(44, 76)]:
 		_build("hospital", p)
+	# The small ones, side by side in the north suburb.
+	_build("police_office", Vector2i(44, 34))
+	_build("fire_small", Vector2i(45, 34))
+	_build("clinic", Vector2i(47, 34))
 
 	# Parks and the golf links.
 	for r: Array in [[Vector2i(53, 37), Vector2i(54, 38)], [Vector2i(62, 40), Vector2i(63, 41)],
@@ -247,6 +252,7 @@ func _build_town() -> void:
 	_later("station", Vector2i(53, 61))
 	_later("stadium", Vector2i(59, 68))
 	_later("nuclear", Vector2i(83, 73))
+	_later("airport", Vector2i(60, 102), Vector2i(84, 108))
 
 
 func _build(id: String, from: Vector2i, to: Vector2i = Vector2i(-1, -1)) -> int:
@@ -639,6 +645,13 @@ func _shot_list() -> Array[Dictionary]:
 		{"name": "60_offices_core", "at": Vector2(49, 63), "yaw": -40.0, "pitch": 26.0, "dist": 520.0},
 		{"name": "61_offices_chambers", "at": Vector2(55, 54), "yaw": -35.0, "pitch": 36.0, "dist": 230.0},
 		{"name": "62_offices_small", "at": Vector2(71, 62), "yaw": -50.0, "pitch": 38.0, "dist": 260.0},
+		# The small services in the north suburb: police office, small fire station, clinic.
+		{"name": "63_small_services", "at": Vector2(46, 34.5), "yaw": -40.0, "pitch": 36.0, "dist": 190.0},
+		{"name": "64_small_services_view", "at": Vector2(44, 38), "yaw": -40.0, "pitch": 55.0, "dist": 1500.0,
+			"hud": true, "prep": _prep_services.bind(0)},
+		# The airport south-east of the links: all of it, the terminal and stands, the Build menu's card.
+		{"name": "65_airport", "at": Vector2(72, 105), "yaw": -40.0, "pitch": 38.0, "dist": 1300.0},
+		{"name": "66_airport_terminal", "at": Vector2(64, 103.5), "yaw": -60.0, "pitch": 30.0, "dist": 330.0},
 		{"name": "32_towers_night", "at": Vector2(46, 63), "yaw": -40.0, "pitch": 22.0, "dist": 620.0,
 			"time": NIGHT},
 		{"name": "33_abandoned", "at": Vector2(54, 51), "yaw": -35.0, "pitch": 38.0, "dist": 230.0,

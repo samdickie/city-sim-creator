@@ -25,7 +25,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES }   # same order as simulation.gd
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES }
 
@@ -60,9 +60,9 @@ const DISTRICT_ABOUT := [
 const GROUPS := {
 	Tool.POWER: [Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WIND, Tile.SOLAR, Tile.POWER_LINE],
 	Tool.UTILITY: [Tile.WATER_PUMP, Tile.WATER_TOWER, Tile.LANDFILL, Tile.RECYCLING],
-	Tool.SERVICE: [Tile.POLICE, Tile.FIRE, Tile.SCHOOL, Tile.HOSPITAL],
+	Tool.SERVICE: [Tile.POLICE_OFFICE, Tile.POLICE, Tile.FIRE_SMALL, Tile.FIRE, Tile.SCHOOL, Tile.CLINIC, Tile.HOSPITAL],
 	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
-	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR],
+	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR, Tile.AIRPORT],
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -103,6 +103,9 @@ const TILE_NAMES := {
 	Tile.FIRE: "Fire station",
 	Tile.SCHOOL: "School",
 	Tile.HOSPITAL: "Hospital",
+	Tile.POLICE_OFFICE: "Police office",
+	Tile.FIRE_SMALL: "Small fire station",
+	Tile.CLINIC: "Clinic",
 }
 
 # --- Map ---
@@ -751,7 +754,8 @@ func _cost_of(t: int) -> int:
 	if t == Tile.POWER_LINE:
 		return Settings.POWER_LINE_COST
 	if sim.is_service(t):
-		var service_cost: int = Settings.SERVICE_COSTS[t - Tile.POLICE]
+		var service_cost: int = Settings.SMALL_SERVICE_COSTS[sim.service_of(t)] if sim.service_small(t) \
+			else Settings.SERVICE_COSTS[sim.service_of(t)]
 		return service_cost
 	var cost: int = sim.info(t).get("cost", 0)
 	return cost
@@ -848,12 +852,13 @@ const SHORT := {
 	"water_pump": "Water for 400 zone levels", "water_tower": "A small water supply",
 	"landfill": "Takes the town's rubbish", "recycling": "Takes rubbish, cleanly",
 	"police": "Safer streets", "fire": "Stops fires spreading", "school": "Families need one",
-	"hospital": "Care for a growing town", "golf": "Fairways, greens and bunkers",
+	"hospital": "Care for a growing town", "police_office": "A village bobby", "fire_small": "One engine, close by",
+	"clinic": "A doctor nearby", "golf": "Fairways, greens and bunkers",
 	"woodland": "Plant trees: drag out a forest",
 	"library": "Books, and better land", "museum": "A big draw for visitors", "stadium": "A football ground",
 	"marina": "Yachts by the shore", "town_hall": "The heart of the town",
 	"bus_depot": "Plots can sit further from roads", "station": "Visitors arrive by train",
-	"harbour": "Ships bring trade", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
+	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
 
@@ -890,7 +895,8 @@ func _item_id(t: int) -> String:
 		var key: String = Simulation.BUILDING_KEYS[t]
 		return key
 	if sim.is_service(t):
-		var word: String = Settings.SERVICE_WORDS[t - Tile.POLICE]
+		var word: String = Settings.SMALL_SERVICE_WORDS[sim.service_of(t)] if sim.service_small(t) \
+			else Settings.SERVICE_WORDS[sim.service_of(t)]
 		return word
 	return "power_line" if t == Tile.POWER_LINE else ""
 
@@ -940,7 +946,9 @@ func _menu_items() -> Array:
 				about = ["Police: in a bigger town, homes and shops without police grow at half speed",
 					"Fire: stops buildings nearby burning down",
 					"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
-					"Hospitals: in a bigger town, homes without one grow at half speed"][t - Tile.POLICE]
+					"Hospitals: in a bigger town, homes without one grow at half speed"][sim.service_of(t)]
+				if sim.service_small(t):
+					about += ". A small one: cheap, but it reaches about half as far"
 			else:
 				about = "Carries power across open land (roads and buildings carry it too)"
 				price += " / tile"
@@ -1007,7 +1015,7 @@ func _show_group() -> void:
 func _change_funding(step: float) -> void:
 	if current_tool != Tool.SERVICE:
 		return
-	var s := _target_tile() - Tile.POLICE
+	var s := sim.service_of(_target_tile())
 	sim.set_funding(s, sim.funding[s] + step)
 	_show_group()
 	_update_reach_preview()
@@ -1016,12 +1024,13 @@ func _change_funding(step: float) -> void:
 
 
 func _funding_text() -> String:
-	var s := _target_tile() - Tile.POLICE
+	var s := sim.service_of(_target_tile())
+	var small := sim.service_small(_target_tile())
 	var word: String = Settings.SERVICE_WORDS[s]
-	var upkeep: float = Settings.SERVICE_UPKEEP[s]
+	var upkeep: float = Settings.SMALL_SERVICE_UPKEEP[s] if small else Settings.SERVICE_UPKEEP[s]
 	return "%s funding %d%%  ·  %s a month each  ·  reaches %d m" % [word.capitalize(),
 		roundi(sim.funding[s] * 100.0), Hud.money_text(roundi(upkeep * sim.funding[s] * sim.upkeep_scale())),
-		sim.service_reach_m(s, cell_size_m)]
+		sim.service_reach_m(s, cell_size_m, small)]
 
 
 func _has_density() -> bool:
@@ -1058,7 +1067,7 @@ func _auto_view() -> void:
 		want = WorldView.Overlay.DISTRICTS
 	elif current_tool == Tool.SERVICE:
 		want = WorldView.Overlay.SERVICES
-		filter = _target_tile() - Tile.POLICE
+		filter = sim.service_of(_target_tile())
 	if _auto_overlay:
 		if want == world.overlay:
 			if filter != world.service_filter:
@@ -1154,7 +1163,7 @@ func _service_note(s: int) -> String:
 func _update_reach_preview() -> void:
 	# Placing a service: a disc round the mouse shows how far it would reach.
 	if current_tool == Tool.SERVICE and _in_map(hover):
-		world.show_reach(hover, sim.service_cover_tiles(_target_tile() - Tile.POLICE))
+		world.show_reach(hover, sim.service_cover_tiles(sim.service_of(_target_tile()), sim.service_small(_target_tile())))
 	else:
 		world.hide_reach()
 
@@ -1315,7 +1324,7 @@ func _update_info() -> void:
 		action = problem
 		state = 1
 	elif current_tool == Tool.SERVICE:
-		action += "  ·  " + _service_gain_text(_target_tile() - Tile.POLICE, i)
+		action += "  ·  " + _service_gain_text(sim.service_of(_target_tile()), i, sim.service_small(_target_tile()))
 	# Which services reach a zone plot (red: missing, and the plot needs it).
 	var marks: Array = []
 	if sim.is_zone(sim.tiles[i]):
@@ -1324,9 +1333,9 @@ func _update_info() -> void:
 	hud.show_query(_tile_text(i), ground, action, state, marks)
 
 
-func _service_gain_text(s: int, i: int) -> String:
+func _service_gain_text(s: int, i: int, small: bool = false) -> String:
 	# What a new service building here would add: "would reach 14 homes with no school (420 people), 9 held back now".
-	var g := sim.service_gain(s, i)
+	var g := sim.service_gain(s, i, small)
 	var plots: int = g["plots"]
 	var people: int = g["people"]
 	var held: int = g["held"]
@@ -1356,9 +1365,9 @@ func _tile_text(i: int) -> String:
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP * sim.upkeep_scale())
 	if sim.is_service(t):
-		var s: int = t - Tile.POLICE
+		var s: int = sim.service_of(t)
 		var text := "%s: %s\nReaches %d m at %d%% funding" % [TILE_NAMES[t], sim.service_status(i),
-			sim.service_reach_m(s, cell_size_m), roundi(sim.funding[s] * 100.0)]
+			sim.service_reach_m(s, cell_size_m, sim.service_small(t)), roundi(sim.funding[s] * 100.0)]
 		var r := sim.service_reach(i)
 		var plots: int = r["plots"]
 		if plots > 0:

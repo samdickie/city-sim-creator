@@ -346,8 +346,7 @@ static func _n(stuck: Dictionary, key: String) -> int:
 
 static func _name_of(sim: Simulation, t: int) -> String:
 	if sim.is_service(t):
-		var s: String = Settings.SERVICE_NAMES[t - Simulation.Tile.POLICE]
-		return s
+		return sim.service_name(t)
 	return sim.building_name(t)
 
 

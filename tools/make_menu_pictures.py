@@ -673,6 +673,55 @@ def hospital():
         box(along, 5.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
 
 
+def police_office():
+    ground()
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    model("classical2", -8.0, 4.0, 18.0, 11.0, 13.1, BLONDE_SANDSTONE, (0.17, 0.24, 0.40))
+    box(-8.0, 3.85, 2.4, 0.25, 3.0, tuple(c * 0.65 for c in POLICE_BLUE))
+    box(-8.0, 3.85, 7.0, 0.25, 0.7, POLICE_BLUE, 3.2)
+    box(-3.0, 2.6, 0.16, 0.16, 3.0, CHARCOAL)
+    box(-3.0, 2.4, 0.5, 0.5, 0.6, POLICE_BLUE, 3.0)
+    slab(14.0, 3.0, 14.0, 20.0, CAR_PARK)
+    car(11.0, 6.0, (0.95, 0.95, 0.95))
+    car(16.0, 6.0, CAR_PAINT[3])
+    hedge(-8.0, 17.0, 32.0, 0.8, 1.2)
+    for k in range(3):
+        tree(-19.0 + k * 16.0, 40.0, 8.5)
+
+
+def fire_small():
+    ground()
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    slab(-6.0, 3.0, 20.0, 5.0, CONCRETE)
+    gabled(-6.0, 8.0, 20.0, 14.0, 6.6, 2.2, RED_SANDSTONE, windows=False)
+    for k in range(2):
+        box(-10.6 + k * 9.2, 7.85, 7.0, 0.25, 4.8, FIRE_RED)
+    gabled(10.0, 10.0, 8.0, 9.0, 3.6, 1.6, RED_SANDSTONE)
+    slab(0.0, 23.0, 49.0, 26.0, YARD)
+    box(-10.5, 24.0, 2.6, 8.5, 3.2, FIRE_RED)
+    box(18.0, 6.0, 1.6, 1.6, 9.0, RED_SANDSTONE)
+
+
+def clinic():
+    ground()
+    slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
+    box(-7.0, 7.0, 28.0, 14.0, 7.0, MODERN_WHITE)
+    for k in range(7):
+        box(-18.5 + k * 3.6, 6.9, 2.2, 0.15, 1.5, (0.10, 0.17, 0.24), 1.2, rough=0.08)
+        box(-18.5 + k * 3.6, 6.9, 2.2, 0.15, 1.5, (0.10, 0.17, 0.24), 4.4, rough=0.08)
+    box(2.0, 6.8, 0.9, 0.25, 2.7, (0.10, 0.55, 0.30), 3.6)
+    box(2.0, 6.8, 2.7, 0.25, 0.9, (0.10, 0.55, 0.30), 4.5)
+    box(-16.0, 4.0, 8.0, 3.2, 3.6, (0.10, 0.17, 0.24), rough=0.08)
+    box(-16.0, 3.7, 9.0, 3.8, 0.4, TRIM, 3.6)
+    slab(16.0, 3.0, 14.0, 22.0, CAR_PARK)
+    for k in range(3):
+        car(11.5 + k * 4.0, 6.0, CAR_PAINT[k])
+    box(16.0, 16.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
+    hedge(-7.0, 23.0, 30.0, 0.8, 1.2)
+    for k in range(3):
+        tree(-19.0 + k * 16.0, 40.0, 8.5)
+
+
 def golf():
     ground((0.30, 0.48, 0.20))
     model("clubhouse", -14.0, 2.0, 18.0, 11.0, None, MODERN_WHITE, TIMBER, r=0.4)
@@ -800,6 +849,24 @@ def harbour():
     box(-16.0, 57.0, 8.0, 9.0, 8.0, HULL_WHITE, 4.5)
 
 
+def airport():
+    ground((0.33, 0.47, 0.22), road=False)
+    slab(0.0, 36.0, 50.0, 11.0, (0.20, 0.20, 0.21))                 # runway
+    for k in range(4):
+        slab(-18.0 + k * 12.0, 41.0, 6.0, 0.5, (0.92, 0.92, 0.88), 0.03)
+    slab(0.0, 12.0, 50.0, 22.0, CONCRETE)                           # apron
+    box(-8.0, 1.0, 30.0, 9.0, 5.0, (0.10, 0.17, 0.24), rough=0.08)  # terminal
+    box(-8.0, 0.4, 31.0, 10.5, 0.5, MODERN_WHITE, 5.0)
+    cylinder(17.0, 5.0, 1.5, 13.0, CONCRETE)                        # tower
+    cylinder(17.0, 5.0, 2.8, 2.2, (0.10, 0.17, 0.22), 13.0)
+    cylinder(17.0, 5.0, 3.1, 0.4, MODERN_WHITE, 15.2)
+    for along, tail in ((-12.0, (0.10, 0.25, 0.55)), (6.0, (0.75, 0.10, 0.10))):
+        box(along, 14.0, 1.8, 15.0, 1.8, (0.94, 0.94, 0.93), 1.0)
+        box(along, 19.5, 15.0, 2.6, 0.3, (0.80, 0.81, 0.82), 1.3)
+        box(along, 27.0, 5.5, 1.5, 0.25, (0.94, 0.94, 0.93), 2.2)
+        box(along, 26.6, 0.3, 2.3, 2.8, tail, 2.8)
+
+
 def _district(colour, tall):
     ground()
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
@@ -833,9 +900,9 @@ ITEMS = {
     "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,
-    "police": police, "fire": fire, "school": school, "hospital": hospital, "golf": golf, "library": library,
+    "police": police, "police_office": police_office, "fire_small": fire_small, "clinic": clinic, "fire": fire, "school": school, "hospital": hospital, "golf": golf, "library": library,
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
-    "station": station, "harbour": harbour, "cbd": cbd, "conservation": conservation, "normal": normal,
+    "station": station, "harbour": harbour, "airport": airport, "cbd": cbd, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,

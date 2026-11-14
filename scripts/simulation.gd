@@ -10,7 +10,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES }
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -18,9 +18,9 @@ const BUILDING_KEYS := {
 	Tile.LANDFILL: "landfill", Tile.RECYCLING: "recycling", Tile.GOLF: "golf",
 	Tile.LIBRARY: "library", Tile.MUSEUM: "museum", Tile.STADIUM: "stadium", Tile.MARINA: "marina",
 	Tile.TOWN_HALL: "town_hall", Tile.BUS_DEPOT: "bus_depot", Tile.STATION: "station",
-	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland",
+	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland", Tile.AIRPORT: "airport",
 }
-const LAST_TILE := Tile.OFFICES   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.AIRPORT   # (new tiles go on the end, so saved tile numbers never change)
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -37,6 +37,8 @@ const COMPLAINTS := {
 # home) only residents feel, so they don't put shops and industry off.
 const BUSINESS_PARTS: Array[String] = ["taxes", "services", "leisure", "rubbish"]
 enum Service { POLICE, FIRE, SCHOOL, HOSPITAL }   # same order as the service tiles
+# The small service buildings, and the service each one gives.
+const SMALL_SERVICES := {Tile.POLICE_OFFICE: Service.POLICE, Tile.FIRE_SMALL: Service.FIRE, Tile.CLINIC: Service.HOSPITAL}
 enum Growth { NONE, GROWING, WAITING, BLOCKED, FULL, ABANDONED }   # for the growth map
 
 # --- The city ---
@@ -103,11 +105,21 @@ var polluted_share := 0.0             # 0-1: share of residents living in pollut
 var _value_dirty := true
 var _wood_effect := PackedFloat32Array() # scratch: woodland's land value or cleaning round each tile (capped)
 var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 = 100%
-var services := [0, 0, 0, 0]          # how many of each service the town has
+var services := [0, 0, 0, 0]          # how many of each service the town has (big and small together)
+var small_services := [0, 0, 0, 0]    # ...of which small ones
 var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
 var burned := PackedInt32Array()      # plots that burned down last month
 var service_score := 0.0              # 0-1: how well services cover the town's homes, on average
 var _coverage_dirty := true
+# Airports: what each airport tile is (AirportRole, +8 if the runway runs north-south,
+# +16 at a runway's two ends and on the taxiway beside the stands), which airport it belongs to, and each airport's
+# problem ("" = open). Worked out in recount() by _update_airports().
+enum AirportRole { NONE, RUNWAY, TAXIWAY, APRON, GRASS, TERMINAL, TOWER, HANGAR }
+var airport_role := PackedByteArray()
+var _airport_group := PackedInt32Array()
+var _airport_problems: Array[String] = []
+var _airport_terminals := PackedInt32Array()   # each open airport's terminal tile
+var airports_open := 0
 var layout_version := 0               # goes up whenever a tile changes type (roads, zones...)
 
 var _road_dist := PackedByteArray()   # tiles to the nearest road (255 = far)
@@ -800,6 +812,7 @@ func recount() -> void:
 	power_supply = 0
 	water_supply = 0
 	services = [0, 0, 0, 0]
+	small_services = [0, 0, 0, 0]
 	counts = {}
 	abandoned_count = 0
 	run_down_count = 0
@@ -812,7 +825,9 @@ func recount() -> void:
 			run_down_count += 1
 		power_used += power_use(i)
 		if is_service(t):
-			services[t - Tile.POLICE] += 1
+			services[service_of(t)] += 1
+			if service_small(t):
+				small_services[service_of(t)] += 1
 		if is_building(t):
 			var made: int = info(t).get("power", 0)
 			if made > 0:
@@ -835,6 +850,10 @@ func recount() -> void:
 				office_jobs += units(i)
 	_update_power()
 	_update_water()
+	var open_before := airports_open
+	_update_airports()
+	if airports_open != open_before:
+		_value_dirty = true           # (an airport opening or closing changes noise and fumes)
 	_measure_rubbish()
 	_measure_leisure()
 	_measure_polluted_homes()
@@ -854,7 +873,25 @@ func is_zone(t: int) -> bool:
 
 
 func is_service(t: int) -> bool:
-	return t >= Tile.POLICE and t <= Tile.HOSPITAL
+	return service_of(t) >= 0
+
+
+func service_of(t: int) -> int:
+	# Which service (Service.POLICE...) a tile gives, big or small; -1 for anything else.
+	if t >= Tile.POLICE and t <= Tile.HOSPITAL:
+		return t - Tile.POLICE
+	var s: int = SMALL_SERVICES.get(t, -1)
+	return s
+
+
+func service_small(t: int) -> bool:
+	return SMALL_SERVICES.has(t)
+
+
+func service_name(t: int) -> String:
+	var names: Array = Settings.SMALL_SERVICE_NAMES if service_small(t) else Settings.SERVICE_NAMES
+	var n: String = names[service_of(t)]
+	return n
 
 
 func power_use(i: int) -> int:
@@ -863,7 +900,7 @@ func power_use(i: int) -> int:
 	if is_zone(t):
 		return 0 if abandoned[i] == 1 else stage(i)
 	if is_service(t):
-		return Settings.SERVICE_POWER
+		return Settings.SMALL_SERVICE_POWER if service_small(t) else Settings.SERVICE_POWER
 	if is_building(t):
 		var use: int = info(t).get("uses_power", 0)
 		return use
@@ -933,6 +970,8 @@ func building_working(i: int) -> bool:
 	var t: int = tiles[i]
 	if makes_power(t) or needs_nothing(t):
 		return true
+	if t == Tile.AIRPORT:
+		return airport_problem(i) == ""
 	if not near_road(i):
 		return false
 	if int(info(t).get("uses_power", 0)) > 0:
@@ -947,6 +986,9 @@ func building_status(i: int) -> String:
 		return "making %d units of power" % int(info(t)["power"])
 	if needs_nothing(t):
 		return "growing"
+	if t == Tile.AIRPORT:
+		var why := airport_problem(i)
+		return "open, flights coming and going" if why == "" else "not open, " + why
 	if not near_road(i):
 		return "not working, needs a road within %d tiles" % Settings.ROAD_REACH
 	if int(info(t).get("uses_power", 0)) > 0:
@@ -1005,6 +1047,161 @@ func _measure_leisure() -> void:
 			if a > 0.0 and building_working(i):
 				total += a
 	leisure_appeal = minf(total, Settings.LEISURE_APPEAL_MAX)
+
+
+# ------------------------------------------------------------- airport
+
+func airport_problem(i: int) -> String:
+	# Why the airport this tile belongs to isn't open ("" = it is).
+	if i >= _airport_group.size() or _airport_group[i] < 0 or _airport_group[i] >= _airport_problems.size():
+		return "not laid out yet"
+	return _airport_problems[_airport_group[i]]
+
+
+func airport_role_at(i: int) -> int:
+	# AirportRole of a tile (0 for anything that isn't airport), without the direction bits.
+	return airport_role[i] & 7 if i < airport_role.size() else 0
+
+
+func _update_airports() -> void:
+	# Group the airport tiles, lay each group out (runway, taxiway, apron,
+	# terminal, tower, hangars, grass) and say whether it can open.
+	# (Power must be up to date.)
+	airport_role.resize(w * h)
+	airport_role.fill(0)
+	_airport_group.resize(w * h)
+	_airport_group.fill(-1)
+	_airport_problems.clear()
+	_airport_terminals.clear()
+	airports_open = 0
+	if not tiles.has(Tile.AIRPORT):
+		return
+	_update_road_distance()
+	for start in w * h:
+		if tiles[start] != Tile.AIRPORT or _airport_group[start] >= 0:
+			continue
+		var g := _airport_problems.size()
+		var members: Array[int] = [start]
+		_airport_group[start] = g
+		var head := 0
+		while head < members.size():
+			var i := members[head]
+			head += 1
+			var x := i % w
+			for n: int in [i - 1 if x > 0 else -1, i + 1 if x < w - 1 else -1, i - w, i + w]:
+				if n >= 0 and n < w * h and tiles[n] == Tile.AIRPORT and _airport_group[n] < 0:
+					_airport_group[n] = g
+					members.append(n)
+		_airport_problems.append(_lay_out_airport(g, members))
+		if _airport_problems[g] == "":
+			airports_open += 1
+
+
+func _lay_out_airport(g: int, members: Array[int]) -> String:
+	# The longest straight run of tiles is the runway. Of several as long, the one
+	# AIRPORT_APRON_ROWS back from the landside (the tile nearest a road), so
+	# there's room for the stands between the terminal and the runway.
+	var landside: int = members[0]
+	for i in members:
+		if _road_dist[i] < _road_dist[landside]:
+			landside = i
+	var best_len := 0
+	var best_start := -1
+	var best_off := 0
+	var vertical := false
+	var ideal: int = Settings.AIRPORT_APRON_ROWS
+	for i in members:
+		var x := i % w
+		if x == 0 or _airport_group[i - 1] != g:
+			var n := 0
+			while x + n < w and _airport_group[i + n] == g:
+				n += 1
+			var off := absi(absi(i / w - landside / w) - ideal)
+			if n > best_len or (n == best_len and off < best_off):
+				best_len = n
+				best_start = i
+				best_off = off
+				vertical = false
+		if i < w or _airport_group[i - w] != g:
+			var n := 0
+			while i + n * w < w * h and _airport_group[i + n * w] == g:
+				n += 1
+			var off := absi(absi(i % w - landside % w) - ideal)
+			if n > best_len or (n == best_len and off < best_off):
+				best_len = n
+				best_start = i
+				best_off = off
+				vertical = true
+	var step := w if vertical else 1
+	var side := 1 if vertical else w          # one tile across the runway
+	var turn := 8 if vertical else 0
+	for i in members:
+		airport_role[i] = AirportRole.GRASS + turn
+	for k in best_len:
+		var end := 16 if (k == 0 or k == best_len - 1) else 0
+		airport_role[best_start + k * step] = AirportRole.RUNWAY + turn + end
+	# The terminal: the tile off the runway nearest a road (then nearest the middle of the runway).
+	var mid := Vector2((best_start % w), (best_start / w)) + Vector2(step % w, step / w) * (best_len - 1) * 0.5
+	var terminal := -1
+	var terminal_score := INF
+	var powered_any := false
+	for i in members:
+		if powered[i] == 1:
+			powered_any = true
+		if airport_role[i] & 7 == AirportRole.RUNWAY:
+			continue
+		var score: float = _road_dist[i] * 1000.0 + Vector2(i % w, i / w).distance_to(mid)
+		if score < terminal_score:
+			terminal_score = score
+			terminal = i
+	if terminal >= 0:
+		# How far the terminal is from the runway, along it (u) and across it (v).
+		var tu: int = (terminal / w - best_start / w) if vertical else (terminal % w - best_start % w)
+		var tv: int = (terminal % w - best_start % w) if vertical else (terminal / w - best_start / w)
+		var toward := 1 if tv > 0 else -1
+		# A taxiway along the runway on the terminal's side.
+		for k in best_len:
+			var n: int = best_start + k * step + toward * side
+			if _airport_inside(n, g, best_start + k * step, vertical):
+				airport_role[n] = AirportRole.TAXIWAY + turn
+		# The terminal's row: tower, terminal (two tiles), hangars; apron from there to the taxiway.
+		var row_roles: Array[int] = [AirportRole.TOWER, AirportRole.TERMINAL, AirportRole.TERMINAL, AirportRole.HANGAR, AirportRole.HANGAR]
+		for d in range(-1, 4):
+			var u := tu + d
+			if u < 0 or u >= best_len:
+				continue
+			# (The taxiway beside the stands is concrete too: +16.)
+			var link: int = best_start + u * step + toward * side
+			if airport_role[link] & 7 == AirportRole.TAXIWAY:
+				airport_role[link] = AirportRole.TAXIWAY + turn + 16
+			for across in range(2, absi(tv) + 1):
+				var n: int = best_start + u * step + toward * across * side
+				if not _airport_inside(n, g, best_start + u * step, vertical):
+					continue
+				airport_role[n] = (row_roles[d + 1] if across == absi(tv) else AirportRole.APRON) + turn
+		airport_role[terminal] = AirportRole.TERMINAL + turn
+	# Can it open?
+	if best_len < Settings.AIRPORT_MIN_RUNWAY:
+		return "the runway needs a straight run of %d m (the longest here is %d m)" % [
+			Settings.AIRPORT_MIN_RUNWAY * 50, best_len * 50]
+	if members.size() < Settings.AIRPORT_MIN_TILES or terminal < 0:
+		return "it needs more room beside the runway for the terminal (%d tiles in all; it has %d)" % [
+			Settings.AIRPORT_MIN_TILES, members.size()]
+	if _road_dist[terminal] > Settings.ROAD_REACH:
+		return "it needs a road within %d tiles of one side, for the terminal" % Settings.ROAD_REACH
+	if not powered_any:
+		return "no power"
+	if airports_open == 0:
+		_airport_terminals.append(terminal)
+	return ""
+
+
+func _airport_inside(n: int, g: int, beside: int, vertical: bool) -> bool:
+	# Is tile n on the map, in airport g, and in line with runway tile `beside`
+	# (same row or column, so a step across never wraps round the map's edge)?
+	if n < 0 or n >= w * h or _airport_group[n] != g or airport_role[n] & 7 == AirportRole.RUNWAY:
+		return false
+	return n / w == beside / w if vertical else n % w == beside % w
 
 
 func _working_count(t: int) -> int:
@@ -1118,12 +1315,12 @@ func land_value_word(i: int) -> String:
 func service_working(i: int) -> bool:
 	# A service needs a road and power to do anything (and some funding).
 	_update_power()
-	var f: float = funding[tiles[i] - Tile.POLICE]
+	var f: float = funding[service_of(tiles[i])]
 	return near_road(i) and powered[i] == 1 and f > 0.0
 
 
 func service_status(i: int) -> String:
-	var f: float = funding[tiles[i] - Tile.POLICE]
+	var f: float = funding[service_of(tiles[i])]
 	if f <= 0.0:
 		return "closed (no funding)"
 	if not near_road(i):
@@ -1134,13 +1331,13 @@ func service_status(i: int) -> String:
 	return "working"
 
 
-func service_reach_m(s: int, cell_m: float) -> int:
+func service_reach_m(s: int, cell_m: float, small: bool = false) -> int:
 	# How far a service reaches at its current funding, in metres.
-	return roundi(_service_radius(s) * cell_m)
+	return roundi(_service_radius(s, small) * cell_m)
 
 
-func _service_radius(s: int) -> float:
-	var r: float = Settings.SERVICE_RADIUS[s]
+func _service_radius(s: int, small: bool = false) -> float:
+	var r: float = Settings.SMALL_SERVICE_RADIUS[s] if small else Settings.SERVICE_RADIUS[s]
 	return r * (0.4 + 0.6 * funding[s])     # 50% funding reaches 70% as far
 
 
@@ -1171,7 +1368,9 @@ func service_upkeep() -> int:
 	var total := 0.0
 	for s in 4:
 		var each: float = Settings.SERVICE_UPKEEP[s]
-		total += each * funding[s] * int(services[s])
+		var small_each: float = Settings.SMALL_SERVICE_UPKEEP[s]
+		var small: int = small_services[s]
+		total += (each * (int(services[s]) - small) + small_each * small) * funding[s]
 	return roundi(total)
 
 
@@ -1204,8 +1403,8 @@ func _update_coverage() -> void:
 	for i in w * h:
 		if not is_service(tiles[i]) or not service_working(i):
 			continue
-		var s: int = tiles[i] - Tile.POLICE
-		var radius := _service_radius(s)
+		var s: int = service_of(tiles[i])
+		var radius := _service_radius(s, service_small(tiles[i]))
 		var reach := ceili(radius)
 		var cx := i % w
 		var cy := i / w
@@ -1273,16 +1472,16 @@ func _needs_school(i: int, next_stage: int) -> bool:
 const SERVICE_HELD_PHRASES := ["no police station", "", "waiting for a school", "hospital nearby"]
 
 
-func service_full_tiles(s: int) -> float:
+func service_full_tiles(s: int, small: bool = false) -> float:
 	# Tiles round a service building that it covers fully (coverage 1): the
 	# first 37.5% of its reach, at its current funding.
-	return _service_radius(s) * (1.0 - 1.0 / 1.6)
+	return _service_radius(s, small) * (1.0 - 1.0 / 1.6)
 
 
-func service_cover_tiles(s: int) -> float:
+func service_cover_tiles(s: int, small: bool = false) -> float:
 	# Tiles round a service building that it covers enough to count (coverage at
 	# least Settings.COVERED), at its current funding.
-	return _service_radius(s) * (1.0 - Settings.COVERED / 1.6)
+	return _service_radius(s, small) * (1.0 - Settings.COVERED / 1.6)
 
 
 func cover_strength(s: int, i: int) -> int:
@@ -1348,17 +1547,17 @@ func service_report(s: int) -> Dictionary:
 				reached += n
 		if is_zone(t) and service_holds_back(s, i):
 			held += 1
-		if t == Tile.POLICE + s and service_working(i):
+		if service_of(t) == s and service_working(i):
 			working += 1
 	var built: int = services[s]
 	return {"share": float(reached) / people if people > 0 else -1.0, "held": held,
 		"built": built, "working": working}
 
 
-func _reach_of(s: int, at: int) -> PackedInt32Array:
+func _reach_of(s: int, at: int, small: bool = false) -> PackedInt32Array:
 	# The tiles a building of service s at `at` would cover enough to count.
 	var out := PackedInt32Array()
-	var radius := _service_radius(s)
+	var radius := _service_radius(s, small)
 	var reach := ceili(radius)
 	var cx := at % w
 	var cy := at / w
@@ -1374,17 +1573,16 @@ func service_reach(i: int) -> Dictionary:
 	# What the service building at i covers by itself: zone plots and residents
 	# within the reach that counts ("alone": plots no other building of its kind
 	# covers). Nothing while it isn't working.
-	var s: int = tiles[i] - Tile.POLICE
+	var s: int = service_of(tiles[i])
 	var plots := 0
 	var people := 0
 	var alone := 0
 	if service_working(i):
-		var radius := _service_radius(s)
-		var others: Array[Vector2] = []
+		var others: Array[Vector3] = []     # (x, y, reach) of every other building of this service
 		for j in w * h:
-			if j != i and tiles[j] == tiles[i] and service_working(j):
-				others.append(Vector2(j % w, j / w))
-		for k: int in _reach_of(s, i):
+			if j != i and service_of(tiles[j]) == s and service_working(j):
+				others.append(Vector3(j % w, j / w, _service_radius(s, service_small(tiles[j]))))
+		for k: int in _reach_of(s, i, service_small(tiles[i])):
 			if not is_zone(tiles[k]):
 				continue
 			plots += 1
@@ -1393,8 +1591,8 @@ func service_reach(i: int) -> Dictionary:
 			# Covered by another building of the same kind too?
 			var spot := Vector2(k % w, k / w)
 			var shared := false
-			for o: Vector2 in others:
-				if (1.0 - spot.distance_to(o) / radius) * 1.6 >= Settings.COVERED:
+			for o: Vector3 in others:
+				if (1.0 - spot.distance_to(Vector2(o.x, o.y)) / o.z) * 1.6 >= Settings.COVERED:
 					shared = true
 					break
 			if not shared:
@@ -1402,14 +1600,14 @@ func service_reach(i: int) -> Dictionary:
 	return {"plots": plots, "people": people, "alone": alone}
 
 
-func service_gain(s: int, at: int) -> Dictionary:
+func service_gain(s: int, at: int, small: bool = false) -> Dictionary:
 	# What a new building of service s at `at` would add: zone plots that want it
 	# and have none now (and their residents), and how many of those are held
 	# back right now.
 	var plots := 0
 	var people := 0
 	var held := 0
-	for k: int in _reach_of(s, at):
+	for k: int in _reach_of(s, at, small):
 		if not service_matters(s, k) or covered(s, k):
 			continue
 		plots += 1
@@ -1515,6 +1713,11 @@ func _update_land_value() -> void:
 	_sum_woodland(Settings.WOODLAND_VALUE_RADIUS, Settings.WOODLAND_VALUE)
 	for i in w * h:
 		land_value[i] += minf(_wood_effect[i], Settings.WOODLAND_VALUE_MAX)
+	# Airport noise: worse the more of the airport is near, up to a limit.
+	if airports_open > 0:
+		_sum_woodland(Settings.AIRPORT_NOISE_RADIUS, Settings.AIRPORT_NOISE, Tile.AIRPORT)
+		for i in w * h:
+			land_value[i] -= minf(_wood_effect[i], Settings.AIRPORT_NOISE_MAX)
 	# Districts: a CBD is where everyone wants to be; the old town has character.
 	for i in w * h:
 		if district[i] == 2:
@@ -1532,16 +1735,16 @@ func _update_land_value() -> void:
 		land_value[i] = clampf(land_value[i], 0.0, 1.0)
 
 
-func _sum_woodland(radius: int, amount: float) -> void:
+func _sum_woodland(radius: int, amount: float, kind: int = Tile.WOODLAND) -> void:
 	# Into _wood_effect: every woodland tile's amount, fading out over radius tiles
-	# (as _spread does), added up round each tile.
+	# (as _spread does), added up round each tile. (Also used for airport noise.)
 	if _wood_effect.size() != w * h:
 		_wood_effect.resize(w * h)
 	_wood_effect.fill(0.0)
-	if not tiles.has(Tile.WOODLAND):
+	if not tiles.has(kind):
 		return
 	for i in w * h:
-		if tiles[i] != Tile.WOODLAND:
+		if tiles[i] != kind or (kind == Tile.AIRPORT and not building_working(i)):
 			continue
 		var cx := i % w
 		var cy := i / w
@@ -1946,12 +2149,18 @@ func _update_demand() -> void:
 	shop_target += population * visitors * stations
 	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
+	# An airport brings visitors, business and freight.
+	var office_boost := 1.0
+	if airports_open > 0:
+		shop_target += population * Settings.AIRPORT_VISITORS
+		office_boost += Settings.AIRPORT_OFFICE_BOOST
+		trade += Settings.AIRPORT_FREIGHT
 	var b := business_appeal()
 	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, b)
 	# Offices: a share of the workers who aren't in shops (see office_share). Only
 	# offices that are built take workers from industry, so a town with no office
 	# zone runs exactly as before.
-	var office_target := maxf(workers - shop_target, 0.0) * office_share()
+	var office_target := maxf(workers - shop_target, 0.0) * minf(office_share() * office_boost, 1.0)
 	demand[Tile.OFFICES] = _business_demand(office_target - office_jobs, office_jobs, b)
 	demand[Tile.INDUSTRY] = _business_demand(workers - shop_target - office_jobs - industry_jobs + trade,
 		industry_jobs, b)
@@ -2305,6 +2514,9 @@ func _update_traffic() -> void:
 		elif t == Tile.HARBOUR and building_working(i):
 			var port: float = info(t).get("port_jobs", 0)
 			lorry_from[a] += port * Settings.TRAFFIC_HARBOUR_LORRIES
+		elif t == Tile.AIRPORT and _airport_terminals.has(i):
+			shop_from[a] += population * Settings.AIRPORT_VISITORS * Settings.AIRPORT_TRIPS
+			lorry_from[a] += Settings.AIRPORT_FREIGHT * Settings.TRAFFIC_HARBOUR_LORRIES
 	transit_trips = roundi(by_transit)
 
 	var flow := PackedFloat32Array()        # per group, per road node: trips setting off from there

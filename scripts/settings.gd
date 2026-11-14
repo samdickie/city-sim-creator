@@ -146,6 +146,15 @@ const SERVICE_COSTS := [1500, 1500, 2000, 4000]    # £ to build
 const SERVICE_UPKEEP := [60, 60, 80, 150]           # £ per month at 100% funding
 const SERVICE_RADIUS := [16, 14, 12, 20]            # tiles covered at 100% funding (16 = 800 m)
 const SERVICE_POWER := 3                            # power each uses, in zone levels
+# Small versions (police office, small fire station, clinic; no small school):
+# cheap first cover for a village, but they reach about half as far, so a town
+# covered only by small ones pays more in the end.
+const SMALL_SERVICE_NAMES := ["Police office", "Small fire station", "", "Clinic"]
+const SMALL_SERVICE_WORDS := ["police_office", "fire_small", "", "clinic"]
+const SMALL_SERVICE_COSTS := [500, 500, 0, 1200]
+const SMALL_SERVICE_UPKEEP := [22, 22, 0, 50]
+const SMALL_SERVICE_RADIUS := [8, 7, 0, 10]
+const SMALL_SERVICE_POWER := 1
 const SERVICE_LAND_BONUS := [0.04, 0.03, 0.05, 0.04] # land value added where fully covered
 const COVERED := 0.3                                # coverage that counts as "covered"
 const MAX_FUNDING := 1.5                            # funding runs from 0% (closed) to 150%
@@ -219,7 +228,22 @@ const BUILDINGS := {
 		"value": 0.08, "radius": 6, "visitors": 0.03, "about": "Visitors by train: more demand for shops, higher land value"},
 	"harbour": {"name": "Harbour", "cost": 7000, "upkeep": 120, "uses_power": 4, "unlock": 1000, "near_sea": true,
 		"value": -0.02, "radius": 3, "port_jobs": 80, "about": "Ships bring trade: more demand for industry"},
+	"airport": {"name": "Airport", "cost": 200, "upkeep": 4, "area": true, "unlock": 5000,
+		"about": "Drag out a box at least 800 m long for the runway, with room beside it and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }
+# --- Airport (dragged out like a golf course; the layout is worked out from its shape) ---
+# The runway is the longest straight run of airport tiles; the terminal goes on
+# the tile nearest a road. It opens once it has all of these and power.
+const AIRPORT_MIN_RUNWAY := 16      # tiles in a straight line (800 m)
+const AIRPORT_MIN_TILES := 40       # in all, so there's room for a terminal and apron
+const AIRPORT_APRON_ROWS := 5       # the runway likes to be this many tiles from the road side (terminal, stands, taxiway)
+const AIRPORT_VISITORS := 0.05      # extra shop demand, as a share of the population
+const AIRPORT_OFFICE_BOOST := 0.2   # this much more demand for offices
+const AIRPORT_FREIGHT := 120        # extra demand for industry, in jobs
+const AIRPORT_NOISE := 0.03         # land value lost per airport tile within AIRPORT_NOISE_RADIUS...
+const AIRPORT_NOISE_RADIUS := 4
+const AIRPORT_NOISE_MAX := 0.15     # ...up to this much, however big the airport
+const AIRPORT_TRIPS := 2.0          # car trips a day per visitor (there and back), from the terminal
 const LEISURE_APPEAL_MAX := 0.3   # all the leisure buildings together add at most this much appeal
 const RUBBISH_START_POP := 400    # below this the town's rubbish isn't a problem
 const RUBBISH_PER_JOB := 0.5      # a job makes half as much rubbish as a resident
@@ -241,6 +265,7 @@ const POLLUTION_SOURCES := {
 	"landfill": [0.12, 4],                # per tile, so a big tip smells more
 	"recycling": [0.08, 2],
 	"harbour": [0.35, 5],                 # ships' engines
+	"airport": [0.012, 4],                # per tile: jet fumes round a working airport
 }
 const PARK_CLEANING := 0.1                # each park tile soaks up this much within its spread (golf half)
 const PARK_CLEANING_SPREAD := 2

@@ -61,7 +61,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
-	WOODLAND, OFFICES }   # same order as simulation.gd
+	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -210,6 +210,7 @@ const LOT_GOLF := 16
 const LOT_YARD := 17         # concrete and gravel: fire station, depots, utilities, power stations
 const LOT_HOSPITAL := 18
 const LOT_MEADOW := 19       # rough grass under wind turbines and solar panels
+const LOT_AIRPORT := 21      # runway, taxiway, apron or grass: the detail is sim.airport_role
 const LOT_WOODS := 20        # planted woodland: the terrain paints its floor; a road's verge beside it is woods floor too
 const SIDES: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 var _lot_kind := PackedByteArray()
@@ -1261,11 +1262,15 @@ func refresh_ground(layout_changed: bool = true) -> void:
 					warn.g = 1.0   # (shown as a floating icon, see _build_alerts)
 				elif sim.needs_water_to_grow(i):
 					warn.b = 1.0
-			elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
+			elif sim.is_service(t):
 				if reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
 				elif power[i] == 0:
 					warn.g = 1.0
+			elif t == Tile.AIRPORT:
+				# (Only the terminal needs the road: the hover text says what's missing.)
+				if sim.airport_role_at(i) == AIRPORT_TERMINAL and reach[i] > Settings.ROAD_REACH:
+					warn.r = 1.0
 			elif sim.is_building(t):
 				if not sim.makes_power(t) and not sim.needs_nothing(t):
 					if reach[i] > Settings.ROAD_REACH:
@@ -1401,7 +1406,7 @@ func refresh_buildings() -> void:
 			_plan_abandoned(i, t, wall_list, roof_list, chimney_list, walls_before, roofs_before)
 		elif ZONE_TINTS.has(t) and lv > 0:
 			_plan_zone(i, t, sim.stage(i), wall_list, roof_list, chimney_list)
-		elif t >= Tile.POLICE and t <= Tile.HOSPITAL:
+		elif sim.is_service(t):
 			_plan_service(i, t, wall_list, roof_list)
 		elif ZONE_TINTS.has(t) and _lot_kind[i] == LOT_SITE:
 			_plan_site(i, t, wall_list)
@@ -1558,7 +1563,7 @@ func _plan_lots() -> void:
 					kind = LOT_CIVIC
 				Tile.SCHOOL:
 					kind = LOT_SCHOOL
-				Tile.HOSPITAL:
+				Tile.HOSPITAL, Tile.CLINIC, Tile.POLICE_OFFICE:
 					kind = LOT_HOSPITAL
 				Tile.GOLF:
 					kind = LOT_GOLF
@@ -1566,7 +1571,10 @@ func _plan_lots() -> void:
 					kind = LOT_MEADOW
 				Tile.WOODLAND:
 					kind = LOT_WOODS
-				Tile.FIRE, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
+				Tile.AIRPORT:
+					kind = LOT_AIRPORT
+					detail = sim.airport_role[i] if i < sim.airport_role.size() else 4
+				Tile.FIRE, Tile.FIRE_SMALL, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
 						Tile.LANDFILL, Tile.RECYCLING, Tile.BUS_DEPOT, Tile.HARBOUR:
 					kind = LOT_YARD
 		_lot_kind[i] = kind
@@ -2053,10 +2061,9 @@ func _update_pins() -> void:
 	# they can be found from afar. Pins are reused from one paint to the next.
 	var count := 0
 	if overlay == Overlay.SERVICES and service_filter >= 0:
-		var want := Tile.POLICE + service_filter
 		var tiles: PackedByteArray = sim.tiles
 		for i in tiles.size():
-			if tiles[i] != want:
+			if sim.service_of(tiles[i]) != service_filter:
 				continue
 			if count == _pin_items.size():
 				var fresh := Sprite3D.new()
@@ -2152,7 +2159,7 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 	if water[i] == 1:
 		return none
 	var zone := ZONE_TINTS.has(t)
-	var service := t >= Tile.POLICE and t <= Tile.HOSPITAL
+	var service: bool = sim.is_service(t)
 	match overlay:
 		Overlay.LAND_VALUE:
 			# Bands match the hover text and the land value tall buildings need.
@@ -2257,7 +2264,7 @@ func _one_service_colour(i: int, t: int, zone: bool, service: bool) -> Color:
 	# orange, its buildings blue and the other services' buildings grey.
 	var s := service_filter
 	if service:
-		return Color(OV_BLUE, 0.95) if t == Tile.POLICE + s else Color(OV_GREY, 0.6)
+		return Color(OV_BLUE, 0.95) if sim.service_of(t) == s else Color(OV_GREY, 0.6)
 	var band: int = sim.cover_strength(s, i)
 	if zone:
 		if band >= 2:
@@ -2443,7 +2450,7 @@ func _busy_junction(x: int, y: int, tiles: PackedByteArray) -> bool:
 				continue
 			var k := ny * map_w + nx
 			var t: int = tiles[k]
-			if t == Tile.SHOPS or t == Tile.OFFICES or (t >= Tile.POLICE and t <= Tile.HOSPITAL) or (t >= Tile.LIBRARY and t <= Tile.STATION):
+			if t == Tile.SHOPS or t == Tile.OFFICES or sim.is_service(t) or (t >= Tile.LIBRARY and t <= Tile.STATION):
 				return true
 			if t == Tile.HOMES and (sim.density[k] >= 1 or sim.district[k] == 2):
 				return true
@@ -3067,9 +3074,54 @@ func _plan_service(i: int, t: int, wall_list: Array, roof_list: Array) -> void:
 				_plant(i, front, -21.0 + k * 7.5, depth - 6.0, rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
 			for k in 3:
 				_parked_car(i, front, 15.5 + k * 3.0, 16.0, true, rng)
+		Tile.POLICE_OFFICE:
+			# A two-storey sandstone office with the navy roof and blue sign of the
+			# big station, a blue lamp by the door, one patrol car, a lawn and a hedge.
+			var spot := _place(i, front, -8.0, 4.0, 18.0, 11.0)
+			_classical_block(spot, 18.0, 11.0, 2, BLONDE_SANDSTONE, false, false, wall_list, roof_list, true,
+				POLICE_ROOF)
+			_front_panel(spot, 11.0, 0.0, 0.0, 2.4, 3.0, POLICE_BLUE.darkened(0.35), wall_list)
+			_front_panel(spot, 11.0, 0.0, 3.2, 7.0, 0.7, POLICE_BLUE, wall_list)
+			_prop(i, front, -3.0, 2.6, 0.16, 0.16, 3.0, CHARCOAL)
+			_prop(i, front, -3.0, 2.6, 0.5, 0.5, 0.6, POLICE_BLUE, 3.0)
+			_slab(i, front, 14.0, 3.0, 14.0, 20.0, CAR_PARK)
+			_parked_car(i, front, 11.0, 6.0, true, rng, PATROL_WHITE)
+			_parked_car(i, front, 16.0, 6.0, true, rng)
+			_prop(i, front, -8.0, 17.0, 32.0, 0.8, 1.2, _hedge_colour(rng))
+			for k in 3:
+				_plant(i, front, -19.0 + k * 16.0, depth - 8.0, rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
+		Tile.FIRE_SMALL:
+			# A two-bay red sandstone shed with red doors, an apron and one engine.
+			var spot := _place(i, front, -6.0, 8.0, 20.0, 14.0)
+			_add_block(spot, 20.0, 14.0, 6.6, RED_SANDSTONE, STYLE_FLATS, 2.2, SLATE, wall_list, roof_list)
+			for k in 2:
+				_front_panel(spot, 14.0, -4.6 + k * 9.2, 0.0, 7.0, 4.8, FIRE_RED, wall_list)
+			_slab(i, front, -6.0, 3.0, 20.0, 5.0, CONCRETE)
+			var hut := _place(i, front, 10.0, 10.0, 8.0, 9.0)
+			_add_block(hut, 8.0, 9.0, 3.6, RED_SANDSTONE, STYLE_FLATS, 1.6, SLATE, wall_list, roof_list)
+			_prop(i, front, -10.5, 24.0, 2.6, 8.5, 3.2, FIRE_RED)       # the fire engine, out the back
+			_prop(i, front, 18.0, 6.0, 1.6, 1.6, 9.0, RED_SANDSTONE)     # a short hose tower
+		Tile.CLINIC:
+			# A low white health centre with a glass porch and a green cross, a small
+			# car park, a lawn and trees.
+			var main := _place(i, front, -7.0, 7.0, 28.0, 14.0)
+			_add_block(main, 28.0, 14.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			_front_panel(main, 14.0, 9.0, 3.6, 0.9, 2.7, CLINIC_GREEN, wall_list)
+			_front_panel(main, 14.0, 9.0, 4.5, 2.7, 0.9, CLINIC_GREEN, wall_list)
+			var porch := _place(i, front, -9.0, 4.0, 8.0, 3.2)
+			_add_block(porch, 8.0, 3.2, 3.6, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+			_front_panel(porch, 3.2, 0.0, 3.6, 9.0, 0.4, TRIM, wall_list)
+			_slab(i, front, 16.0, 3.0, 14.0, 22.0, CAR_PARK)
+			for k in 3:
+				_parked_car(i, front, 11.5 + k * 4.0, 6.0, true, rng)
+			_prop(i, front, 16.0, 16.0, 2.3, 6.0, 2.8, AMBULANCE_YELLOW)
+			_prop(i, front, -7.0, 23.0, 30.0, 0.8, 1.2, _hedge_colour(rng))
+			for k in 3:
+				_plant(i, front, -19.0 + k * 16.0, depth - 8.0, rng.randf_range(7.0, 10.0), TreeKind.BROADLEAF, rng)
 
 
 const POLICE_ROOF := Color(0.17, 0.24, 0.40)    # navy slate
+const CLINIC_GREEN := Color(0.10, 0.55, 0.30)
 const SALTIRE_BLUE := Color(0.0, 0.37, 0.72)
 const COPPER_GREEN := Color(0.40, 0.64, 0.54)    # weathered copper domes and spires
 
@@ -4500,6 +4552,8 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				Color(0.55, 0.55, 0.55)]
 			for k in 6:
 				_prop(i, front, -19.0 + k * 6.5, depth - 10.0, 2.6, 6.0, 2.4, skips[k % 4])
+		Tile.AIRPORT:
+			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
 		Tile.GOLF:
 			# Fairway (the ground colour), a green with its flag, bunkers, a tee and
 			# a few trees in the rough.
@@ -4648,6 +4702,128 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_prop(i, front, 6.0 + (k % 4) * 4.0, 8.0 + (k / 4) * 7.0, 2.5, 6.1, 2.6 * (1 + k % 2),
 					CONTAINERS[k % CONTAINERS.size()])
 			_plan_on_water(i, rng, true)
+
+
+# Airport roles, as simulation.gd AirportRole (the runway, taxiway, apron and grass are
+# painted by the shader; only what stands up is drawn here).
+const AIRPORT_APRON := 3
+const AIRPORT_TERMINAL := 5
+const AIRPORT_TOWER := 6
+const AIRPORT_HANGAR := 7
+const TAIL_COLOURS := [Color(0.10, 0.25, 0.55), Color(0.75, 0.10, 0.10), Color(0.95, 0.60, 0.05),
+	Color(0.05, 0.45, 0.40), Color(0.35, 0.15, 0.50), Color(0.15, 0.15, 0.18)]
+const TOWER_GLASS := Color(0.10, 0.17, 0.22)
+
+
+func _airport_spot(i: int, airside: Vector2i, along: float, back: float, w: float, d: float) -> Dictionary:
+	# A spot on an airport tile, like _place gives: `back` metres from the tile's
+	# landside edge towards the runway, `along` metres to one side.
+	var centre := tile_centre(Vector2i(i % map_w, i / map_w))
+	var away := Vector2(airside)
+	var across := Vector2(away.y, -away.x)
+	var mid := centre - away * (cell * 0.5) + across * along + away * (back + d * 0.5)
+	var base := INF
+	for sx: float in [-0.5, 0.5]:
+		for sz: float in [-0.5, 0.5]:
+			var q: Vector2 = mid + across * (w * sx) + away * (d * sz)
+			base = minf(base, height_at(q.x, q.y))
+	base = maxf(base, 0.3) - 0.3
+	return {"pos": Vector3(mid.x, base, mid.y), "x": Vector3(away.y, 0.0, -away.x), "z": Vector3(away.x, 0.0, away.y),
+		"rise": 0.0, "ground": maxf(height_at(mid.x, mid.y), 0.0)}
+
+
+func _airside(i: int) -> Vector2i:
+	# Which way the runway lies from this airport tile (across the runway's line).
+	var vertical: bool = (sim.airport_role[i] & 8) != 0
+	var x := i % map_w
+	var y := i / map_w
+	for n in range(1, 40):
+		for way: int in [1, -1]:
+			var p := Vector2i(x + way * n, y) if vertical else Vector2i(x, y + way * n)
+			if p.x < 0 or p.y < 0 or p.x >= map_w or p.y >= map_h:
+				continue
+			var k := p.y * map_w + p.x
+			if sim.tiles[k] == Tile.AIRPORT and sim.airport_role_at(k) == 1:
+				return Vector2i(way, 0) if vertical else Vector2i(0, way)
+	return Vector2i(0, 1)
+
+
+func _plan_airport(i: int, rng: RandomNumberGenerator, wall_list: Array, roof_list: Array,
+		chimney_list: Array) -> void:
+	if i >= sim.airport_role.size():
+		return
+	var role: int = sim.airport_role_at(i)
+	if role < AIRPORT_APRON or role == 4:
+		return
+	var airside := _airside(i)
+	match role:
+		AIRPORT_APRON:
+			# An airliner on its stand, nose in towards the terminal.
+			if rng.randf() < 0.75:
+				_airliner(_airport_spot(i, airside, rng.randf_range(-3.0, 3.0), 7.0, 30.0, 34.0),
+					TAIL_COLOURS[rng.randi_range(0, TAIL_COLOURS.size() - 1)])
+			_prop_items.append([Transform3D(Basis.from_scale(Vector3(2.2, 2.0, 5.0)),
+				_airport_spot(i, airside, 19.0, 4.0, 2.2, 5.0)["pos"]), AMBULANCE_YELLOW])     # a tug
+		AIRPORT_TERMINAL:
+			# A long glass hall under a white roof, a pier out to the stands with two
+			# air bridges, and a drop-off canopy on the landside.
+			var hall := _airport_spot(i, airside, 0.0, 5.0, 50.0, 24.0)
+			_add_block(hall, 50.0, 24.0, 11.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
+			var hall_pos: Vector3 = hall["pos"]
+			_box_item(_prop_items, hall_pos + Vector3.UP * 11.0, hall["x"], hall["z"], Vector3(50.0, 0.9, 28.0), MODERN_WHITE)
+			_box_item(_prop_items, hall_pos + Vector3.UP * 11.9, hall["x"], hall["z"], Vector3(50.0, 1.4, 12.0), MODERN_WHITE)
+			var canopy := _airport_spot(i, airside, 0.0, 0.5, 44.0, 4.5)
+			var canopy_pos: Vector3 = canopy["pos"]
+			_box_item(_prop_items, canopy_pos + Vector3.UP * 4.6, canopy["x"], canopy["z"], Vector3(44.0, 0.4, 5.0), MODERN_WHITE)
+			var pier := _airport_spot(i, airside, 0.0, 29.0, 9.0, 21.0)
+			_add_block(pier, 9.0, 21.0, 7.5, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			for side: float in [-1.0, 1.0]:
+				var bridge := _airport_spot(i, airside, side * 9.5, 40.0, 10.0, 2.6)
+				var bridge_pos: Vector3 = bridge["pos"]
+				_box_item(_prop_items, bridge_pos + Vector3.UP * 3.6, bridge["x"], bridge["z"], Vector3(10.0, 2.6, 2.6), TRIM)
+				_box_item(_prop_items, bridge_pos + bridge["x"] * (side * 4.0), bridge["x"], bridge["z"],
+					Vector3(0.8, 3.6, 0.8), CHARCOAL)
+		AIRPORT_TOWER:
+			# The control tower: a concrete shaft, a glazed cab and its roof, with a
+			# low operations block and the fire crew's shed beside it.
+			var foot: Vector3 = _airport_spot(i, airside, -10.0, 20.0, 8.0, 8.0)["pos"]
+			_cylinder(chimney_list, foot, 3.4, 32.0, CONCRETE)
+			_cylinder(chimney_list, foot + Vector3.UP * 32.0, 6.0, 4.6, TOWER_GLASS)
+			_cylinder(chimney_list, foot + Vector3.UP * 36.6, 6.6, 0.7, MODERN_WHITE)
+			_cylinder(chimney_list, foot + Vector3.UP * 37.3, 0.25, 7.0, CHARCOAL)
+			var ops := _airport_spot(i, airside, 8.0, 6.0, 26.0, 13.0)
+			_add_block(ops, 26.0, 13.0, 7.0, MODERN_WHITE, STYLE_MODERN, 0.0, SLATE, wall_list, roof_list)
+			var crew := _airport_spot(i, airside, 12.0, 30.0, 18.0, 12.0)
+			_add_block(crew, 18.0, 12.0, 6.0, FIRE_RED.darkened(0.15), STYLE_INDUSTRY, 0.0, SLATE, wall_list, roof_list)
+			_prop_items.append([Transform3D(Basis.from_scale(Vector3(2.6, 3.2, 8.5)),
+				_airport_spot(i, airside, 12.0, 43.0, 2.6, 8.5)["pos"]), FIRE_RED])
+		AIRPORT_HANGAR:
+			# A big hangar with its doors to the airfield.
+			var shed := _turned(_airport_spot(i, airside, 0.0, 6.0, 44.0, 36.0), 2)
+			_add_block(shed, 44.0, 36.0, 14.0, SHED_METAL, STYLE_INDUSTRY, 0.0, SLATE, wall_list, roof_list)
+			var shed_pos: Vector3 = shed["pos"]
+			_box_item(_prop_items, shed_pos + Vector3.UP * 14.0, shed["x"], shed["z"], Vector3(45.0, 1.2, 37.0),
+				SHED_METAL.darkened(0.25))
+			_front_panel(shed, 36.0, 0.0, 0.0, 36.0, 11.0, SHED_METAL.lightened(0.25), wall_list)
+
+
+func _airliner(spot: Dictionary, tail: Color) -> void:
+	# A twin-jet airliner out of boxes, about 32 m long: its nose at the spot's
+	# landside end, its tail towards the runway.
+	var x_axis: Vector3 = spot["x"]
+	var z_axis: Vector3 = spot["z"]
+	var at: Vector3 = spot["pos"]
+	at.y = float(spot["ground"])
+	var white := Color(0.94, 0.94, 0.93)
+	_box_item(_prop_items, at + Vector3.UP * 2.0, x_axis, z_axis, Vector3(3.6, 3.6, 30.0), white)            # fuselage
+	_box_item(_prop_items, at + Vector3.UP * 2.3 - z_axis * 16.2, x_axis, z_axis, Vector3(2.6, 2.8, 2.6), white)  # nose
+	_box_item(_prop_items, at + Vector3.UP * 2.5 + z_axis * 1.0, x_axis, z_axis, Vector3(30.0, 0.5, 5.0), Color(0.80, 0.81, 0.82))
+	_box_item(_prop_items, at + Vector3.UP * 4.4 + z_axis * 13.2, x_axis, z_axis, Vector3(11.0, 0.4, 3.0), white)
+	_box_item(_prop_items, at + Vector3.UP * 5.6 + z_axis * 12.6, x_axis, z_axis, Vector3(0.5, 5.6, 4.6), tail)   # fin
+	_box_item(_prop_items, at + Vector3.UP * 2.0 + z_axis * 13.0, x_axis, z_axis, Vector3(3.7, 1.2, 4.0), tail)
+	for side: float in [-1.0, 1.0]:
+		_box_item(_prop_items, at + Vector3.UP * 0.9 + x_axis * (side * 5.2) - z_axis * 1.5, x_axis, z_axis,
+			Vector3(1.9, 1.9, 3.8), Color(0.72, 0.73, 0.75))
 
 
 func _plan_fence(i: int, front: Vector2i, depth: float) -> void:
