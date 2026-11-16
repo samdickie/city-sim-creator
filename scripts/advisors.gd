@@ -177,11 +177,12 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 	if rubbish > 0.3:
 		_add(out, "rubbish", URGENT if _n(stuck, "rubbish") > 0 else WARNING,
 			"Rubbish is piling up: build a landfill",
-			"Uncollected rubbish puts people off moving here. Build a landfill or recycling "
-			+ "centre (Utilities) with a road; recycling also needs power.", NO_OVERLAY)
+			"Uncollected rubbish puts people off moving here. Build a landfill, recycling centre "
+			+ "or (in a bigger town) an incinerator (Utilities) with a road; the last two also need power.", NO_OVERLAY)
 	elif rubbish > 0.0:
 		_add(out, "rubbish_some", ADVICE, "Some rubbish isn't collected: add landfill space",
-			"The town makes more rubbish than its landfills and recycling can take.", NO_OVERLAY)
+			"The town makes more rubbish than its landfills, recycling and incinerators can take. "
+			+ "Point at one to see how full it is.", NO_OVERLAY)
 
 	# --- Roads ---
 	var no_road := _n(stuck, "road")

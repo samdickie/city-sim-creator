@@ -27,6 +27,7 @@ signal new_city_cancelled
 signal borrow_pressed(amount: int)
 signal repay_pressed(amount: int)           # -1 = everything owed
 signal save_pressed
+signal undo_pressed
 signal load_pressed
 signal example_chosen(id: String)           # a ready-made city picked in the game menu (Settings.EXAMPLES)
 signal day_cycle_toggled(on: bool)
@@ -93,6 +94,7 @@ var _menu_panel: PanelContainer
 var example_buttons: Dictionary = {}       # example id -> its row in the game menu
 var _day_button: Button
 var speed_buttons := {}
+var undo_button: Button
 var date_label: Label
 var clock_label: Label
 
@@ -361,6 +363,12 @@ func _build_top_left() -> void:
 		b.pressed.connect(func(): speed_chosen.emit(s))
 		speeds.add_child(b)
 		speed_buttons[s] = b
+
+	row.add_child(_vline())
+	undo_button = _icon_button("undo", "Nothing to undo", false)
+	undo_button.pressed.connect(func(): undo_pressed.emit())
+	undo_button.disabled = true
+	row.add_child(undo_button)
 
 
 func _build_game_menu() -> void:
@@ -1175,6 +1183,7 @@ func _build_help() -> void:
 			["T", "Cars and people on the streets on or off"],
 			["H", "This help"],
 			["Ctrl/Cmd S, L", "Save, load"],
+			["Ctrl/Cmd Z", "Undo the last build (up to 20, for a year); you get the money back"],
 			["Move", "Two-finger scroll, middle-drag, or WASD"],
 			["Turn", "Right-drag, or Q / E (rotate and tilt)"],
 			["Zoom", "Pinch or scroll wheel"]]:
@@ -1433,6 +1442,15 @@ func set_speed(speed: int) -> void:
 	clock_label.add_theme_color_override("font_color", WARN if speed == 0 else TEXT_FAINT)
 
 
+func set_undo(tip: String) -> void:
+	# tip: what Undo would do ("" = nothing to undo: the button is greyed out).
+	if undo_button == null:
+		return
+	undo_button.disabled = tip == ""
+	undo_button.tooltip_text = tip if tip != "" else "Nothing to undo"
+	undo_button.modulate.a = 1.0 if tip != "" else 0.35
+
+
 func set_clock(text: String) -> void:
 	clock_label.text = text
 
@@ -1542,7 +1560,11 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 	var piling: float = sim.rubbish_shortfall()
 	rubbish_label.text = "Rubbish: %s" % sim.rubbish_word()
 	if piling > 0.3:
-		rubbish_label.text += " (build a landfill or recycling)"
+		rubbish_label.text += " (build a landfill, recycling or incinerator)"
+	elif sim.population >= Settings.RUBBISH_START_POP and sim.rubbish_capacity > 0:
+		# How much room is left at the tips: "all collected, 35% room to spare".
+		var spare := 100 - roundi(minf(float(sim.rubbish_made) / sim.rubbish_capacity, 1.0) * 100.0)
+		rubbish_label.text += ", %d%% room to spare" % spare
 	var collecting: bool = sim.population >= Settings.RUBBISH_START_POP
 	var rubbish_colour := TEXT_DIM
 	if collecting:

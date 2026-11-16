@@ -7,7 +7,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Decisions
 - **Engine:** Godot 4.7, GDScript. Free tools only.
-- **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings.
+- **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings. (Planned: a generated map instead of Troon; see Tech layer.)
 - **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D version is kept in `archive/2d/` for reference (Godot ignores it).
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
 - **Simulate tiles and totals, not individual people.** A zone counts as connected if a road is near it. Traffic is a light model of trips a day per road tile (see Traffic), not individual cars; for now it is only shown, it doesn't hold the town back.
@@ -116,7 +116,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Interface
 - The town is the hero: small frosted-glass pieces hug the edges, nothing sits over the middle. Glass: the game behind blurred, drained of most colour and darkened to a cool slate (so text reads the same over grass, sea, overlays and night), rounded corners, hairline edge, soft shadow. Pieces fade in and out.
-- Top left: game menu (New city, Save, Load, How to play, Example cities: Village, Town and City, ready-made towns to load and carry on with; Day and night), city name, date and clock, and speed as pause / play / fast icons (the chosen one lit; pause in amber).
+- Top left: game menu (New city, Save, Load, How to play, Example cities: Village, Town and City, ready-made towns to load and carry on with; Day and night), city name, date and clock, speed as pause / play / fast icons (the chosen one lit; pause in amber), and Undo.
+- Undo (the arrow, or Ctrl/Cmd+Z): each drag is one step; undoing puts its tiles back exactly as they were (zone, level, density, district, kind of road) and gives back what it cost. It remembers the last 20 builds for up to a year (it's for mistakes, not free demolition later); loading or starting a city forgets them. The button's tooltip says what it would undo; greyed out when there's nothing.
 - Top centre: advisors ticker (see Advisors).
 - Top right: status strip: money and last month's change (green or red), people and jobs, happiness, four small meters (power, water, services, rubbish: icon and bar, red/amber/green, details on hover) and the demand meter (homes, shops, industry bars round a zero line). Clicking the strip opens the City panel: budget (with the difficulty), tax rate with - / +, loans, happiness with its complaints and fixes, services, housing and last month's growth.
 - Bottom centre: a card with the picture of the tool in use, what's under the mouse (name, stage, land value, services, problems) and what building there costs (green) or why it can't (red). Messages pop up just above it.
@@ -137,7 +138,11 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Water and rubbish (Utilities, 7)
 - Anything bigger than a first-level plot needs water. Water pumps (£800, 400 units, need power) and water towers (£300, 120 units) supply it; it travels through roads and buildings like power, nearest plots first.
-- Towns over 400 people make rubbish (1 per resident, 0.5 per job). Landfill (£100 a tile, takes 800, lowers land value nearby) and recycling centres (£2,500, takes 2,500, from 1,000 people) collect it. Uncollected rubbish cuts appeal (up to -0.5).
+- Towns over 400 people make rubbish (1 per resident, 0.5 per job). Three ways to deal with it:
+  - Landfill: £100 a tile, takes 2,000 (was 800: it needed far too much), lowers land value nearby and smells a little.
+  - Recycling centre: £2,500, takes 6,000, clean, needs power, from 800 people.
+  - Incinerator: £9,000, £160 a month, takes 25,000 on one plot, needs power, from 4,000 people; its tall chimney smokes (pollution 0.45, 300 m) and lowers land value nearby.
+- The rubbish goes to recycling first, then incinerators, and landfill takes the rest. Hovering one says how full it is (a landfill counts all its joined-up tiles): "This landfill (12 tiles) takes the rubbish of 24,000 residents: 78% full, 22% to spare". The City panel's rubbish line says how much room is left. Uncollected rubbish cuts appeal (up to -0.5).
 
 ## Leisure and landmarks (-)
 - Park (£100 a tile, £1 a month; the 8 key), woodland, golf course (£150 a tile, drag to lay out holes), library (from 500 people), museum (2,000), stadium (5,000, one only), marina (1,500, by the sea), town hall (1,000, one only). Golf and the landmarks raise land value round them and the town's appeal (all together up to +0.3), and cost upkeep. They need a road (and power, except golf).
@@ -152,7 +157,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Bus depot (from 500 people): plots within 700 m can grow 3 tiles from a road instead of 2.
 - Railway station (2,000): visitors add shop demand (3% of the population each, up to two stations); raises land value.
 - Harbour (1,000, by the sea): ships bring trade, +80 industry demand each.
-- Airport (5,000): dragged out as a box, £200 a tile, £2 a tile a month. The game lays it out: the runway is the longest straight run of tiles (several as long: the one five tiles back from the road side), with a taxiway beside it, stands with airliners, and a terminal (two tiles), control tower and hangars on the tile nearest a road. It opens with a runway of 800 m, 40 tiles in all and a road within 2 tiles of the terminal (it needs no mains power); the hover text says what's missing. Open, it adds shop demand (visitors, 3% of the population), 20% more office demand and +120 industry demand, brings half as many tourists again to the landmarks, and its noise lowers land value round it (capped) with a little pollution. Only one airport counts.
+- Airport (5,000): dragged out as a box, £200 a tile, £2 a tile a month. The game lays it out: the runway is the longest straight run of tiles (several as long: the one five tiles back from the road side), with a taxiway beside it, stands with airliners, and a terminal (two tiles), control tower and hangars on the tile nearest a road. It opens with a runway of 800 m, 40 tiles in all and a road within 2 tiles of the terminal (it needs no mains power); the hover text says what's missing. While dragging, the box is red until it's big enough (16 tiles in a line and 40 in all, counting any airport it joins on to), with the size and what's missing; then it turns green. Let go while it's red, or without the money for all of it, and nothing is built. Open, it adds shop demand (visitors, 3% of the population), 20% more office demand and +120 industry demand, brings half as many tourists again to the landmarks, and its noise lowers land value round it (capped) with a little pollution. Only one airport counts.
 - All the numbers for these buildings are in `Settings.BUILDINGS`.
 
 ## Offices (a zone of their own)
@@ -187,7 +192,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Pollution
 - A pollution map (0 clean to 1 heavy) is worked out every month and whenever the town changes; it isn't saved (loading works it out again).
-- Sources add up where they overlap, fading out with distance: industry 0.06 per stage (200 m), coal plant 1.2 (450 m), gas plant 0.5 (300 m), harbour 0.35 (250 m), landfill 0.12 per tile (200 m), recycling 0.08 (100 m). Nuclear, wind and solar are clean. Parks soak some up (golf half as much; woodland a bit over half, capped, see Woodland). The total is eased into 0-1, so a coal plant is "heavy" for about 200 m.
+- Sources add up where they overlap, fading out with distance: industry 0.06 per stage (200 m), coal plant 1.2 (450 m), gas plant 0.5 (300 m), harbour 0.35 (250 m), landfill 0.12 per tile (200 m), recycling 0.08 (100 m), incinerator 0.45 (300 m). Nuclear, wind and solar are clean. Parks soak some up (golf half as much; woodland a bit over half, capped, see Woodland). The total is eased into 0-1, so a coal plant is "heavy" for about 200 m.
 - Effects: land value -0.2 in full pollution; homes grow up to 60% slower in polluted air (the hover text says so); the share of residents in polluted air (0.3 or more) costs up to -0.15 appeal. The old land value penalties of industry, power plants, landfill and the harbour were halved or so, as the smoke is now counted here.
 - Pollution map view: clean, a little, some, polluted, heavy (green to red). Hover text mentions pollution from "some" upwards, and polluting buildings say how far their pollution reaches.
 - Coal plant chimneys smoke (a few particle streams; looks only).
@@ -252,11 +257,117 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Only the streets round the camera are filled (cars up to 1.8 km away as you zoom out, people within 700 m); anyone who drives out of range reappears in view. At most 300 vehicles and 400 people; no people drawn beyond 1.1 km zoom and no cars beyond 3.5 km.
 - Drawn with six MultiMeshes (car bodies, cabins, lamps, light pools, people, heads) filled from one buffer each frame; with a crowd, each person moves every other frame. Code in `scripts/traffic.gd`; numbers in `scripts/settings.gd`.
 
+## Tech layer (planned, Nov 2026; nothing built yet)
+The next direction: blend town planning with today's big-tech issues. You're the mayor; tech companies write asking to build, at a scale you pick, and you live with what follows: data centres eating power and water, campuses pushing up house prices, gigafactories filling the roads. Tongue-in-cheek throughout. Every number below is a first guess, to be tuned in play.
+
+### No more Troon
+- The map stops being Troon. A **generated map** replaces `map/troon_map.json`: same format (heights and sea per tile), made from a seed, so the same seed always gives the same land. The New city dialog adds a kind of land: **Coast, River valley, Inland hills, Desert flats** (cheap flat land is what data centres and gigafactories look for). The player names their city.
+- The example cities, screenshot town and play test are laid out on Troon's land, so they move to fixed seeds and get rebuilt.
+- The buildings stay the sandstone set for now; a modern glass-and-lawn style is a later job.
+
+### Real companies, real founders, as satire
+- Real company and founder names, so people recognise them. Names in text only: **no logos**.
+- Letters are cliché parodies of each founder's **public persona** (catchphrases, posting style, famous habits). No invented facts, scandals or private lives: that keeps it satire.
+- A line on the title screen and in the credits: "This is satire. None of these people or companies are involved, and they didn't write any of this."
+- Each founder has a **gameplay quirk**, not just a voice:
+
+| Founder | Voice | Quirk |
+| --- | --- | --- |
+| Elon Musk (Tesla, SpaceX) | memes, "hardcore", 2am energy | promises 6 months, takes 3 years; threatens to leave if taxes rise |
+| Sam Altman (OpenAI) | all lowercase, calm, "benefit all of humanity" | asks for more power every year |
+| Jensen Huang (Nvidia) | leather jacket, huge enthusiasm | the bigger the scale, the better the deal |
+| Mark Zuckerberg (Meta) | "bringing the community closer together" | pivots: the campus changes purpose halfway |
+| Jeff Bezos (Amazon) | "it's still Day 1" | makes you bid against rival cities |
+| Alex Karp (Palantir) | philosophy-professor intensity | a deal, not a building: police cover up, privacy complaints |
+| Palmer Luckey (Anduril) | Hawaiian shirt, flip-flops | won't take no: writes again a year later |
+| Sundar Pichai (Google) | extremely polite, corporate | reliable, never any trouble; mentions AI eleven times |
+
+### Letters and the inbox
+- A letter: who it's from, what they want to build, and buttons **Small / Standard / Mega / Decline**. Each scale lists what they offer (jobs, a one-off investment, tax) and what they need (land, power, water, a road or rail link, a tax break).
+- Say yes and you **pick the site**: drag out its footprint (like the airport), inside the Tech zone, within 6 months, or the deal lapses.
+- Say no and they go elsewhere; investor appetite (below) drops.
+- Letters go to an **inbox** with a count badge, like the advisors. Only big ones pause the game.
+
+### The company ladder
+How often letters come, and how big the companies are, grows with the town:
+
+| Stage | Who writes | How often | Wants |
+| --- | --- | --- | --- |
+| Start-ups (from ~500 people) | small made-up start-ups ("a two-person drone start-up") | every few months | a cheap office plot in the Tech zone |
+| Scale-ups | Stripe, Figma, Discord, Revolut | every couple of months | office space, some tech workers |
+| Big Tech | Google, Apple, Microsoft, Amazon, Meta, Nvidia | monthly at a real tech hub | lots of tech workers, schools, transport |
+| Mega projects | Tesla, SpaceX, OpenAI, Palantir, Anduril | rare | everything: power, land, talent, tax breaks |
+
+- A start-up you backed early can grow into a scale-up.
+- Each month the town's **interest** sets the odds of a letter and its stage. Interest comes from: the Tech zone (size, empty land ready, tax rate), **tech workers**, infrastructure (spare power and water, transport) and **investor appetite** (your record of saying yes, and companies doing well).
+- Each company has a **wishlist**: Amazon and Microsoft want low tax, spare power and water, cheap land; Google wants schools, parks and good housing; Tesla wants a motorway or rail, power and workers; SpaceX wants empty coast; Palantir and Anduril want low tax, a big town and police. A "Who's interested" list in the City panel shows each one and what they're waiting for ("Amazon: interested. Wants 500 more spare power").
+
+### What they build
+| Proposal | Upside | Catch | Hooks into |
+| --- | --- | --- | --- |
+| Data centre (Amazon, Microsoft) | big tax, one-off investment | power and cooling water like a small town, few jobs, a hum lowers land value, bills rise if the grid is stretched | power, water, land value, a "bills" complaint |
+| Mega AI data centre (OpenAI, late) | enormous investment | needs its own power plant or drains yours | power |
+| Tech campus (Google, Apple, Meta) | thousands of well-paid office jobs | house prices soar, locals priced out, commuter traffic | offices, home prices, housing, traffic, schools |
+| Gigafactory (Tesla) | thousands of factory jobs | heavy power, lorries, some pollution, wants a motorway | industry, pollution, traffic |
+| Launch site (SpaceX, coast only) | tourists, prestige | launch noise, a no-build zone, a rare explosion | coast, tourism, land value |
+| Chip factory (Nvidia) | high-skill jobs | heavy water use, chemical pollution | water, pollution |
+| Drone factory and test range (Anduril) | defence money, skilled jobs | noise, protests, lower land value | land value, happiness |
+| City data deal (Palantir, no building) | police cover up town-wide | a monthly fee, a privacy complaint | services, happiness |
+| Robotaxi trial (Waymo, no building) | less traffic | taxi and bus jobs lost | traffic, jobs |
+
+Data centre scales, as an example:
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Footprint | 4 tiles | 12 tiles | 30 tiles |
+| Power | 150 units | 500 | 1,200 (nearly a nuclear plant) |
+| Water | 80 | 250 | 600 |
+| Jobs | 10 | 40 | 120 |
+| Tax a month | £400 | £1,500 | £4,000 |
+| Asks for | nothing | 5 years' tax break | 10 years' tax break and grid priority (homes lose power first) |
+
+### Tech zone (a district)
+- A third kind of district beside Conservation and CBD, painted with the District tool. It has **its own tax rate** in the City panel (say town 9%, Tech zone 3%), used for every plot inside it.
+- Offices and industry inside grow faster at a lower rate; companies' buildings go inside it.
+- Catches: less tax income; a "tech pays less tax than we do" complaint when the zone's rate is far below the town's and the zone is big; companies that came for a low rate threaten to leave if it's raised.
+- Real-world cousins: Enterprise Zones and Freeports (UK), Opportunity Zones (US).
+- Later, perhaps: separate tax rates for homes, shops, industry and offices, as SimCity 4 does.
+
+### Tech workers
+- A new key number: the share of residents with tech skills. It sets which stages of the ladder can write.
+- Grown by schools (the base), a **college** (new, small, early), a **university** (new, a big multi-tile campus, mid-game: graduates, land value and student housing demand, but costly to run and students pay no tax) and a **research park** (new, next to the university: makes Big Tech and mega letters likelier). Parks, landmarks and transport help keep graduates.
+- It feeds itself: tech jobs bring in tech workers, who bring more companies.
+- Say yes to a big company without enough tech workers and it brings its own staff: more housing demand, higher prices, more people priced out.
+
+### New town problems
+- **Cost of living**: a happiness complaint when home prices rise faster than wages; this is where gentrification shows.
+- **Bills**: electricity bills rise when big users stretch the grid.
+- **Boom and bust**: companies can shrink or leave, leaving an empty campus (drawn like abandoned buildings). It hurts most after years of tax breaks. Deals can carry claw-back if they leave early.
+- **Community fund**: a deal can have the company pay for a park or school.
+
+### Ideas, not yet decided
+- Approval rating and elections every 4 years; interest groups (tech workers, long-time residents, unions, environmentalists, small businesses) who each like or hate a decision; protests on the map.
+- Rival cities bidding for a company (like Amazon's HQ2 contest), or poaching yours.
+- A policies panel: rent control, affordable housing quota, data centre water cap, launch noise curfew, a jobs tax on big employers.
+- A tech market that booms and crashes (a flood of letters, then layoffs and empty offices); remote-work swings.
+- Broadband as a utility to the Tech zone; 5G masts; power deals (Microsoft restarting a nuclear plant for its data centre); droughts.
+- Gentrification seen on the map (corner shops turning into coffee shops near the Tech zone); private tech shuttle buses; automation cutting shop and office jobs; tents in parks when prices run away.
+- A satirical headline ticker reacting to your choices.
+
+### Build order (one at a time, played before the next)
+1. **Tech zone** with its own tax rate.
+2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come.
+3. **College, university, research park** and tech workers.
+4. **Generated map** (no Troon); rebuild the examples.
+5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks.
+6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
+
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*
 3. **Real game** — services (done), land value (done), overlay maps (done), taxes vs services (done), happiness (done), goals. *Done when a friend asks for more.*
 4. **Polish and share** — 3D art, sound, tutorial, publish on itch.io.
+5. **Tech layer** — company letters, the Tech zone, tech workers, a generated map (see Tech layer). *Done when every letter feels like a real dilemma.*
 
 ## Working rules
 - One small feature per session; play it before moving on.

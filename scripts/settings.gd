@@ -59,6 +59,8 @@ const SLOPE_COST_PER_METRE := 0.08
 const MAX_SLOPE_M := 12.0
 
 # --- Time ---
+const UNDO_STEPS := 20            # how many builds Undo (Cmd+Z) remembers
+const UNDO_MONTHS := 12           # ...for up to a year; undoing gives back what they cost
 const MONTH_SECONDS := 3.0        # real seconds per game month at normal speed
 const FAST_SPEED := 3             # how much faster the fast-forward button runs
 const START_YEAR := 2027
@@ -216,10 +218,13 @@ const BUILDINGS := {
 		"about": "Supplies water for 400 zone levels; water travels through roads and buildings"},
 	"water_tower": {"name": "Water tower", "cost": 300, "upkeep": 10, "water": 120, "uses_power": 1,
 		"about": "A small, cheap water supply"},
-	"landfill": {"name": "Landfill", "cost": 100, "upkeep": 5, "rubbish": 800, "area": true,
-		"value": -0.06, "radius": 3, "about": "Takes the rubbish of 800 residents per tile; nobody wants to live by it"},
-	"recycling": {"name": "Recycling centre", "cost": 2500, "upkeep": 70, "rubbish": 2500, "uses_power": 3,
-		"unlock": 1000, "value": -0.01, "radius": 2, "about": "Takes the rubbish of 2,500 residents, cleanly"},
+	"landfill": {"name": "Landfill", "cost": 100, "upkeep": 5, "rubbish": 2000, "area": true,
+		"value": -0.06, "radius": 3, "about": "Takes the rubbish of 2,000 residents per tile; nobody wants to live by it"},
+	"recycling": {"name": "Recycling centre", "cost": 2500, "upkeep": 70, "rubbish": 6000, "uses_power": 3,
+		"unlock": 800, "value": -0.01, "radius": 2, "about": "Takes the rubbish of 6,000 residents, cleanly"},
+	"incinerator": {"name": "Incinerator", "cost": 9000, "upkeep": 160, "rubbish": 25000, "uses_power": 4,
+		"unlock": 4000, "value": -0.08, "radius": 4,
+		"about": "Burns the rubbish of 25,000 residents on one plot, but its chimney smokes"},
 	"woodland": {"name": "Woodland", "cost": 20, "area": true, "no_road": true,
 		"about": "Plant trees: drag out a forest. Cleans the air a little and raises land value nearby; no upkeep, needs no road"},
 	"golf": {"name": "Golf course", "cost": 150, "upkeep": 2, "area": true, "value": 0.07, "radius": 3,
@@ -267,7 +272,7 @@ const BUILDINGS := {
 		"landmark": true, "value": 0.10, "radius": 8, "appeal": 0.04, "visitors": 0.006,
 		"about": "The art deco skyscraper, the tallest thing in town. Tourists come to see it: shop demand, land value and appeal"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
-		"about": "Drag out a box at least 800 m long for the runway, with room beside it and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
+		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }
 # --- Airport (dragged out like a golf course; the layout is worked out from its shape) ---
 # The runway is the longest straight run of airport tiles; the terminal goes on
@@ -304,6 +309,7 @@ const POLLUTION_SOURCES := {
 	"gas": [0.5, 6],
 	"landfill": [0.12, 4],                # per tile, so a big tip smells more
 	"recycling": [0.08, 2],
+	"incinerator": [0.45, 6],             # a tall chimney: less than coal, more than gas nearby
 	"harbour": [0.35, 5],                 # ships' engines
 	"airport": [0.012, 4],                # per tile: jet fumes round a working airport
 }

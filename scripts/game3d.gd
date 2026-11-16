@@ -26,7 +26,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
-	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }   # same order as simulation.gd
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
+	INCINERATOR }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK }
 
@@ -61,7 +62,7 @@ const DISTRICT_ABOUT := [
 # Tools that open a picker of several buildings (Tab or the buttons choose one).
 const GROUPS := {
 	Tool.POWER: [Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WIND, Tile.SOLAR, Tile.POWER_LINE],
-	Tool.UTILITY: [Tile.WATER_PUMP, Tile.WATER_TOWER, Tile.LANDFILL, Tile.RECYCLING],
+	Tool.UTILITY: [Tile.WATER_PUMP, Tile.WATER_TOWER, Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR],
 	Tool.SERVICE: [Tile.POLICE_OFFICE, Tile.POLICE, Tile.FIRE_SMALL, Tile.FIRE, Tile.SCHOOL, Tile.CLINIC, Tile.HOSPITAL],
 	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
 	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR, Tile.AIRPORT],
@@ -153,6 +154,8 @@ var _camera_seen := Transform3D()      # camera position last used to pick the h
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
 var _speed_before_dialog := 1          # the speed to go back to when the New city dialog closes
+# Undo: one step per drag, newest last: {"what", "month", "spent", "tiles": {tile index: sim.tile_state}}.
+var _undo: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -197,6 +200,7 @@ func _ready() -> void:
 	hud.borrow_pressed.connect(_borrow)
 	hud.repay_pressed.connect(_repay)
 	hud.save_pressed.connect(_save_game)
+	hud.undo_pressed.connect(_undo_last)
 	hud.load_pressed.connect(_load_game)
 	hud.example_chosen.connect(_load_example)
 	hud.day_cycle_toggled.connect(_set_day_cycle)
@@ -366,6 +370,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				_save_game()
 			elif k.keycode == KEY_L:
 				_load_game()
+			elif k.keycode == KEY_Z:
+				_undo_last()
 			return
 		match k.keycode:
 			KEY_1:
@@ -544,7 +550,25 @@ func _update_drag() -> void:
 		if ok:
 			total += _tool_cost(p)
 			count += 1
-	world.set_preview(items, TOOL_COLOURS[current_tool])
+	# An airport has a minimum size: the whole drag is red until it's big enough, then green.
+	var airport_short := _airport_too_small()
+	var colour: Color = TOOL_COLOURS[current_tool]
+	if _dragging_airport():
+		colour = AIRPORT_OK_COLOUR
+		if airport_short != "":
+			for item: Array in items:
+				item[1] = false
+	world.set_preview(items, colour)
+	if _dragging_airport() and count > 0:
+		var size := drag_plan[drag_plan.size() - 1] - drag_plan[0] + Vector2i.ONE   # (a box: first and last corners)
+		var box := "Airport: %d x %d tiles" % [size.x, size.y]
+		if airport_short != "":
+			hud.show_info("%s. Too small: %s. Keep dragging (Esc to cancel)." % [box, airport_short])
+		elif total > sim.money:
+			hud.show_info("%s, big enough. %s, but you have %s." % [box, Hud.money_text(total), Hud.money_text(sim.money)])
+		else:
+			hud.show_info("%s, big enough. %s. Release to build, Esc to cancel." % [box, Hud.money_text(total)])
+		return
 	var tool_name := _tool_label()
 	if _has_density():
 		var dn: String = Settings.DENSITY_NAMES[current_density]
@@ -560,17 +584,150 @@ func _update_drag() -> void:
 
 
 func _finish_drag() -> void:
+	var too_small := _airport_too_small()
+	if too_small != "":
+		hud.flash("Too small for an airport: %s. Nothing built." % too_small)
+		_cancel_drag()
+		return
+	if _dragging_airport() and _plan_cost() > sim.money:
+		# Half an airport is no use: build all of it or none.
+		hud.flash("Not enough money for the whole airport: it costs %s." % Hud.money_text(_plan_cost()))
+		_cancel_drag()
+		return
 	var built := 0
+	var before := {}                   # what each changed tile was, for undo
+	var money_before := sim.money
+	var what := _tool_label()
 	for p in drag_plan:
+		var i := p.y * map_w + p.x
+		var state := sim.tile_state(i)
 		if _apply_tool(p):
 			built += 1
+			before[i] = state
 	drag_plan.clear()
 	world.set_preview([], Color.WHITE)
 	if built > 0:
+		_remember(what, before, money_before - sim.money)
 		sim.recount()
 		_ground_dirty = true
 		_buildings_dirty = true
 	_refresh_hud()
+
+
+# ---------------------------------------------------------------------- undo
+
+# Each drag is one step. Undo puts its tiles back as they were and gives the
+# money back. Steps are kept for UNDO_MONTHS (it's for mistakes, not a free
+# demolition later on); loading or starting a city forgets them.
+
+func _remember(what: String, before: Dictionary, spent: int) -> void:
+	_undo.append({"what": what, "month": sim.month, "spent": spent, "tiles": before})
+	while _undo.size() > Settings.UNDO_STEPS:
+		_undo.pop_front()
+	_show_undo()
+
+
+func _forget_old_undo() -> void:
+	while not _undo.is_empty() and sim.month - int(_undo[0]["month"]) > Settings.UNDO_MONTHS:
+		_undo.pop_front()
+
+
+func _undo_last() -> void:
+	if painting:
+		_cancel_drag()
+	_forget_old_undo()
+	if _undo.is_empty():
+		hud.flash("Nothing to undo.")
+		_show_undo()
+		return
+	var step: Dictionary = _undo.pop_back()
+	var before: Dictionary = step["tiles"]
+	for i: int in before:
+		sim.restore_tile(i, before[i])
+	var spent: int = step["spent"]
+	sim.money += spent
+	sim.recount()
+	_ground_dirty = true
+	_buildings_dirty = true
+	_refresh_hud()
+	var n := before.size()
+	var back := ", %s back" % Hud.money_text(spent) if spent > 0 else ""
+	hud.flash("Undone: %s, %d %s%s." % [String(step["what"]), n, "tile" if n == 1 else "tiles", back])
+	_show_undo()
+
+
+func _show_undo() -> void:
+	# The Undo button: what it would undo, or greyed out.
+	_forget_old_undo()
+	if _undo.is_empty():
+		hud.set_undo("")
+	else:
+		var step: Dictionary = _undo.back()
+		var n: int = (step["tiles"] as Dictionary).size()
+		hud.set_undo("Undo %s, %d %s (Cmd+Z)" % [String(step["what"]), n, "tile" if n == 1 else "tiles"])
+
+
+const AIRPORT_OK_COLOUR := Color(0.25, 0.85, 0.35)   # the drag once it's big enough
+
+
+func _dragging_airport() -> bool:
+	return current_tool == Tool.TRANSPORT and _target_tile() == Tile.AIRPORT
+
+
+func _plan_cost() -> int:
+	# What the tiles of the current drag that can be built would cost.
+	var total := 0
+	for p in drag_plan:
+		if _why_cant_build(p, false) == "":
+			total += _tool_cost(p)
+	return total
+
+
+func _airport_too_small() -> String:
+	# "" if the airport being dragged out (with any airport it joins on to) is big
+	# enough: a runway of AIRPORT_MIN_RUNWAY tiles in a line and AIRPORT_MIN_TILES
+	# in all. Otherwise what's missing, e.g. "the runway needs 16 tiles in a line (you have 9)".
+	if not _dragging_airport() or drag_plan.is_empty():
+		return ""
+	var spots := {}
+	for p in drag_plan:
+		if _why_cant_build(p, false) == "":
+			spots[p.y * map_w + p.x] = true
+	if spots.is_empty():
+		return ""      # (nothing can be built here at all: the usual reasons show)
+	# Airport already built next to the drag counts too (making one bigger).
+	var queue: Array = spots.keys()
+	var head := 0
+	while head < queue.size():
+		var c: int = queue[head]
+		head += 1
+		var x := c % map_w
+		for n: int in [c - 1 if x > 0 else -1, c + 1 if x < map_w - 1 else -1, c - map_w, c + map_w]:
+			if n >= 0 and n < map_w * map_h and not spots.has(n) and sim.tiles[n] == Tile.AIRPORT:
+				spots[n] = true
+				queue.append(n)
+	# The longest straight run, across or down.
+	var longest := 0
+	for c: int in spots:
+		var x := c % map_w
+		if x == 0 or not spots.has(c - 1):
+			var n := 0
+			while x + n < map_w and spots.has(c + n):
+				n += 1
+			longest = maxi(longest, n)
+		if c < map_w or not spots.has(c - map_w):
+			var n := 0
+			while spots.has(c + n * map_w):
+				n += 1
+			longest = maxi(longest, n)
+	var need_run: int = Settings.AIRPORT_MIN_RUNWAY
+	var need_tiles: int = Settings.AIRPORT_MIN_TILES
+	var missing: Array[String] = []
+	if longest < need_run:
+		missing.append("the runway needs %d tiles in a line (you have %d)" % [need_run, longest])
+	if spots.size() < need_tiles:
+		missing.append("it needs %d tiles in all (you have %d)" % [need_tiles, spots.size()])
+	return " and ".join(missing)
 
 
 func _cancel_drag() -> void:
@@ -874,7 +1031,8 @@ const SHORT := {
 	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
 	"wind": "Clean power: drag a wind farm", "solar": "Quiet, clean power", "power_line": "Carries power",
 	"water_pump": "Water for 400 zone levels", "water_tower": "A small water supply",
-	"landfill": "Takes the town's rubbish", "recycling": "Takes rubbish, cleanly",
+	"landfill": "Cheap: drag out a tip", "recycling": "Takes rubbish, cleanly",
+	"incinerator": "Burns lots of rubbish; smoky",
 	"police": "Safer streets", "fire": "Stops fires spreading", "school": "Families need one",
 	"hospital": "Care for a growing town", "police_office": "A village bobby", "fire_small": "One engine, close by",
 	"clinic": "A doctor nearby", "golf": "Fairways, greens and bunkers",
@@ -1255,6 +1413,7 @@ func _load_game(path: String = SAVE_FILE, done_text: String = "City loaded.") ->
 		return
 	_cancel_drag()
 	sim.from_save(data)
+	_undo.clear()
 	clock = 0.0
 	world.refresh_all()
 	_layout_seen = sim.layout_version
@@ -1295,6 +1454,7 @@ func _new_city_cancelled() -> void:
 func _new_city(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	_cancel_drag()
 	sim.reset(level)
+	_undo.clear()
 	clock = 0.0
 	world.refresh_all()
 	_layout_seen = sim.layout_version
@@ -1337,6 +1497,7 @@ func _refresh_hud() -> void:
 	_show_group()
 	if world.overlay == WorldView.Overlay.SERVICES and world.service_filter >= 0:
 		_show_overlay_key()         # (its numbers change as the town does)
+	_show_undo()                    # (steps run out after a year)
 	_update_info()
 
 
@@ -1395,7 +1556,10 @@ func _tile_text(i: int) -> String:
 		var reach := sim.pollution_reach_m(t, cell_size_m)
 		if reach > 0:
 			about += " (pollutes the air up to %d m away)" % reach
-		return "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
+		var text := "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
+		if Simulation.RUBBISH_ORDER.has(t) and sim.building_working(i):
+			text += "\n" + _rubbish_text(i)
+		return text
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP * sim.upkeep_scale())
 	if sim.is_service(t):
@@ -1440,6 +1604,44 @@ func _tile_text(i: int) -> String:
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
 	return text
+
+
+func _rubbish_text(i: int) -> String:
+	# How full a landfill (all its joined-up tiles), recycling centre or incinerator is:
+	# "This landfill (12 tiles) takes 24,000: 78% full, 22% to spare".
+	var t := sim.tiles[i]
+	var plots := 1
+	if t == Tile.LANDFILL:
+		plots = 0
+		for n in _joined_tiles(i):
+			if sim.building_working(n):    # (tiles too far from a road take nothing)
+				plots += 1
+	var per: int = sim.info(t).get("rubbish", 0)
+	var used := sim.rubbish_use_of(t)
+	var full := roundi(used * 100.0)
+	var what := "This landfill (%d %s)" % [plots, "tile" if plots == 1 else "tiles"] if t == Tile.LANDFILL else "It"
+	var text := "%s takes the rubbish of %s residents: %d%% full, %d%% to spare" % [
+		what, Hud.thousands(per * plots), full, 100 - full]
+	if full >= 100 and sim.rubbish_shortfall() > 0.0:
+		text += " (the town needs more)"
+	return text
+
+
+func _joined_tiles(i: int) -> Array[int]:
+	# The tiles of the same kind joined to this one (side by side), this one included.
+	var t := sim.tiles[i]
+	var seen := {i: true}
+	var out: Array[int] = [i]
+	var head := 0
+	while head < out.size():
+		var c := out[head]
+		head += 1
+		var x := c % map_w
+		for n: int in [c - 1 if x > 0 else -1, c + 1 if x < map_w - 1 else -1, c - map_w, c + map_w]:
+			if n >= 0 and n < map_w * map_h and not seen.has(n) and sim.tiles[n] == t:
+				seen[n] = true
+				out.append(n)
+	return out
 
 
 func _road_text(i: int) -> String:

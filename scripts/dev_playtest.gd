@@ -110,6 +110,7 @@ func _run() -> void:
 	await _traffic()
 	await _road_types()
 	await _services()
+	await _feedback_fixes()
 	await _examples()
 	await _new_buildings()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
@@ -213,6 +214,108 @@ func _new_buildings() -> void:
 	check(before == after, "new buildings: saving and loading keeps them (%s)" % [after])
 	world.refresh_all()
 	await _shot("p24_new_buildings")
+
+
+func _feedback_fixes() -> void:
+	# From playing it (Nov 2026): undo; landfill that lasts, says how full it is,
+	# and an incinerator to buy instead; an airport drag that's red until it's
+	# big enough, then green.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(24, 10)
+	check(o.x >= 0 and _built_count() == 0, "feedback: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	var undo: Button = hud.get("undo_button")
+	check(undo != null and undo.disabled, "undo: nothing to undo in a new city (the button is greyed out)")
+	sim.money = 500000
+
+	# Undo: a road dragged with the mouse, a zone, part of it bulldozed; then
+	# Cmd+Z, the button, Cmd+Z again, and everything is as it was.
+	var money0: int = sim.money
+	var map0 := _tiles_hash()
+	await _pick_item("roads", "road")
+	await _look_at(o + Vector2i(10, 5), PLAY_DISTANCE * 1.6, -40.0, 50.0, [o, o + Vector2i(20, 0), o + Vector2i(20, 9)])
+	await _drag(_screen_of(o), _screen_of(o + Vector2i(20, 0)))
+	var laid := _count(T.ROAD, o, o + Vector2i(20, 0))
+	check(laid == 21 and sim.money < money0 and not undo.disabled and undo.tooltip_text.contains("21 tiles"),
+		"undo: a road dragged with the mouse (%d tiles) can be undone (%s)" % [laid, undo.tooltip_text])
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(20, 2))
+	var zoned := _count(T.HOMES, o + Vector2i(0, 1), o + Vector2i(20, 2))
+	_place("bulldoze", o + Vector2i(0, 1), o + Vector2i(5, 2))
+	check(zoned == 42 and _count(T.HOMES, o + Vector2i(0, 1), o + Vector2i(20, 2)) == 30, "undo: zoned 42 plots, bulldozed 12")
+	await _key(KEY_Z, true)
+	check(_count(T.HOMES, o + Vector2i(0, 1), o + Vector2i(20, 2)) == 42, "undo: Cmd+Z brings the bulldozed plots back")
+	await _click(undo)
+	check(_count(T.HOMES, o + Vector2i(0, 1), o + Vector2i(20, 2)) == 0 and _count(T.ROAD, o, o + Vector2i(20, 0)) == 21,
+		"undo: the button then takes the zone away, leaving the road")
+	await _key(KEY_Z, true)
+	check(_tiles_hash() == map0 and sim.money == money0, "undo: ...and then the road, with every penny back (%s)" % Hud.money_text(sim.money))
+	check(undo.disabled, "undo: nothing left to undo")
+	await _key(KEY_Z, true)       # (nothing happens)
+	_place("road", o, o + Vector2i(20, 0))
+	sim.month += Settings.UNDO_MONTHS + 1
+	game.call("_refresh_hud")
+	check(undo.disabled, "undo: a build from over a year ago can't be undone")
+
+	# Rubbish: 32 plots of tenements, a landfill beside the road; its hover says how full it is.
+	_place("road", o + Vector2i(0, 4), o + Vector2i(20, 4))
+	_place("homes_1", o + Vector2i(5, 1), o + Vector2i(20, 3))
+	_place("coal", o + Vector2i(20, 5))
+	_place("landfill", o + Vector2i(0, 5), o + Vector2i(3, 6))
+	_fill_plots(o, o + Vector2i(20, 3))
+	sim.call("_measure_rubbish")
+	var tip := (o.y + 5) * sim.w + o.x
+	var text: String = game.call("_tile_text", tip)
+	var full := roundi(float(sim.rubbish_made) / (8 * 2000) * 100.0)
+	check(sim.rubbish_capacity == 8 * 2000 and text.contains("This landfill (8 tiles) takes the rubbish of 16,000 residents: %d%% full" % full),
+		"rubbish: a landfill of 8 tiles takes 16,000 residents' rubbish; the hover says how full (%s)" % text.get_slice("\n", 2))
+	var items := {}
+	for item: Dictionary in game.call("_menu_items"):
+		items[item["id"]] = item["locked"]
+	check(items.has("incinerator") and bool(items["incinerator"]), "rubbish: the incinerator is in the menu, for a bigger town")
+	sim.population = 5000                   # (unlocked; the next recount sets it back)
+	_place("incinerator", o + Vector2i(10, 5))
+	var burner := (o.y + 5) * sim.w + o.x + 10
+	sim.call("_measure_rubbish")
+	text = game.call("_tile_text", tip)
+	check(sim.tiles[burner] == T.INCINERATOR and sim.building_working(burner) and sim.rubbish_capacity == 16000 + 25000
+		and text.contains("0% full, 100% to spare"),
+		"rubbish: an incinerator burns 25,000 residents' worth first, so the landfill is empty (%s)" % text.get_slice("\n", 2))
+	check(String(game.call("_tile_text", burner)).contains("% full") and sim.pollution_at(burner + 2 * sim.w) > 0.0,
+		"rubbish: the incinerator says how full it is, and its smoke pollutes")
+	game.call("_refresh_hud")
+	var rubbish_line: Label = hud.get("rubbish_label")
+	check(rubbish_line.text.contains("room to spare"), "rubbish: the City panel says how much room is left (%s)" % rubbish_line.text)
+
+	# The airport: red while too small, green once big enough, and only built then.
+	sim.population = 6000
+	game.call("_refresh_hud")
+	await _pick_item("transport", "airport")
+	await _drag(_screen_of(o + Vector2i(2, 7)), _screen_of(o + Vector2i(12, 9)), MOUSE_BUTTON_LEFT, false)
+	var info: Label = hud.get("info_label")
+	var red: Color = world.preview.multimesh.get_instance_color(0)
+	check(String(game.call("_airport_too_small")).contains("16 tiles in a line") and red.r > red.g and info.text.contains("Too small"),
+		"airport: an 11 x 3 drag is red and says why (%s)" % info.text)
+	await _shot("p26_airport_too_small")
+	await _move(_screen_of(o + Vector2i(19, 9)))
+	await _frames(3)
+	var green: Color = world.preview.multimesh.get_instance_color(0)
+	check(String(game.call("_airport_too_small")) == "" and green.g > green.r and info.text.contains("big enough"),
+		"airport: dragged out to 18 x 3 it turns green (%s)" % info.text)
+	await _shot("p27_airport_big_enough")
+	await _press(_screen_of(o + Vector2i(19, 9)), MOUSE_BUTTON_LEFT, false)
+	await _frames(2)
+	check(_count(T.AIRPORT, o + Vector2i(2, 7), o + Vector2i(19, 9)) == 54, "airport: released, all 54 tiles are built")
+	await _key(KEY_Z, true)
+	check(_count(T.AIRPORT, o + Vector2i(2, 7), o + Vector2i(19, 9)) == 0, "airport: and Cmd+Z takes it away again")
+	sim.population = 6000
+	await _drag(_screen_of(o + Vector2i(2, 7)), _screen_of(o + Vector2i(12, 9)))
+	check(_count(T.AIRPORT, o + Vector2i(2, 7), o + Vector2i(19, 9)) == 0, "airport: let go while it's red, nothing is built")
 
 
 func _examples() -> void:

@@ -661,6 +661,16 @@ def recycling():
         box(-19.0 + k * 6.5, 40.0, 2.6, 6.0, 2.4, [(0.20, 0.45, 0.25), (0.15, 0.30, 0.60), (0.50, 0.35, 0.20), (0.55, 0.55, 0.55)][k % 4])
 
 
+def incinerator():
+    ground(YARD)
+    model("shed", -6.0, 14.0, 28.0, 22.0, 20.0, SHED_METAL, (0.44, 0.46, 0.50))
+    box(-6.0, 5.0, 20.0, 9.0, 8.0, CONCRETE)
+    cylinder(15.0, 30.0, 2.0, 55.0, (0.80, 0.80, 0.78))
+    for k in range(2):
+        box(13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, (0.22, 0.42, 0.28))
+    fence()
+
+
 def police():
     ground()
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
@@ -953,14 +963,14 @@ ITEMS = {
     "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "avenue": avenue, "motorway": motorway, "grid": grid, "bulldoze": bulldoze, "park": park,
     "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
-    "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling,
+    "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling, "incinerator": incinerator,
     "police": police, "police_office": police_office, "fire_small": fire_small, "clinic": clinic, "fire": fire, "school": school, "hospital": hospital, "golf": golf, "library": library,
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
     "station": station, "harbour": harbour, "airport": airport,
     "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
     "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "conservation": conservation, "normal": normal,
 }
-TALL = {"coal": 1.9, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
+TALL = {"coal": 1.9, "incinerator": 1.7, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,
         "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6,
         "big_ben": 2.3, "liberty": 2.1, "eiffel": 2.9, "empire_state": 4.0, "taj_mahal": 1.2}

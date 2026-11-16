@@ -11,7 +11,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
-	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
+	INCINERATOR }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -22,14 +23,15 @@ const BUILDING_KEYS := {
 	Tile.HARBOUR: "harbour", Tile.WOODLAND: "woodland", Tile.AIRPORT: "airport",
 	Tile.BIG_BEN: "big_ben", Tile.COLOSSEUM: "colosseum", Tile.GREAT_PYRAMID: "great_pyramid", Tile.LIBERTY: "liberty",
 	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
+	Tile.INCINERATOR: "incinerator",
 }
-const LAST_TILE := Tile.EMPIRE_STATE   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.INCINERATOR   # (new tiles go on the end, so saved tile numbers never change)
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
 	"taxes": ["taxes too high for the services", "lower the tax rate, or build services near homes"],
 	"services": ["not enough police, fire, schools or hospitals", "build services near homes, or fund them more"],
-	"rubbish": ["rubbish piling up", "build a landfill or recycling centre"],
+	"rubbish": ["rubbish piling up", "build a landfill, recycling centre or incinerator"],
 	"jobs": ["not enough jobs", "zone more shops, offices or industry"],
 	"housing": ["homes too dear (housing shortage)", "zone more homes, or zone them denser"],
 	"power": ["homes without power", "build another power plant, or link the homes to one"],
@@ -77,6 +79,8 @@ var water_supply := 0                 # zone levels the pumps and towers can sup
 var water_used := 0
 var rubbish_made := 0                 # in residents' worth
 var rubbish_capacity := 0
+var rubbish_use := {}                 # Tile -> how full that kind is (0-1); see _measure_rubbish
+const RUBBISH_ORDER: Array[int] = [Tile.RECYCLING, Tile.INCINERATOR, Tile.LANDFILL]
 var tourism := 0.0                    # visitors the working landmarks bring, as a share of the population
 var leisure_appeal := 0.0             # extra appeal from leisure buildings and landmarks
 # How residents feel, 0 (furious) to 1 (delighted): the single summary of taxes,
@@ -253,6 +257,29 @@ func set_road(i: int, kind: int) -> void:
 	road_kind[i] = kind
 	_roads_dirty = true
 	_value_dirty = true
+	_traffic_dirty = true
+	layout_version += 1
+
+
+func tile_state(i: int) -> PackedByteArray:
+	# Everything about one tile, so undo can put it back (see restore_tile).
+	return PackedByteArray([tiles[i], levels[i], density[i], district[i], road_kind[i], decline[i], abandoned[i]])
+
+
+func restore_tile(i: int, state: PackedByteArray) -> void:
+	# Put a tile back as tile_state saw it (undo). Call recount() afterwards.
+	tiles[i] = state[0]
+	levels[i] = state[1]
+	density[i] = state[2]
+	district[i] = state[3]
+	road_kind[i] = state[4]
+	decline[i] = state[5]
+	abandoned[i] = state[6]
+	_roads_dirty = true
+	_power_dirty = true
+	_water_dirty = true
+	_value_dirty = true
+	_coverage_dirty = true
 	_traffic_dirty = true
 	layout_version += 1
 
@@ -1061,16 +1088,34 @@ func building_upkeep() -> int:
 
 
 func _measure_rubbish() -> void:
-	# Rubbish made by residents and jobs, against what working landfills and
-	# recycling centres can take.
+	# Rubbish made by residents and jobs, against what working landfills,
+	# recycling centres and incinerators can take. The rubbish goes to the
+	# recycling first, then the incinerators, and the landfill takes the rest,
+	# so rubbish_use says how full each kind is (for its hover text).
 	rubbish_made = roundi(population + jobs() * Settings.RUBBISH_PER_JOB)
 	rubbish_capacity = 0
+	var caps := {}
+	for t: int in RUBBISH_ORDER:
+		caps[t] = 0
 	for i in w * h:
 		var t: int = tiles[i]
-		if t == Tile.LANDFILL or t == Tile.RECYCLING:
-			if building_working(i):
-				var cap: int = info(t).get("rubbish", 0)
-				rubbish_capacity += cap
+		if caps.has(t) and building_working(i):
+			var cap: int = info(t).get("rubbish", 0)
+			caps[t] = int(caps[t]) + cap
+			rubbish_capacity += cap
+	var left := rubbish_made
+	rubbish_use = {}
+	for t: int in RUBBISH_ORDER:
+		var cap: int = caps[t]
+		var taken := mini(left, cap)
+		left -= taken
+		rubbish_use[t] = float(taken) / cap if cap > 0 else 0.0
+
+
+func rubbish_use_of(t: int) -> float:
+	# How full the working landfills (or recycling centres, or incinerators) are: 0 to 1.
+	var used: float = rubbish_use.get(t, 0.0)
+	return used
 
 
 func rubbish_shortfall() -> float:

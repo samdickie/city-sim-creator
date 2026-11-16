@@ -67,7 +67,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WIND, SOLAR, GAS, NUCLEAR, WATER_PUMP, WATER_TOWER, LANDFILL, RECYCLING,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
-	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE }   # same order as simulation.gd
+	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
+	INCINERATOR }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1600,7 +1601,7 @@ func _plan_lots() -> void:
 					kind = LOT_AIRPORT
 					detail = sim.airport_role[i] if i < sim.airport_role.size() else 4
 				Tile.FIRE, Tile.FIRE_SMALL, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
-						Tile.LANDFILL, Tile.RECYCLING, Tile.BUS_DEPOT, Tile.HARBOUR:
+						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR:
 					kind = LOT_YARD
 		_lot_kind[i] = kind
 		_lot_detail[i] = detail
@@ -4615,6 +4616,21 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				Color(0.55, 0.55, 0.55)]
 			for k in 6:
 				_prop(i, front, -19.0 + k * 6.5, depth - 10.0, 2.6, 6.0, 2.4, skips[k % 4])
+		Tile.INCINERATOR:
+			# A clad hall over the furnace, a concrete tipping bunker the bin lorries back
+			# into, and one tall chimney (it smokes like the coal plant's, only from one stack).
+			var hall := _place(i, front, -6.0, 14.0, 28.0, 22.0)
+			_add_block(hall, 28.0, 22.0, 18.0, SHED_METAL, STYLE_INDUSTRY, 2.0, SHED_METAL.darkened(0.2),
+				wall_list, roof_list)
+			var bunker := _place(i, front, -6.0, 5.0, 20.0, 9.0)
+			_add_block(bunker, 20.0, 9.0, 8.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
+			var stack := _place(i, front, 15.0, 28.0, 4.0, 4.0)
+			var stack_pos: Vector3 = stack["pos"]
+			_cylinder(chimney_list, stack_pos, 2.0, 55.0, Color(0.80, 0.80, 0.78))
+			_smoke_points.append(stack_pos + Vector3.UP * 56.0)
+			for k in 2:
+				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
+			_plan_fence(i, front, depth)
 		Tile.AIRPORT:
 			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
 		Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE, \
@@ -5787,7 +5803,7 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
-							or bt == Tile.HARBOUR or bt == Tile.RECYCLING:
+							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = road_hw + 2.6   # in the pavement in front of the buildings
