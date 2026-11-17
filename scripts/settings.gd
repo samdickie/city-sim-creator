@@ -179,8 +179,15 @@ const FIRE_START_POP := 500        # fires can break out once the town is this b
 const FIRE_CHANCE := 0.0005        # chance per built plot per month with no fire cover (industry x2)
 
 # --- Districts: height rules painted over the zones ---
-# 0 = normal, 1 = conservation area, 2 = central business district (CBD).
-const DISTRICT_NAMES := ["Normal", "Conservation area", "CBD"]
+# 0 = normal, 1 = conservation area, 2 = central business district (CBD), 3 = Tech zone.
+const DISTRICT_NAMES := ["Normal", "Conservation area", "CBD", "Tech zone"]
+# Tech zone: offices and industry inside it pay their own tax rate (the City
+# panel). Set below the town's rate, firms come from outside to fill it.
+const TECH_ZONE := 3
+const TECH_PULL_GAP := 0.06         # a Tech zone tax this far below the town's draws firms to fill the whole zone
+const TECH_JOBS_PER_PERSON := 0.25  # ...but at most this many incoming jobs per resident
+const TECH_JOBS_BASE := 60          # (plus this many, so a village gets a few start-ups)
+const TECH_FAIRNESS_EFFECT := 0.3   # appeal lost when every job is in a Tech zone with the full tax break
 const CONSERVATION_MAX_STAGE := 3   # tenements (4 storeys) at most
 const CONSERVATION_VALUE := 0.03    # land value for the character of the old town
 const CBD_EXTRA_LEVELS := 2         # high-density plots in a CBD can rise two more stages (skyscrapers)

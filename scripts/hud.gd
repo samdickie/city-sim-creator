@@ -21,6 +21,7 @@ signal tool_chosen(tool_id: int)            # (the Bulldoze button)
 signal build_item_chosen(id: String)       # an item picked in the Build menu
 signal speed_chosen(speed: int)
 signal tax_changed(step: float)
+signal tech_tax_changed(step: float)
 signal new_city_pressed                      # New city in the game menu (the game then opens the dialog)
 signal new_city_chosen(level: int)          # Start in the New city dialog (Settings.DIFFICULTIES index)
 signal new_city_cancelled
@@ -69,7 +70,7 @@ const OVERLAY_TIPS := ["The normal view",
 	"Why each zone is or isn't growing",
 	"How many of police, fire, schools and hospitals cover each area. Pick one to see where it's missing",
 	"Which plots have water (anything bigger than a first-level plot needs it)",
-	"CBD (skyscrapers allowed) and conservation areas (low-rise only)",
+	"CBD (skyscrapers allowed), Tech zones (their own tax rate) and conservation areas (low-rise only)",
 	"Where the air is dirty: industry, coal and gas power, landfill and the harbour pollute; parks and woodland help",
 	"How busy each road is with people driving to work and the shops. Busy roads need another way round, or buses"]
 const OVERLAY_ICONS := ["eye", "value", "power", "roads", "growth", "services", "utilities", "districts", "pollution",
@@ -127,6 +128,7 @@ var borrow_buttons: Array[Button] = []     # one per Settings.BORROW_STEPS
 var repay_button: Button
 var repay_all_button: Button
 var tax_label: Label
+var tech_tax_label: Label            # the Tech zone's own tax rate (City panel)
 var happiness_label: Label
 var _happy_bar: Control
 var _happy_value := 0.0
@@ -558,6 +560,16 @@ func _build_city_panel() -> void:
 	tax_row.add_child(tax_label)
 	tax_row.add_child(_small_button("–", "Lower taxes by 1%", func(): tax_changed.emit(-0.01)))
 	tax_row.add_child(_small_button("+", "Raise taxes by 1%", func(): tax_changed.emit(0.01)))
+	var tech_row := _hbox(box, 6)
+	tech_tax_label = _label("", 13, TEXT)
+	tech_tax_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tech_tax_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	tech_tax_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	tech_tax_label.tooltip_text = "Offices and industry in a Tech zone pay this instead of the town's rate. " \
+		+ "Below the town's, firms come from outside to fill the zone."
+	tech_row.add_child(tech_tax_label)
+	tech_row.add_child(_small_button("–", "Lower the Tech zone's tax by 1%", func(): tech_tax_changed.emit(-0.01)))
+	tech_row.add_child(_small_button("+", "Raise the Tech zone's tax by 1%", func(): tech_tax_changed.emit(0.01)))
 
 	# Loans: borrow when money is short; paid back a little each month.
 	box.add_child(_divider())
@@ -1211,7 +1223,7 @@ func _build_help() -> void:
 			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
-			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), or a conservation area kept low-rise.",
+			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry pay their own tax rate (set it in the City panel; below the town's draws firms in), or a conservation area kept low-rise.",
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1596,6 +1608,14 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 
 	tax_label.text = "Tax rate %d%%: %s" % [roundi(sim.tax_rate * 100.0), sim.tax_word()]
 	tax_label.add_theme_color_override("font_color", BAD if sim.business_appeal() < 0.3 else TEXT)
+	var has_tech: bool = sim.has_tech_zone()
+	tech_tax_label.text = "Tech zone tax %d%%: %s" % [roundi(sim.tech_tax_rate * 100.0), sim.tech_word()]
+	if has_tech:
+		var tech_jobs: int = sim.tech_zone_jobs()
+		tech_tax_label.text += "\n%s jobs there" % thousands(tech_jobs)
+		if sim.last_tech_relief > 0:
+			tech_tax_label.text += " · the break cost %s last month" % money_text(sim.last_tech_relief)
+	tech_tax_label.add_theme_color_override("font_color", TEXT if has_tech else TEXT_DIM)
 
 	# Demand, in words for the tooltip.
 	var parts: Array[String] = []

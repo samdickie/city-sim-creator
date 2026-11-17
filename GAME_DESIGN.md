@@ -74,7 +74,8 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Re-zone by dragging a different density over an area; buildings trim to the new maximum.
 
 ## Districts and skyscrapers
-- District tool (Z) paints a height rule over any land, free: CBD, conservation area, or back to normal. Choosing it shows the Districts map view.
+- District tool (Z) paints a rule over any land, free: CBD, Tech zone, conservation area, or back to normal. Choosing it shows the Districts map view (Tech zones in teal).
+- Tech zone: offices and industry in it pay its own tax rate (see Tech layer, Tech zone); no height rule of its own. A tile is one kind of district, so a Tech zone can't also be a CBD.
 - Conservation area: nothing above stage 3 (tenements, four storeys); +0.03 land value for character. Existing taller buildings are trimmed back.
 - CBD: high-density homes and shops can rise two more stages, to skyscrapers: stage 7 (20-26 storeys; 350 residents or 160 jobs) and stage 8 (32-42 storey landmark that steps in twice, often with a spire; 500 residents or 260 jobs). +0.08 land value across the CBD, and tall buildings grow 1.5x faster there.
 - Skyscrapers also need land value 0.72 / 0.8, a town of 8,000 people, and a working railway station or bus depot within 600 m. Each stands on a three-storey podium (glass, or classical with shopfronts) with a planted plaza behind.
@@ -257,7 +258,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 - Only the streets round the camera are filled (cars up to 1.8 km away as you zoom out, people within 700 m); anyone who drives out of range reappears in view. At most 300 vehicles and 400 people; no people drawn beyond 1.1 km zoom and no cars beyond 3.5 km.
 - Drawn with six MultiMeshes (car bodies, cabins, lamps, light pools, people, heads) filled from one buffer each frame; with a crowd, each person moves every other frame. Code in `scripts/traffic.gd`; numbers in `scripts/settings.gd`.
 
-## Tech layer (planned, Nov 2026; nothing built yet)
+## Tech layer (planned Nov 2026; step 1, the Tech zone, built)
 The next direction: blend town planning with today's big-tech issues. You're the mayor; tech companies write asking to build, at a scale you pick, and you live with what follows: data centres eating power and water, campuses pushing up house prices, gigafactories filling the roads. Tongue-in-cheek throughout. Every number below is a first guess, to be tuned in play.
 
 ### No more Troon
@@ -326,10 +327,14 @@ Data centre scales, as an example:
 | Tax a month | £400 | £1,500 | £4,000 |
 | Asks for | nothing | 5 years' tax break | 10 years' tax break and grid priority (homes lose power first) |
 
-### Tech zone (a district)
-- A third kind of district beside Conservation and CBD, painted with the District tool. It has **its own tax rate** in the City panel (say town 9%, Tech zone 3%), used for every plot inside it.
-- Offices and industry inside grow faster at a lower rate; companies' buildings go inside it.
-- Catches: less tax income; a "tech pays less tax than we do" complaint when the zone's rate is far below the town's and the zone is big; companies that came for a low rate threaten to leave if it's raised.
+### Tech zone (a district) — built (Nov 2026), not yet played by Sam
+- A fourth kind of district (Districts > Tech zone, after CBD), painted with the District tool, free. **Its own tax rate** in the City panel, under the town's (– / +, 0-20%, starts at 9%): offices and industry inside pay it; homes and shops there pay the town's. The panel says how it's going ("no tax break, so no pull", "drawing a few firms in", "drawing firms in"), the jobs there and what the break cost last month.
+- **Pull** = how far its rate is below the town's, out of 6 points (0 at the same rate, full at 6 below). Firms from outside want to bring jobs to fill that share of what its reachable office and industry plots hold (up to tenement size), at most 60 + a quarter of a job per resident. These jobs come **on top** of what the town's own workers want: they don't take workers from industry, and spare jobs bring people in. With any pull, the zone's plots grow first.
+- With no break, its plots wait: "firms from outside only come for a tax break". Hover text: "Tech zone: offices and industry pay 3% tax".
+- **Fairness**, a new happiness part: pull x the share of the town's jobs in the zone x 0.3 ("firms in the Tech zone pay less tax than everyone else"). So a small zone or a small break costs little; a whole town's jobs at 0% costs 0.3 appeal (about 10% happiness).
+- Advisors: "Residents grumble that Tech zone firms pay less tax" (when fairness costs 0.05 or more), or "The Tech zone has no tax break, so no firms are drawn to it". Both open the Districts view.
+- Saved (`tech_tax_rate`); older saves take the town's rate. Numbers under Districts in `scripts/settings.gd` (`TECH_*`).
+- Still to come: companies that came for a low rate threatening to leave if it's raised (with the letters); the zone feeding how often letters come.
 - Real-world cousins: Enterprise Zones and Freeports (UK), Opportunity Zones (US).
 - Later, perhaps: separate tax rates for homes, shops, industry and offices, as SimCity 4 does.
 
@@ -355,7 +360,7 @@ Data centre scales, as an example:
 - A satirical headline ticker reacting to your choices.
 
 ### Build order (one at a time, played before the next)
-1. **Tech zone** with its own tax rate.
+1. **Tech zone** with its own tax rate. *Built Nov 2026, not yet played.*
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come.
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.

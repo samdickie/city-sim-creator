@@ -952,6 +952,16 @@ def conservation():
     _district((0.70, 0.45, 0.20), False)
 
 
+def tech_zone():
+    # A glass office campus and a big shed (a data centre or works) on the zone's colour.
+    ground()
+    slab(0.0, 0.0, 50.0, 50.0, (0.16, 0.62, 0.64), 0.0)
+    modern_block(-12.5, 3.0, 23.0, 18.0, 4, (0.30, 0.36, 0.44), glassy=True)
+    model("shed", 12.5, 4.0, 21.0, 24.0, 10.2, SHED_METAL, (0.44, 0.46, 0.50))
+    for along in (-23.4, -2.0):
+        tree(along, 26.0, 7.0)
+
+
 def normal():
     ground()
     model("terrace", -12.0, 4.0, 15.0, 8.5, 9.4, BLONDE_SANDSTONE)
@@ -968,7 +978,7 @@ ITEMS = {
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
     "station": station, "harbour": harbour, "airport": airport,
     "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
-    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "conservation": conservation, "normal": normal,
+    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "tech_zone": tech_zone, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "incinerator": 1.7, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,

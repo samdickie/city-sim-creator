@@ -111,6 +111,7 @@ func _run() -> void:
 	await _road_types()
 	await _services()
 	await _feedback_fixes()
+	await _tech_zone()
 	await _examples()
 	await _new_buildings()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
@@ -316,6 +317,139 @@ func _feedback_fixes() -> void:
 	sim.population = 6000
 	await _drag(_screen_of(o + Vector2i(2, 7)), _screen_of(o + Vector2i(12, 9)))
 	check(_count(T.AIRPORT, o + Vector2i(2, 7), o + Vector2i(19, 9)) == 0, "airport: let go while it's red, nothing is built")
+
+
+func _tech_zone() -> void:
+	# The Tech zone (tech layer step 1, Nov 2026): a district painted with the
+	# mouse whose offices and industry pay their own tax, set in the City panel.
+	# Below the town's rate, firms come from outside to fill it; residents
+	# grumble when it's a big break for a big share of the jobs.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(24, 10)
+	check(o.x >= 0 and _built_count() == 0, "tech zone: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	# Homes above a road; offices and industry below it; coal and water at the end.
+	_place("road", o + Vector2i(0, 4), o + Vector2i(21, 4))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(20, 3))
+	_place("offices_1", o + Vector2i(0, 5), o + Vector2i(9, 6))
+	_place("industry", o + Vector2i(11, 5), o + Vector2i(20, 6))
+	_place("coal", o + Vector2i(21, 5))
+	_place("water_tower", o + Vector2i(21, 3))
+	var plots := _count(T.OFFICES, o + Vector2i(0, 5), o + Vector2i(20, 6)) + _count(T.INDUSTRY, o + Vector2i(0, 5), o + Vector2i(20, 6))
+	check(plots == 40, "tech zone: 20 office and 20 industry plots zoned (%d)" % plots)
+
+	# Paint it with the mouse: Districts > Tech zone, drag over the business plots.
+	game.call("_refresh_hud")
+	check(String(hud.get("tech_tax_label").text).contains("paint a Tech zone"),
+		"tech zone: before there is one, the City panel says how to make one (%s)" % hud.get("tech_tax_label").text)
+	await _pick_item("districts", "tech_zone")
+	check(_tool() == DISTRICT, "tech zone: Districts > Tech zone picks the District tool")
+	await _look_at(o + Vector2i(10, 5), PLAY_DISTANCE * 1.4, -40.0, 50.0, [o, o + Vector2i(21, 0), o + Vector2i(21, 7)])
+	await _drag(_screen_of(o + Vector2i(0, 5)), _screen_of(o + Vector2i(20, 6)))
+	var painted := 0
+	for y: int in range(o.y + 5, o.y + 7):
+		for x: int in range(o.x, o.x + 21):
+			if sim.district[y * sim.w + x] == Settings.TECH_ZONE:
+				painted += 1
+	check(painted == 42 and sim.has_tech_zone(), "tech zone: dragging paints a Tech zone over 42 tiles (%d)" % painted)
+	check(world.overlay == WorldView.Overlay.DISTRICTS, "tech zone: painting shows the Districts view")
+	var office := (o.y + 5) * sim.w + o.x + 2
+	var text: String = game.call("_tile_text", office)
+	check(text.contains("Tech zone: offices and industry pay 9% tax"), "tech zone: hovering a plot says what it pays (%s)" % text.get_slice("\n", 1))
+	check(String(sim.zone_status(office)).contains("only come for a tax break"),
+		"tech zone: with no break, its plots say firms want one (%s)" % sim.zone_status(office))
+	await _key(KEY_Z, true)
+	check(not sim.has_tech_zone(), "tech zone: Cmd+Z takes the painting back")
+	_place("tech_zone", o + Vector2i(0, 5), o + Vector2i(20, 6))
+	await _shot("p28_tech_zone_painted")
+
+	# The City panel's own tax row: lower it to 3% with the mouse.
+	await _click(hud.get("_city_button"))
+	var label: Label = hud.get("tech_tax_label")
+	check(label.visible and label.text.contains("Tech zone tax 9%: no tax break"), "tech zone: the City panel has its own tax row (%s)" % label.text)
+	var minus: Button = null
+	for child: Node in label.get_parent().get_children():
+		var b := child as Button
+		if b and b.text == "–":
+			minus = b
+	for k: int in 6:
+		await _click(minus)
+	check(is_equal_approx(sim.tech_tax_rate, 0.03) and is_equal_approx(sim.tax_rate, Settings.DEFAULT_TAX_RATE),
+		"tech zone: – six times sets it to 3%%, the town stays at %d%%" % roundi(sim.tax_rate * 100.0))
+	check(label.text.contains("drawing firms in"), "tech zone: the panel says it's drawing firms in (%s)" % label.text)
+	var incoming: Dictionary = sim.tech_incoming()
+	check(float(incoming[T.OFFICES]) > 0.0 and float(incoming[T.INDUSTRY]) > 0.0,
+		"tech zone: firms want to bring %d office and %d industry jobs" % [roundi(float(incoming[T.OFFICES])), roundi(float(incoming[T.INDUSTRY]))])
+	await _click(hud.get("_city_button"))
+
+	# Two years with the break, and the same two years without: the break fills the zone.
+	var start := sim.to_save()
+	var jobs_with := 0
+	var jobs_without := 0
+	for run: int in 2:
+		sim.from_save(start)
+		sim.money = 500000
+		sim.tech_tax_rate = 0.03 if run == 0 else Settings.DEFAULT_TAX_RATE
+		sim.recount()
+		for m: int in 24:
+			sim.tick()
+		if run == 0:
+			jobs_with = sim.tech_zone_jobs()
+		else:
+			jobs_without = sim.tech_zone_jobs()
+	check(jobs_with > jobs_without + 50, "tech zone: after two years, %d jobs in it with a 3%% tax, %d without a break" % [jobs_with, jobs_without])
+	sim.from_save(start)
+	sim.money = 500000
+	sim.recount()
+	for m: int in 24:
+		sim.tick()
+	check(sim.last_tech_relief > 0, "tech zone: the break gave up %s of tax last month" % Hud.money_text(sim.last_tech_relief))
+	var most := Settings.TECH_JOBS_BASE + sim.population * Settings.TECH_JOBS_PER_PERSON
+	var wanted := float(sim.tech_incoming()[T.OFFICES]) + float(sim.tech_incoming()[T.INDUSTRY])
+	check(wanted <= most + 0.5, "tech zone: incoming firms are capped by the town's size (%d of at most %d)" % [roundi(wanted), roundi(most)])
+
+	# Fairness: at 0% with most of the jobs in the zone, residents grumble.
+	sim.change_tech_tax(-1.0)
+	sim.recount()
+	var share := float(sim.tech_zone_jobs()) / maxi(sim.jobs(), 1)
+	var part: float = sim.happiness_parts.get("fairness", 0.0)
+	check(part < 0.0 and is_equal_approx(part, -share * Settings.TECH_FAIRNESS_EFFECT),
+		"tech zone: at 0%%, with %d%% of jobs in it, fairness costs %.2f appeal" % [roundi(share * 100.0), part])
+	if part <= -Settings.COMPLAINT_SIZE:
+		check("tech_fairness" in _tip_ids(), "tech zone: the advisors say residents grumble about it")
+	sim.change_tech_tax(1.0)
+	sim.tech_tax_rate = sim.tax_rate
+	sim.recount()
+	check(float(sim.happiness_parts.get("fairness", 0.0)) == 0.0 and "tech_no_break" in _tip_ids(),
+		"tech zone: at the town's rate nobody minds, and the advisors suggest a break")
+
+	# Saved and loaded; an older save takes the town's rate.
+	sim.tech_tax_rate = 0.04
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(is_equal_approx(sim.tech_tax_rate, 0.04) and sim.has_tech_zone(), "tech zone: saved and loaded with its 4% tax")
+	data.erase("tech_tax_rate")
+	data["tax_rate"] = 0.11
+	sim.from_save(data)
+	check(is_equal_approx(sim.tech_tax_rate, 0.11), "tech zone: a save from before takes the town's rate (11%)")
+	sim.tech_tax_rate = 0.03
+	sim.tax_rate = Settings.DEFAULT_TAX_RATE
+	sim.recount()
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	sim.layout_version += 1
+	game.call("_refresh_hud")
+	await _frames(3)
+	await _click(hud.get("_city_button"))
+	await _shot("p29_tech_zone_city_panel")
+	await _click(hud.get("_city_button"))
 
 
 func _examples() -> void:
@@ -1348,12 +1482,12 @@ func _one_month() -> Dictionary:
 func _new_city() -> void:
 	# New city from the menu asks for a difficulty; Esc keeps the city.
 	var built := _built_count()
-	var money := sim.money
 	game.call("_set_speed", 1)
 	await _open_new_city_from_menu()
 	check(hud.is_modal(), "New city in the menu opens the dialog")
 	check((hud.get("_new_warning") as Control).visible, "...warning that it clears the city")
 	check(int(game.get("speed")) == 0, "...and pauses the clock")
+	var money := sim.money          # (read once paused: a month may tick while the menu opens)
 	await _key(KEY_ESCAPE)
 	await _wait(0.2)
 	check(not hud.is_modal() and _built_count() == built and sim.money == money,

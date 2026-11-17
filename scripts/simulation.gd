@@ -37,6 +37,7 @@ const COMPLAINTS := {
 	"power": ["homes without power", "build another power plant, or link the homes to one"],
 	"water": ["homes without water", "build a water pump or tower"],
 	"pollution": ["polluted air near homes", "keep homes away from industry and coal, or plant parks or woodland between"],
+	"fairness": ["firms in the Tech zone pay less tax than everyone else", "raise the Tech zone's tax in the City panel, or keep the zone small"],
 }
 # The parts businesses weigh too. The rest (jobs, housing, power and water at
 # home) only residents feel, so they don't put shops and industry off.
@@ -60,6 +61,7 @@ var abandoned := PackedByteArray()    # zones: 1 = the building stands empty (no
 var money := 0
 var month := 0                        # months since the city was founded
 var tax_rate := Settings.DEFAULT_TAX_RATE
+var tech_tax_rate := Settings.DEFAULT_TAX_RATE   # what offices and industry in a Tech zone pay
 var difficulty := Settings.DEFAULT_DIFFICULTY   # index into Settings.DIFFICULTIES; set when the city starts
 var debt := 0                         # what the town owes on loans (one running balance)
 var debt_peak := 0                    # the most owed since the balance was last clear (sets the monthly slice)
@@ -89,7 +91,7 @@ var leisure_appeal := 0.0             # extra appeal from leisure buildings and 
 # whenever taxes change, from the town itself, so it needs no saving.
 var happiness := 2.0 / 3.0
 # What happiness is made of, in appeal points: part name -> amount (below 0 = a
-# complaint). Names: taxes, services, leisure, rubbish, jobs, housing, power, water, pollution.
+# complaint). Names: taxes, services, leisure, rubbish, jobs, housing, power, water, pollution, fairness.
 var happiness_parts := {}
 var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
@@ -97,6 +99,7 @@ var power_used := 0                   # zone levels currently built
 var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
 var last_income := 0
 var last_upkeep := 0
+var last_tech_relief := 0             # tax the Tech zone's lower rate gave up last month (below 0: it paid more)
 var last_loan := 0                    # loan payment last month (interest and repayment together)
 var last_interest := 0                # ...of which interest
 var grew := PackedInt32Array()        # plots that grew last month
@@ -200,6 +203,8 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	debt_peak = 0
 	month = 0
 	tax_rate = Settings.DEFAULT_TAX_RATE
+	tech_tax_rate = Settings.DEFAULT_TAX_RATE
+	last_tech_relief = 0
 	last_income = 0
 	last_upkeep = 0
 	last_loan = 0
@@ -327,7 +332,94 @@ func set_district(i: int, d: int) -> void:
 
 func district_name(i: int) -> String:
 	var n: String = Settings.DISTRICT_NAMES[district[i]]
+	if district[i] == Settings.TECH_ZONE:
+		n += ": offices and industry pay %d%% tax" % roundi(tech_tax_rate * 100.0)
 	return n
+
+
+# ------------------------------------------------------------------ Tech zone
+
+func tech_taxed(i: int) -> bool:
+	# Offices and industry in a Tech zone pay its own tax rate; homes and shops
+	# there pay the town's.
+	return district[i] == Settings.TECH_ZONE and (tiles[i] == Tile.OFFICES or tiles[i] == Tile.INDUSTRY)
+
+
+func has_tech_zone() -> bool:
+	for i in w * h:
+		if district[i] == Settings.TECH_ZONE:
+			return true
+	return false
+
+
+func change_tech_tax(step: float) -> void:
+	tech_tax_rate = clampf(snappedf(tech_tax_rate + step, 0.01), 0.0, Settings.MAX_TAX_RATE)
+	_update_demand()
+
+
+func tech_pull() -> float:
+	# 0-1: how keen outside firms are on the Tech zone, from how far its tax is
+	# below the town's (none at the same rate, all of it TECH_PULL_GAP below).
+	return clampf((tax_rate - tech_tax_rate) / Settings.TECH_PULL_GAP, 0.0, 1.0)
+
+
+func tech_zone_jobs() -> int:
+	# Jobs in the Tech zone's offices and industry.
+	var n := 0
+	for i in w * h:
+		if levels[i] > 0 and tech_taxed(i):
+			n += units(i)
+	return n
+
+
+func tech_incoming() -> Dictionary:
+	# The jobs firms from outside want to bring to the Tech zone for its tax
+	# break, by zone ({OFFICES: n, INDUSTRY: n}): the share tech_pull() of what
+	# its reachable office and industry plots can hold (up to tenement size),
+	# at most a quarter of a job per resident (TECH_JOBS_*). These come on top of
+	# the jobs the town's own workers want, and bring people in to fill them.
+	var out := {Tile.OFFICES: 0.0, Tile.INDUSTRY: 0.0}
+	var pull := tech_pull()
+	if pull <= 0.0:
+		return out
+	_update_road_distance()
+	var room := 0.0
+	for i in w * h:
+		if tech_taxed(i) and _connected(i):
+			var top: int = mini(stage_at(i, max_level(i)), Settings.FREE_STAGE)
+			var n := float(units_at_stage(tiles[i], top))
+			out[tiles[i]] = float(out[tiles[i]]) + n
+			room += n
+	if room <= 0.0:
+		return out
+	var most := Settings.TECH_JOBS_BASE + population * Settings.TECH_JOBS_PER_PERSON
+	var scale := minf(pull, most / room)
+	for t: int in out:
+		out[t] = float(out[t]) * scale
+	return out
+
+
+func tech_unfairness() -> float:
+	# 0-1: how unfair residents find the Tech zone's tax break: how big the break
+	# is (as tech_pull) times the share of the town's jobs that get it.
+	var all_jobs := jobs()
+	if all_jobs <= 0 or tech_tax_rate >= tax_rate:
+		return 0.0
+	return tech_pull() * clampf(float(tech_zone_jobs()) / all_jobs, 0.0, 1.0)
+
+
+func tech_word() -> String:
+	# How the Tech zone's tax is going down, for the City panel.
+	if not has_tech_zone():
+		return "paint a Tech zone (Districts, Z) to use it"
+	var pull := tech_pull()
+	if tech_tax_rate > tax_rate + 0.005:
+		return "higher than the town's, so firms stay away"
+	if pull <= 0.0:
+		return "no tax break, so no pull"
+	if pull < 0.5:
+		return "drawing a few firms in"
+	return "drawing firms in"
 
 
 func has_road_access(i: int) -> bool:
@@ -440,6 +532,8 @@ func _zone_check(i: int) -> Array:
 				return [Growth.WAITING, "waiting, %s won't move in" % who]
 			return [Growth.WAITING, "waiting, %s won't move in: %s (%s)" \
 				% [who, complaint_text(keys[0]), complaint_fix(keys[0])]]
+		if tech_taxed(i) and tech_pull() <= 0.0:
+			return [Growth.WAITING, "waiting: firms from outside only come for a tax break (set the Tech zone's tax below the town's in the City panel)"]
 		match t:
 			Tile.HOMES:
 				return [Growth.WAITING, "waiting, the town needs more jobs first"]
@@ -583,6 +677,17 @@ func _grow() -> void:
 		if is_zone(tiles[i]):
 			zones.append(i)
 	zones.shuffle()                   # no corner of the map gets first pick
+	if tech_pull() > 0.0:
+		# Firms drawn by a Tech zone's tax break go there first.
+		var first: Array[int] = []
+		var rest: Array[int] = []
+		for i in zones:
+			if tech_taxed(i):
+				first.append(i)
+			else:
+				rest.append(i)
+		first.append_array(rest)
+		zones = first
 
 	grew.clear()
 	shrank.clear()
@@ -740,10 +845,16 @@ func _collect_taxes() -> void:
 	# Valuable land pays more: from 0.6x on the worst land to 1.4x on the best.
 	_update_land_value()
 	var taxable := 0.0
+	var taxable_tech := 0.0               # offices and industry in a Tech zone pay its own rate
 	for i in w * h:
 		if is_zone(tiles[i]) and levels[i] > 0:
-			taxable += units(i) * (0.6 + 0.8 * land_value[i]) * (Settings.OFFICE_TAX if tiles[i] == Tile.OFFICES else 1.0)
-	last_income = roundi(taxable * tax_rate * Settings.TAX_BASE)
+			var base := units(i) * (0.6 + 0.8 * land_value[i]) * (Settings.OFFICE_TAX if tiles[i] == Tile.OFFICES else 1.0)
+			if tech_taxed(i):
+				taxable_tech += base
+			else:
+				taxable += base
+	last_income = roundi((taxable * tax_rate + taxable_tech * tech_tax_rate) * Settings.TAX_BASE)
+	last_tech_relief = roundi(taxable_tech * (tax_rate - tech_tax_rate) * Settings.TAX_BASE)
 	# Every running cost is scaled by the difficulty (x1 on Normal).
 	last_upkeep = roundi((road_upkeep + park_tiles * Settings.PARK_UPKEEP
 		+ service_upkeep() + building_upkeep()) * upkeep_scale())
@@ -2139,6 +2250,8 @@ func _measure_happiness() -> void:
 		parts["water"] = 0.0
 	# Pollution: the share of residents breathing polluted air (see pollution_feeling).
 	parts["pollution"] = -pollution_feeling()
+	# Fairness: residents resent a Tech zone paying far less tax than they do.
+	parts["fairness"] = -tech_unfairness() * Settings.TECH_FAIRNESS_EFFECT
 	happiness_parts = parts
 	happiness = (clampf(1.0 + _sum_parts(parts.keys()), -1.0, 2.0) + 1.0) / 3.0
 
@@ -2281,8 +2394,14 @@ func _update_demand() -> void:
 	# offices that are built take workers from industry, so a town with no office
 	# zone runs exactly as before.
 	var office_target := maxf(workers - local_shops, 0.0) * minf(office_share() * office_boost, 1.0)
-	demand[Tile.OFFICES] = _business_demand(office_target - office_jobs, office_jobs, b)
-	demand[Tile.INDUSTRY] = _business_demand(workers - local_shops - office_jobs - industry_jobs + trade,
+	# A Tech zone's tax break brings firms from outside, on top (see tech_incoming):
+	# their jobs don't take the town's workers from industry; they bring people in.
+	var incoming := tech_incoming()
+	var tech_offices: float = incoming[Tile.OFFICES]
+	var tech_industry: float = incoming[Tile.INDUSTRY]
+	demand[Tile.OFFICES] = _business_demand(office_target + tech_offices - office_jobs, office_jobs, b)
+	var local_offices := maxf(office_jobs - tech_offices, 0.0)
+	demand[Tile.INDUSTRY] = _business_demand(workers - local_shops - local_offices - industry_jobs + trade + tech_industry,
 		industry_jobs, b)
 
 
@@ -2928,6 +3047,7 @@ func to_save() -> Dictionary:
 		"debt_peak": debt_peak,
 		"month": month,
 		"tax_rate": tax_rate,
+		"tech_tax_rate": tech_tax_rate,
 		"tiles": Array(tiles),
 		"levels": Array(levels),
 		"density": Array(density),
@@ -2958,7 +3078,7 @@ func from_save(data: Dictionary) -> void:
 	district.fill(0)
 	road_kind.fill(0)
 	for i in mini(saved_district.size(), district.size()):
-		district[i] = clampi(int(saved_district[i]), 0, 2)
+		district[i] = clampi(int(saved_district[i]), 0, Settings.DISTRICT_NAMES.size() - 1)
 	# Kinds of road (saves from before avenues and motorways: all ordinary roads).
 	var saved_roads: Array = data.get("road_kind", [])
 	road_kind.fill(0)
@@ -3006,6 +3126,8 @@ func from_save(data: Dictionary) -> void:
 	last_interest = int(data.get("last_interest", 0))
 	month = int(data.get("month", 0))
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
+	tech_tax_rate = clampf(float(data.get("tech_tax_rate", tax_rate)), 0.0, Settings.MAX_TAX_RATE)   # (older saves: the town's rate)
+	last_tech_relief = 0
 	var saved_funding: Array = data.get("funding", [])
 	for s in 4:
 		funding[s] = clampf(float(saved_funding[s]), 0.0, Settings.MAX_FUNDING) \

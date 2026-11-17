@@ -274,7 +274,7 @@ builders = {
     'police': police, 'fire': fire, 'school': school, 'hospital': hospital,
     'golf': golf, 'library': library, 'museum': museum, 'stadium': stadium, 'marina': marina, 'town_hall': town_hall,
     'bus_depot': bus_depot, 'station': station, 'harbour': harbour,
-    'cbd': lambda: district('#9a62e8', False), 'conservation': lambda: district('#d08f45', True), 'normal': district_normal,
+    'cbd': lambda: district('#9a62e8', False), 'tech_zone': lambda: district('#29c2c7', False), 'conservation': lambda: district('#d08f45', True), 'normal': district_normal,
 }
 for k, f in builders.items():
     icons[k] = f().svg()

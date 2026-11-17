@@ -294,13 +294,33 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			+ "has too many of, are left empty. Fix the problem and they'll be done up, or "
 			+ "bulldoze them. They're brown on the Growth map.", growth_kind)
 
+	# --- Tech zone: a tax break that does nothing, or one residents resent ---
+	if sim.has_tech_zone():
+		var unfair: float = -float(sim.happiness_parts.get("fairness", 0.0))
+		if unfair >= Settings.COMPLAINT_SIZE:
+			_add(out, "tech_fairness", ADVICE,
+				"Residents grumble that Tech zone firms pay less tax",
+				"Offices and industry in the Tech zone pay %d%% tax, against %d%% for everyone else; "
+				% [roundi(sim.tech_tax_rate * 100.0), roundi(sim.tax_rate * 100.0)]
+				+ "last month that break was worth %s to them. The bigger the zone and the break, "
+				% _pounds(maxi(sim.last_tech_relief, 0))
+				+ "the more it costs in happiness. Raise its tax in the City panel, or keep the zone small.",
+				WorldView.Overlay.DISTRICTS)
+		elif sim.tech_pull() <= 0.0 and sim.population >= Settings.TECH_JOBS_BASE:
+			_add(out, "tech_no_break", ADVICE,
+				"The Tech zone has no tax break, so no firms are drawn to it",
+				"Offices and industry in a Tech zone pay its own tax rate. Set it below the town's "
+				+ "(in the City panel) and firms from outside come to fill it, bringing jobs and "
+				+ "people. The bigger the gap, the more come.", WorldView.Overlay.DISTRICTS)
+
 	# --- Happiness: the main complaint, when people are unhappy ---
 	var complaints: Array[String] = sim.complaint_keys(1)
 	if sim.happiness < 0.5 and not complaints.is_empty():
 		var key: String = complaints[0]
 		if not (tax_tip and key in ["taxes", "services"]):
 			var views := {"taxes": services_kind, "services": services_kind, "power": power_kind,
-				"water": water_kind, "pollution": WorldView.Overlay.POLLUTION}
+				"water": water_kind, "pollution": WorldView.Overlay.POLLUTION,
+				"fairness": WorldView.Overlay.DISTRICTS}
 			var view: int = views.get(key, NO_OVERLAY)
 			var leaving: bool = sim.happiness < 1.0 / 3.0
 			_add(out, "happiness", URGENT if leaving else WARNING,

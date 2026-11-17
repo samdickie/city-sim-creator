@@ -313,6 +313,7 @@ const OV_DARK_YELLOW := Color(0.62, 0.52, 0.16)
 const OV_DARK_BLUE := Color(0.16, 0.30, 0.58)
 const OV_CBD := Color(0.62, 0.38, 0.92)
 const OV_CONSERVATION := Color(0.80, 0.56, 0.28)
+const OV_TECH := Color(0.16, 0.76, 0.78)
 const OV_ABANDONED := Color(0.45, 0.30, 0.24)
 # Traffic view: quiet, free-flowing, busy, heavy, jammed (simulation.gd traffic_band, plus traffic_quiet).
 const OV_QUIET := Color(0.42, 0.58, 0.46)
@@ -2038,8 +2039,8 @@ func overlay_legend(kind: int) -> Array:
 			return [[OV_GREEN, "All four services"], [OV_LIGHT_GREEN, "Three"],
 				[OV_YELLOW, "One or two"], [OV_RED, "None"], [OV_BLUE, "Service building"]]
 		Overlay.DISTRICTS:
-			return [[OV_CBD, "CBD: skyscrapers allowed"], [OV_CONSERVATION, "Conservation area: low-rise only"],
-				[OV_GREY, "Normal"]]
+			return [[OV_CBD, "CBD: skyscrapers allowed"], [OV_TECH, "Tech zone: its own tax rate"],
+				[OV_CONSERVATION, "Conservation area: low-rise only"], [OV_GREY, "Normal"]]
 		Overlay.WATER:
 			return [[OV_BLUE, "Has water"], [OV_DARK_BLUE, "Carries water"],
 				[OV_RED, "Needs water to grow"], [OV_GREY, "Not connected"]]
@@ -2211,6 +2212,8 @@ func _overlay_colour(i: int, t: int, values: PackedFloat32Array, power: PackedBy
 				return Color(OV_CBD, 0.85)
 			if d == 1:
 				return Color(OV_CONSERVATION, 0.85)
+			if d == Settings.TECH_ZONE:
+				return Color(OV_TECH, 0.85)
 			return Color(OV_GREY, 0.35) if t != Tile.EMPTY else none
 		Overlay.WATER:
 			if t == Tile.EMPTY:

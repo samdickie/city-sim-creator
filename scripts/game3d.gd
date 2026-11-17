@@ -53,10 +53,12 @@ const TOOL_KEYS := {
 	Tool.POWER: "6", Tool.UTILITY: "7", Tool.PARK: "8", Tool.GRID: "9", Tool.SERVICE: "0",
 	Tool.LEISURE: "-", Tool.TRANSPORT: "=", Tool.DISTRICT: "Z",
 }
-# The District tool's picker, in order: CBD, conservation area, back to normal.
-const DISTRICT_ORDER := [2, 1, 0]
+# The District tool's picker, in order: CBD, Tech zone, conservation area, back to normal.
+const DISTRICT_ORDER := [2, 3, 1, 0]
+const DISTRICT_IDS := ["cbd", "tech_zone", "conservation", "normal"]
 const DISTRICT_ABOUT := [
 	"Central business district: high-density plots can become skyscrapers (with 8,000 people and a station or bus depot nearby). Raises land value.",
+	"Tech zone: offices and industry here pay their own tax rate (set it in the City panel). Set it below the town's and firms come from outside to fill it, bringing jobs and people; residents may grumble that it's unfair.",
 	"Conservation area: nothing taller than four storeys, to keep the old town's character. A little extra land value.",
 	"Normal: the usual height rules for each density."]
 # Tools that open a picker of several buildings (Tab or the buttons choose one).
@@ -194,6 +196,7 @@ func _ready() -> void:
 	hud.set_items(_menu_items())
 	hud.speed_chosen.connect(_set_speed)
 	hud.tax_changed.connect(_change_tax)
+	hud.tech_tax_changed.connect(_change_tech_tax)
 	hud.new_city_pressed.connect(_ask_new_city.bind(false))
 	hud.new_city_chosen.connect(_new_city_chosen)
 	hud.new_city_cancelled.connect(_new_city_cancelled)
@@ -1043,7 +1046,7 @@ const SHORT := {
 	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade",
 	"big_ben": "The great clock tower", "colosseum": "The ancient amphitheatre", "great_pyramid": "A wonder of the ancient world",
 	"liberty": "Torch held high, by the sea", "taj_mahal": "White marble domes", "opera_house": "White sails by the water",
-	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "cbd": "Skyscrapers allowed", "conservation": "Keeps the old town low",
+	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "cbd": "Skyscrapers allowed", "tech_zone": "Its own tax rate, to draw firms", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
 
@@ -1072,7 +1075,7 @@ func _menu_entries() -> Array:
 			var t: int = tiles_in_group[k]
 			out.append([_item_id(t), group_cats[tool_id], tool_id, -1, k, t])
 	for k in DISTRICT_ORDER.size():
-		out.append([["cbd", "conservation", "normal"][k], "districts", Tool.DISTRICT, -1, k, Tile.EMPTY])
+		out.append([DISTRICT_IDS[k], "districts", Tool.DISTRICT, -1, k, Tile.EMPTY])
 	return out
 
 
@@ -1115,7 +1118,7 @@ func _menu_items() -> Array:
 				costs = Settings.OFFICES_COSTS
 			price = Hud.money_text(costs[density])
 		elif tool_id == Tool.DISTRICT:
-			item_name = ["CBD", "Conservation area", "Normal district"][e[4]]
+			item_name = ["CBD", "Tech zone", "Conservation area", "Normal district"][e[4]]
 			about = DISTRICT_ABOUT[e[4]]
 			price = "Free"
 		elif sim.is_building(t) or sim.is_service(t) or t == Tile.POWER_LINE:
@@ -1373,6 +1376,11 @@ func _clock_text() -> String:
 
 func _change_tax(step: float) -> void:
 	sim.change_tax(step)
+	_refresh_hud()
+
+
+func _change_tech_tax(step: float) -> void:
+	sim.change_tech_tax(step)
 	_refresh_hud()
 
 
