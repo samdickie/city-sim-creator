@@ -299,6 +299,26 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - Each year a start-up may **fold** (15%: its plot empties), be **bought** by a big firm (4%: the town's stake pays out 8x the grant) or **grow** a level (25%). Each is a message.
 - Saved (`letters`, `startups`, `investor_appetite`, `letter_count`); older saves have none. Numbers under Letters in `scripts/settings.gd`; rules under Letters in `scripts/simulation.gd`; words in `scripts/companies.gd`.
 
+### Data centres — built (Nov 2026), not yet played by Sam
+- **Amazon (Jeff Bezos), Microsoft (Satya Nadella) or Google (Sundar Pichai)** write from **1,500 people**, once a Tech zone has 4 tiles of open land: at best 8% a month x (0.5 + investor appetite), x0.4 without 160 spare power, x0.6 without a Tech zone tax 3 points below the town's. One data centre letter or unplaced deal at a time; a company already building here doesn't write again. Who's interested says what they're waiting for ("interested, but would like more spare power (160 at least)").
+- The letter card has a button per size (the numbers come from `Settings.DC_SCALES`, so the words never drift from them):
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Tiles | 4 | 12 | 30 |
+| Power / water | 160 / 80 | 480 / 240 | 1,200 / 600 |
+| Jobs (from outside) | 12 | 40 | 120 |
+| Tax a month | £400 | £1,500 | £4,000 |
+| Invested when it opens | £5,000 | £20,000 | £60,000 |
+| Asks for | nothing | no tax for 5 years | no tax for 10 years, power before homes |
+
+- Saying yes needs that much open land in the Tech zone (or the card says so). Then you **drag out its site** (the game switches to placing it, with the Districts view): free, open land in the Tech zone only, between the size and twice it; red until it's right, then green; let go while red and nothing is built. Picking another tool leaves it waiting: the inbox shows "needs a site · N months left" with **Place it**, and an advisor tip counts down. No site in **6 months** and the company goes elsewhere.
+- It runs once it has a road beside any of its tiles and all its power and water (shared over its tiles; it takes water like zones do). Running, it brings its jobs (counted with the town's: spare jobs draw people in) and, the next month, its investment; tax starts after its tax-free years. Not running, the hover text and an advisor tip say why ("not enough power (it needs 480)").
+- **Power before homes** (Mega): on its grid its tiles get power first, so homes at the far end go dark when it runs short.
+- **Bills**, a new happiness part: data centres' share of the town's power x how stretched the grid is (nothing below 60% used, full when it's all used) x 0.4. "electricity bills up: data centres are straining the grid".
+- It hums: land value -0.05 within 3 tiles. Drawn as a long windowless blue-grey hall per tile with cooling units on the roof and generators along the side.
+- Bulldoze it and the company leaves (investors cool, 3x a no). Saved (`deals`); older saves have none. Tile `DATA_CENTRE` (on the end of the list); it's never in the Build menu (the `Tool.DEAL` placing tool).
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -371,7 +391,7 @@ Data centre scales, as an example:
 
 ### Build order (one at a time, played before the next)
 1. **Tech zone** with its own tax rate. *Built Nov 2026, not yet played.*
-2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Letters, inbox and start-ups built Nov 2026, not yet played; the data centre next.*
+2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
 5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks.

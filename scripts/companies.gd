@@ -99,6 +99,69 @@ static func expired_news(letter: Dictionary) -> String:
 	return "%s gave up waiting and went to a town that answers its post." % String(letter.get("company", "A company"))
 
 
+# --- Data centres: real companies, satire of their founders' public personas ---
+# [company, who signs, the letter]. Sizes and terms are added by the card
+# (Settings.DC_SCALES), so the words never go out of step with the numbers.
+const DATA_CENTRE_LETTERS := [
+	["Amazon", "Jeff Bezos",
+		"Mayor,\n\nAt Amazon it is always Day 1. Today, it is Day 1 for your town.\n\n"
+		+ "We would like to build a data centre in your Tech zone. Your residents will never see inside it, never "
+		+ "visit it and never stop needing it. It will need power. Quite a lot of power.\n\n"
+		+ "Pick the size that suits you. We have taken the liberty of assuming it's the biggest.\n\n"
+		+ "Jeff Bezos, Amazon"],
+	["Microsoft", "Satya Nadella",
+		"Dear Mayor,\n\nWe want to help every person on the planet achieve more. Your town is on the planet, "
+		+ "so here we are.\n\nWe'd love to bring a cloud data centre to your Tech zone, built with a growth "
+		+ "mindset and a great deal of electricity. We are learners, not know-it-alls, so we'll learn how much "
+		+ "water it drinks as we go.\n\nWith gratitude,\nSatya Nadella, Microsoft"],
+	["Google", "Sundar Pichai",
+		"Dear Mayor,\n\nThank you so much for your time. Google would be honoured to build an AI-ready data "
+		+ "centre in your AI-curious town, powering AI features for AI users, with AI.\n\n"
+		+ "It would mean a great deal to us, and to AI. We have also put AI in the cooling.\n\n"
+		+ "Warm regards,\nSundar Pichai, Google"],
+]
+
+
+static func data_centre_letter(rng: RandomNumberGenerator, busy: Array) -> Dictionary:
+	# A data centre offer from a company that isn't already building one here
+	# (busy: companies with a deal or letter already). {} if they all are.
+	var free := []
+	for entry: Array in DATA_CENTRE_LETTERS:
+		if not busy.has(entry[0]):
+			free.append(entry)
+	if free.is_empty():
+		return {}
+	var e: Array = free[rng.randi() % free.size()]
+	return {"kind": "data_centre", "company": e[0], "from": "%s, %s" % [e[1], e[0]],
+		"subject": "%s wants to build a data centre in your Tech zone" % e[0], "body": e[2], "big": true}
+
+
+static func scale_terms(scale: Dictionary) -> String:
+	# One line for a size of data centre: what it needs and what it brings.
+	var asks := []
+	var years: int = scale.get("break_years", 0)
+	if years > 0:
+		asks.append("no tax for %d years" % years)
+	if bool(scale.get("priority", false)):
+		asks.append("power before homes when it runs short")
+	return "%d tiles · %d power · %d water · %d jobs · %s tax a month · %s invested%s" % [
+		int(scale["tiles"]), int(scale["power"]), int(scale["water"]), int(scale["jobs"]),
+		_pounds(int(scale["tax"])), _pounds(int(scale["investment"])),
+		("\nAsks for: " + ", ".join(asks)) if not asks.is_empty() else ""]
+
+
+static func deal_news(kind: String, deal: Dictionary) -> String:
+	var company: String = deal.get("company", "A company")
+	match kind:
+		"open":
+			return "%s's data centre is open: %s invested in the town." % [company, _pounds(int(deal.get("investment", 0)))]
+		"gave_up":
+			return "%s gave up waiting for a site and built its data centre somewhere else." % company
+		"left":
+			return "%s has closed its data centre here and left." % company
+	return ""
+
+
 static func _pick(rng: RandomNumberGenerator, list: Array) -> String:
 	var s: String = list[rng.randi() % list.size()]
 	return s

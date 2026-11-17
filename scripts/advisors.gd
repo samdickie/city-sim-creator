@@ -308,6 +308,26 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			"Companies write when the town has something they want. Answer within %d months, or they go elsewhere "
 			% Settings.LETTER_MONTHS + "and investors cool on the town.", NO_OVERLAY)
 
+	# --- Data centres: one waiting for a site, or one that isn't running ---
+	for k: int in sim.deals.size():
+		var deal: Dictionary = sim.deals[k]
+		var company: String = deal["company"]
+		if int(deal.get("count", 0)) == 0 and not bool(deal.get("opened", false)):
+			var left: int = sim.deal_months_left(k)
+			_add(out, "deal_site", WARNING if left <= 2 else ADVICE,
+				"%s's data centre needs a site: %d %s left" % [company, left, "month" if left == 1 else "months"],
+				"You agreed a %s. Drag out %d tiles of open land in your Tech zone for it (Place it, in the inbox), "
+				% [sim.deal_name(k), int(sim.deal_scale(deal)["tiles"])]
+				+ "or the company builds somewhere else and investors cool on the town.", WorldView.Overlay.DISTRICTS)
+		elif int(deal.get("count", 0)) > 0:
+			var problem: String = sim.deal_problem(k)
+			if problem != "":
+				var view := WorldView.Overlay.WATER if problem.contains("water") else (
+					WorldView.Overlay.ROADS if problem.contains("road") else WorldView.Overlay.POWER)
+				_add(out, "deal_down", WARNING, "%s's data centre isn't running: %s" % [company, problem],
+					"It pays nothing and brings no jobs until it has a road, its power and its water. "
+					+ "A data centre uses as much as a small town.", view)
+
 	# --- Tech zone: a tax break that does nothing, or one residents resent ---
 	if sim.has_tech_zone():
 		var unfair: float = -float(sim.happiness_parts.get("fairness", 0.0))
@@ -334,7 +354,7 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 		if not (tax_tip and key in ["taxes", "services"]):
 			var views := {"taxes": services_kind, "services": services_kind, "power": power_kind,
 				"water": water_kind, "pollution": WorldView.Overlay.POLLUTION,
-				"fairness": WorldView.Overlay.DISTRICTS}
+				"fairness": WorldView.Overlay.DISTRICTS, "bills": power_kind}
 			var view: int = views.get(key, NO_OVERLAY)
 			var leaving: bool = sim.happiness < 1.0 / 3.0
 			_add(out, "happiness", URGENT if leaving else WARNING,

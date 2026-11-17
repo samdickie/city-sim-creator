@@ -202,6 +202,23 @@ const STARTUP_GROW := 0.25          # each year a start-up the town backed may g
 const STARTUP_FOLD := 0.15          # fold (its plot empties),
 const STARTUP_ACQUIRED := 0.04      # or be bought by a big firm, paying out the town's stake:
 const STARTUP_PAYOUT := 8           # this many times the grant
+# Data centres: Amazon, Microsoft or Google write from DC_POP people once a Tech
+# zone has open land for the smallest; you pick a size, then drag out its site
+# in the Tech zone within DC_PLACE_MONTHS. Power and water in the same units as
+# the plants (zone levels); jobs come from outside, on top of the town's own.
+const DC_POP := 1500
+const DC_CHANCE := 0.08             # at best this chance a month (x investor appetite, spare power, the Tech zone's tax)
+const DC_PLACE_MONTHS := 6          # months to find a site before the company gives up
+const DC_SCALES := [
+	{"name": "Small", "tiles": 4, "power": 160, "water": 80, "jobs": 12, "tax": 400, "investment": 5000,
+		"break_years": 0, "priority": false},
+	{"name": "Standard", "tiles": 12, "power": 480, "water": 240, "jobs": 40, "tax": 1500, "investment": 20000,
+		"break_years": 5, "priority": false},
+	{"name": "Mega", "tiles": 30, "power": 1200, "water": 600, "jobs": 120, "tax": 4000, "investment": 60000,
+		"break_years": 10, "priority": true},
+]
+const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
+const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
 const CONSERVATION_MAX_STAGE := 3   # tenements (4 storeys) at most
 const CONSERVATION_VALUE := 0.03    # land value for the character of the old town
 const CBD_EXTRA_LEVELS := 2         # high-density plots in a CBD can rise two more stages (skyscrapers)
@@ -292,6 +309,10 @@ const BUILDINGS := {
 	"empire_state": {"name": "Empire State Building", "cost": 45000, "upkeep": 120, "uses_power": 8, "unlock": 25000, "only_one": true,
 		"landmark": true, "value": 0.10, "radius": 8, "appeal": 0.04, "visitors": 0.006,
 		"about": "The art deco skyscraper, the tallest thing in town. Tourists come to see it: shop demand, land value and appeal"},
+	# A company's data centre (the tech layer): never in the Build menu, only
+	# placed for a deal (see DC_SCALES); its power, water, jobs and tax come from the deal.
+	"data_centre": {"name": "Data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.05, "radius": 3,
+		"about": "A company's data centre: rows of servers, cooled day and night. It hums: lowers land value nearby"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }

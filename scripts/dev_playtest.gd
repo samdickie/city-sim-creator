@@ -128,6 +128,7 @@ func _run() -> void:
 	await _feedback_fixes()
 	await _tech_zone()
 	await _letters()
+	await _data_centre()
 	await _examples()
 	await _new_buildings()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
@@ -616,6 +617,148 @@ func _letters() -> void:
 		sim.news.clear()
 	check(outcomes.size() >= 3, "letters: start-ups' years go different ways (%s)" % ", ".join(outcomes.keys()))
 	sim.startups.clear()
+
+
+func _data_centre() -> void:
+	# A data centre (tech layer step 2, Nov 2026): Amazon, Microsoft or Google
+	# write once the town has 1,500 people and open land in a Tech zone; you pick
+	# a size on the letter card, then drag out its site in the Tech zone (red
+	# until it's big enough). It draws its power and water, opens with its
+	# investment, brings jobs, and on a stretched grid pushes bills up.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(26, 12)
+	check(o.x >= 0, "data centre: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	_place("road", o + Vector2i(0, 4), o + Vector2i(25, 4))
+	_place("homes_1", o + Vector2i(0, 2), o + Vector2i(22, 3))
+	_place("coal", o + Vector2i(25, 5))
+	_place("water_pump", o + Vector2i(23, 3))
+	_place("water_pump", o + Vector2i(24, 3))
+	_fill_plots(o + Vector2i(0, 2), o + Vector2i(22, 3))
+	sim.recount()
+	_place("gas", o + Vector2i(24, 5))
+	_place("tech_zone", o + Vector2i(0, 5), o + Vector2i(11, 9))
+	sim.recount()
+	var line: String = sim.interest_lines()[1]
+	check(sim.population >= Settings.DC_POP and line.contains("Data centres") and line.contains("interested"),
+		"data centre: %d people and open land in a Tech zone: %s" % [sim.population, line])
+	check(line.contains("Tech zone tax at least 3%"), "data centre: ...they'd like a Tech zone tax break")
+	sim.change_tech_tax(-0.03)
+	var tries := 0
+	while not sim.call("_has_letter", "data_centre") and tries < 400:
+		sim.call("_update_letters")
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "data_centre":
+			id = letter["id"]
+	check(id >= 0, "data centre: a data centre letter comes (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	var company: String = sim.letter_by_id(id)["company"]
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var options: VBoxContainer = hud.get("_letter_options")
+	var sizes: Array[Button] = []
+	for child: Node in options.get_children():
+		if child is Button:
+			sizes.append(child)
+	check(sizes.size() == 3 and sizes[1].text.begins_with("Standard: 12 tiles") and sizes[2].text.contains("power before homes"),
+		"data centre: %s's letter offers three sizes (%s)" % [company, sizes[1].text.replace("\n", " / ") if sizes.size() > 1 else ""])
+	await _shot("p32_data_centre_letter")
+
+	# Standard: say yes on the card, then drag out its site with the mouse.
+	await _click(sizes[1])
+	await _frames(2)
+	var k: int = sim.deal_by_id(id)
+	check(k >= 0 and not hud.call("letter_open") and int(game.get("_placing_deal")) == id
+		and world.overlay == WorldView.Overlay.DISTRICTS, "data centre: yes to Standard: placing its site, with the Districts view on")
+	await _look_at(o + Vector2i(6, 6), PLAY_DISTANCE * 1.2, -40.0, 50.0, [o + Vector2i(0, 4), o + Vector2i(12, 4), o + Vector2i(12, 10)])
+	await _drag(_screen_of(o + Vector2i(0, 5)), _screen_of(o + Vector2i(1, 6)), MOUSE_BUTTON_LEFT, false)
+	var info: Label = hud.get("info_label")
+	check(info.text.contains("needs 12 tiles"), "data centre: a 2 x 2 drag is red and says it needs 12 tiles (%s)" % info.text)
+	await _press(_screen_of(o + Vector2i(1, 6)), MOUSE_BUTTON_LEFT, false)
+	await _frames(2)
+	check(_count(T.DATA_CENTRE, o + Vector2i(0, 5), o + Vector2i(11, 9)) == 0, "data centre: let go while red, nothing is built")
+	await _drag(_screen_of(o + Vector2i(0, 5)), _screen_of(o + Vector2i(3, 7)))
+	await _frames(2)
+	check(_count(T.DATA_CENTRE, o + Vector2i(0, 5), o + Vector2i(11, 9)) == 12 and int(sim.deals[k]["count"]) == 12
+		and int(game.get("_placing_deal")) == -1, "data centre: a 4 x 3 drag builds its 12 tiles, free, and placing ends")
+	var dc := (o.y + 5) * sim.w + o.x
+	sim.recount()
+	var problem: String = sim.deal_problem(k)
+	check(problem.contains("not enough power") and "deal_down" in _tip_ids(),
+		"data centre: coal and gas can't run it as well as the homes (%s), and the advisors say so" % problem)
+	check(String(game.call("_tile_text", dc)).contains("not running"), "data centre: its hover says it isn't running")
+	sim.population = 6000
+	_place("nuclear", o + Vector2i(25, 6))
+	sim.recount()
+	check(sim.deal_problem(k) == "" and sim.company_jobs == 40, "data centre: with a nuclear plant it runs: 40 jobs")
+	var money0: int = sim.money
+	sim.tick()
+	var opened: bool = sim.deals[k]["opened"] if sim.deal_by_id(id) >= 0 else false
+	check(opened and sim.money == money0 + 20000 + sim.last_balance() and sim.news.size() > 0 and String(sim.news[0]).contains("invested"),
+		"data centre: next month it opens and invests %s (%s)" % [Hud.money_text(20000), sim.news[0] if not sim.news.is_empty() else ""])
+	check(sim.company_tax() == 0 and String(game.call("_tile_text", dc)).contains("no tax for 5 more years"),
+		"data centre: no tax for its first 5 years")
+	k = sim.deal_by_id(id)
+	sim.deals[k]["break_left"] = 0
+	check(sim.company_tax() == 1500, "data centre: after that it pays %s a month" % Hud.money_text(1500))
+	game.set("_buildings_dirty", true)
+	game.call("_refresh_hud")
+	await _look_at(o + Vector2i(2, 6), PLAY_DISTANCE * 0.6, -35.0, 34.0, [])
+	await _shot("p33_data_centre")
+
+	# Bills: without the nuclear plant the grid is stretched and everyone's bills go up.
+	_place("bulldoze", o + Vector2i(25, 6))
+	sim.recount()
+	var bills: float = sim.happiness_parts.get("bills", 0.0)
+	check(bills <= -Settings.COMPLAINT_SIZE, "data centre: on a stretched grid, bills cost %.2f appeal" % bills)
+	# Power before homes (the Mega deal's term): its tiles all get power, homes go short.
+	sim.deals[k]["priority"] = true
+	sim.set("_power_dirty", true)
+	sim.recount()
+	var dc_on := true
+	for t in sim.deals[k]["tiles"]:
+		dc_on = dc_on and sim.powered[int(t)] == 1
+	var homes_off := 0
+	for y: int in range(o.y + 2, o.y + 4):
+		for x: int in range(o.x, o.x + 23):
+			if sim.powered[y * sim.w + x] == 0:
+				homes_off += 1
+	check(dc_on and homes_off > 0, "data centre: with power before homes it runs and %d homes go dark" % homes_off)
+	sim.deals[k]["priority"] = false
+
+	# Saved and loaded; an older save has none.
+	var data := sim.to_save()
+	sim.from_save(data)
+	k = sim.deal_by_id(id)
+	check(k >= 0 and int(sim.deals[k]["count"]) == 12 and bool(sim.deals[k]["opened"]), "data centre: saved and loaded with its deal")
+	data.erase("deals")
+	sim.from_save(data)
+	check(sim.deals.is_empty(), "data centre: an older save loads with no deals")
+	data["deals"] = [{"id": id, "company": company, "scale": 1, "month": sim.month, "tiles": [dc], "opened": true}]
+	sim.from_save(data)
+	# Bulldozed: the company leaves.
+	_place("bulldoze", o + Vector2i(0, 5), o + Vector2i(3, 7))
+	sim.call("_update_letters")
+	check(sim.deals.is_empty() and String(sim.news[0]).contains("left"), "data centre: bulldozed, %s leaves (%s)" % [company, sim.news[0] if not sim.news.is_empty() else ""])
+	# A deal never given a site lapses after 6 months.
+	sim.deals.append({"id": 999, "company": "Google", "scale": 0, "month": sim.month, "tiles": [], "opened": false,
+		"break_left": 0, "priority": false, "investment": 5000})
+	sim.month += Settings.DC_PLACE_MONTHS
+	sim.call("_update_letters")
+	check(sim.deals.is_empty() and String(sim.news[0]).contains("gave up waiting"), "data centre: a deal with no site for 6 months lapses")
+	sim.letters.clear()
+	game.call("_refresh_hud")
 
 
 func _examples() -> void:

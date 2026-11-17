@@ -27,9 +27,9 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
-	DISTRICT, OFFICES, LANDMARK }
+	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -47,6 +47,7 @@ const TOOL_NAMES := {
 	Tool.DISTRICT: "Districts",
 	Tool.OFFICES: "Offices",
 	Tool.LANDMARK: "Landmarks",
+	Tool.DEAL: "Data centre",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
@@ -96,6 +97,7 @@ const TOOL_COLOURS := {
 	Tool.DISTRICT: Color(0.62, 0.38, 0.92),
 	Tool.OFFICES: Color(0.10, 0.72, 0.68),
 	Tool.LANDMARK: Color(0.95, 0.78, 0.30),
+	Tool.DEAL: Color(0.16, 0.76, 0.78),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -156,7 +158,9 @@ var _camera_seen := Transform3D()      # camera position last used to pick the h
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
 var _speed_before_dialog := 1          # the speed to go back to when the New city dialog closes
-var _speed_before_letter := 1          # the speed to go back to when the letter card closes
+var _speed_before_letter := 1
+var _placing_deal := -1                # the deal whose data centre is being placed (Tool.DEAL)
+var _tool_before_deal := 0             # the tool to go back to once it's placed          # the speed to go back to when the letter card closes
 # Undo: one step per drag, newest last: {"what", "month", "spent", "tiles": {tile index: sim.tile_state}}.
 var _undo: Array[Dictionary] = []
 
@@ -200,6 +204,7 @@ func _ready() -> void:
 	hud.tech_tax_changed.connect(_change_tech_tax)
 	hud.letter_answered.connect(_answer_letter)
 	hud.letter_shown.connect(_letter_shown)
+	hud.place_deal_pressed.connect(_start_placing)
 	hud.new_city_pressed.connect(_ask_new_city.bind(false))
 	hud.new_city_chosen.connect(_new_city_chosen)
 	hud.new_city_cancelled.connect(_new_city_cancelled)
@@ -562,15 +567,24 @@ func _update_drag() -> void:
 		if ok:
 			total += _tool_cost(p)
 			count += 1
-	# An airport has a minimum size: the whole drag is red until it's big enough, then green.
-	var airport_short := _airport_too_small()
+	# An airport (or a data centre) has a minimum size: the whole drag is red
+	# until it's big enough, then green.
+	var airport_short := _too_small()
 	var colour: Color = TOOL_COLOURS[current_tool]
-	if _dragging_airport():
+	if _sized_drag():
 		colour = AIRPORT_OK_COLOUR
 		if airport_short != "":
 			for item: Array in items:
 				item[1] = false
 	world.set_preview(items, colour)
+	if current_tool == Tool.DEAL and not drag_plan.is_empty():
+		var dsize := drag_plan[drag_plan.size() - 1] - drag_plan[0] + Vector2i.ONE
+		var dbox := "%s: %d x %d tiles" % [_tool_label(), dsize.x, dsize.y]
+		if airport_short != "":
+			hud.show_info("%s, but %s. Keep dragging (Esc to cancel)." % [dbox, airport_short])
+		else:
+			hud.show_info("%s, %d tiles: big enough. Release to build (the company pays)." % [dbox, count])
+		return
 	if _dragging_airport() and count > 0:
 		var size := drag_plan[drag_plan.size() - 1] - drag_plan[0] + Vector2i.ONE   # (a box: first and last corners)
 		var box := "Airport: %d x %d tiles" % [size.x, size.y]
@@ -596,9 +610,10 @@ func _update_drag() -> void:
 
 
 func _finish_drag() -> void:
-	var too_small := _airport_too_small()
+	var too_small := _too_small()
 	if too_small != "":
-		hud.flash("Too small for an airport: %s. Nothing built." % too_small)
+		hud.flash("%s: %s. Nothing built." % ["Not right for the data centre" if current_tool == Tool.DEAL
+			else "Too small for an airport", too_small])
 		_cancel_drag()
 		return
 	if _dragging_airport() and _plan_cost() > sim.money:
@@ -610,16 +625,26 @@ func _finish_drag() -> void:
 	var before := {}                   # what each changed tile was, for undo
 	var money_before := sim.money
 	var what := _tool_label()
+	var spots: Array[int] = []
 	for p in drag_plan:
 		var i := p.y * map_w + p.x
 		var state := sim.tile_state(i)
 		if _apply_tool(p):
 			built += 1
 			before[i] = state
+			spots.append(i)
 	drag_plan.clear()
 	world.set_preview([], Color.WHITE)
 	if built > 0:
 		_remember(what, before, money_before - sim.money)
+		if current_tool == Tool.DEAL:
+			sim.place_deal(_placing_deal, spots)
+			var k := sim.deal_by_id(_placing_deal)
+			var problem := sim.deal_problem(k) if k >= 0 else ""
+			hud.flash("%s built. %s" % [what, "It opens next month." if problem == "" else
+				"It won't run yet: %s." % problem])
+			_placing_deal = -1
+			_select_tool(_tool_before_deal)
 		sim.recount()
 		_ground_dirty = true
 		_buildings_dirty = true
@@ -684,6 +709,49 @@ const AIRPORT_OK_COLOUR := Color(0.25, 0.85, 0.35)   # the drag once it's big en
 
 func _dragging_airport() -> bool:
 	return current_tool == Tool.TRANSPORT and _target_tile() == Tile.AIRPORT
+
+
+func _sized_drag() -> bool:
+	# Drags that build all or nothing, red until they're the right size.
+	return _dragging_airport() or current_tool == Tool.DEAL
+
+
+func _too_small() -> String:
+	return _deal_too_small() if current_tool == Tool.DEAL else _airport_too_small()
+
+
+func _deal_too_small() -> String:
+	# "" if the data centre being dragged out has room: at least the deal's
+	# tiles, at most twice that, all in the Tech zone. Otherwise what's wrong.
+	if current_tool != Tool.DEAL or drag_plan.is_empty():
+		return ""
+	var k := sim.deal_by_id(_placing_deal)
+	if k < 0:
+		return "the deal has gone"
+	var need: int = sim.deal_scale(sim.deals[k])["tiles"]
+	var n := 0
+	for p in drag_plan:
+		if _why_cant_build(p, false) == "":
+			n += 1
+	if n < need:
+		return "it needs %d tiles of open land in your Tech zone (you have %d)" % [need, n]
+	if n > need * 2:
+		return "that's too big: at most %d tiles" % (need * 2)
+	return ""
+
+
+func _start_placing(id: int) -> void:
+	# After saying yes to a data centre (or Place it in the inbox): drag out its site.
+	var k := sim.deal_by_id(id)
+	if k < 0:
+		return
+	_cancel_drag()
+	if current_tool != Tool.DEAL:
+		_tool_before_deal = current_tool
+	_placing_deal = id
+	_select_tool(Tool.DEAL)
+	hud.flash("Drag out %d tiles in your Tech zone (teal) for the %s." % [
+		int(sim.deal_scale(sim.deals[k])["tiles"]), sim.deal_name(k)])
 
 
 func _plan_cost() -> int:
@@ -755,7 +823,7 @@ func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 			return _l_path(a, b)
 		Tool.GRID:
 			return _grid_tiles(a, b)
-		Tool.BULLDOZE, Tool.DISTRICT:
+		Tool.BULLDOZE, Tool.DISTRICT, Tool.DEAL:
 			return _box(a, b)
 	if GROUPS.has(current_tool):
 		# Power lines run like roads; farms, landfill, woodland and golf courses are dragged
@@ -868,6 +936,9 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	# "" = OK to build; "-" = nothing to do (no message); otherwise the reason.
 	var i := p.y * map_w + p.x
 	var here := sim.tiles[i]
+	if current_tool == Tool.DEAL and here != Tile.DATA_CENTRE and water[i] == 0 \
+			and sim.district[i] != Settings.TECH_ZONE:
+		return "A data centre has to go in your Tech zone."
 	if current_tool == Tool.DISTRICT:
 		# Districts are free and go over anything on land.
 		return "-" if water[i] == 1 or sim.district[i] == _district_choice() else ""
@@ -960,6 +1031,8 @@ func _road_choice() -> int:
 
 func _target_tile() -> int:
 	# The tile the current tool builds.
+	if current_tool == Tool.DEAL:
+		return Tile.DATA_CENTRE
 	if GROUPS.has(current_tool):
 		var items: Array = GROUPS[current_tool]
 		var picked: int = items[_item_index()]
@@ -997,6 +1070,9 @@ func _name_of(t: int) -> String:
 
 
 func _tool_label() -> String:
+	if current_tool == Tool.DEAL:
+		var k := sim.deal_by_id(_placing_deal)
+		return sim.deal_name(k) if k >= 0 else "Data centre"
 	if current_tool == Tool.DISTRICT:
 		var district_name: String = Settings.DISTRICT_NAMES[_district_choice()]
 		return district_name + " district" if _district_choice() == 2 else district_name
@@ -1267,7 +1343,7 @@ func _auto_view() -> void:
 	# where it's missing. Picking another tool goes back to the view before.
 	var want := -1
 	var filter := -1
-	if current_tool == Tool.DISTRICT:
+	if current_tool == Tool.DISTRICT or current_tool == Tool.DEAL:
 		want = WorldView.Overlay.DISTRICTS
 	elif current_tool == Tool.SERVICE:
 		want = WorldView.Overlay.SERVICES
@@ -1403,6 +1479,8 @@ func _answer_letter(id: int, yes: bool, choice: int) -> void:
 		_ground_dirty = true
 		_refresh_hud()
 		hud.flash(String(result.get("text", "")))
+		if result.has("deal"):
+			_start_placing(int(result["deal"]))
 
 
 func _letter_shown(open: bool) -> void:
@@ -1593,6 +1671,8 @@ func _tile_text(i: int) -> String:
 	if t == Tile.WOODLAND:
 		return "Woodland (planted trees: cleans the air a little and raises land value nearby; no upkeep)\nLand value %s   ·   %s" % [
 			sim.land_value_word(i), sim.pollution_word(i)]
+	if t == Tile.DATA_CENTRE:
+		return _data_centre_text(i)
 	if sim.is_building(t):
 		var about: String = sim.info(t).get("about", "")
 		var reach := sim.pollution_reach_m(t, cell_size_m)
@@ -1648,6 +1728,31 @@ func _tile_text(i: int) -> String:
 		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
+	return text
+
+
+func _data_centre_text(i: int) -> String:
+	# "Amazon data centre (standard): running, servers humming" and its terms.
+	var k := -1
+	for d: int in sim.deals.size():
+		for t in sim.deals[d]["tiles"]:
+			if int(t) == i:
+				k = d
+	if k < 0:
+		return "Data centre: %s" % sim.building_status(i)
+	var deal: Dictionary = sim.deals[k]
+	var scale: Dictionary = sim.deal_scale(deal)
+	var text := "%s: %s\nUses %d power and %d water · %d jobs" % [sim.deal_name(k), sim.building_status(i), int(scale["power"]), int(scale["water"]), int(scale["jobs"])]
+	var years_left: int = ceili(int(deal.get("break_left", 0)) / 12.0)
+	if not bool(deal.get("opened", false)):
+		text += " · pays %s when it opens" % Hud.money_text(int(deal.get("investment", 0)))
+	elif years_left > 0:
+		text += " · no tax for %d more %s" % [years_left, "year" if years_left == 1 else "years"]
+	else:
+		text += " · pays %s tax a month" % Hud.money_text(int(scale["tax"]))
+	if bool(deal.get("priority", false)):
+		text += "\nGets power before homes when the grid runs short"
+	text += "\nIt hums: lowers land value nearby"
 	return text
 
 

@@ -36,10 +36,12 @@ signal overlay_chosen(kind: int)
 signal service_filter_chosen(service: int)  # the Services view's chips: -1 all, 0-3 police, fire, school, hospital
 signal funding_changed(step: float)
 signal letter_answered(id: int, yes: bool, choice: int)   # a letter's buttons (choice: which offer, for later letters)
-signal letter_shown(open: bool)             # the letter card opened or closed (the game pauses behind it)
+signal letter_shown(open: bool)
+signal place_deal_pressed(id: int)          # Place it, for a data centre agreed but not yet given a site             # the letter card opened or closed (the game pauses behind it)
 
 const Settings = preload("res://scripts/settings.gd")
 const Icons = preload("res://scripts/icons.gd")
+const Companies = preload("res://scripts/companies.gd")
 const GLASS_SHADER = preload("res://shaders/glass.gdshader")
 const BULLDOZE_TOOL := 4                   # (game3d.gd's Tool.BULLDOZE)
 const ADVICE_URGENT := 3                   # (advisors.gd's URGENT; WARNING is 2, ADVICE 1)
@@ -111,6 +113,7 @@ var _letter_from: Label
 var _letter_subject: Label
 var _letter_body: Label
 var _letter_note: Label
+var _letter_options: VBoxContainer        # a data centre letter's sizes, one button each
 var _letter_buttons: HBoxContainer
 var date_label: Label
 var clock_label: Label
@@ -1277,6 +1280,7 @@ func _build_help() -> void:
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
 			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry pay their own tax rate (set it in the City panel; below the town's draws firms in), or a conservation area kept low-rise.",
 			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
+			"Data centres: Amazon, Microsoft or Google write once you have %s people and open land in a Tech zone. Pick a size, then drag out its site in the Tech zone. They pay well and bring a little work, but use power and water like a small town; on a stretched grid everyone's bills go up." % "1,500",
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1530,6 +1534,7 @@ func _build_letters() -> void:
 	_letter_note = _label("", 12, TEXT_DIM)
 	_letter_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(_letter_note)
+	_letter_options = _vbox(box, 6)
 	_letter_buttons = _hbox(box, 8)
 	_letter_buttons.alignment = BoxContainer.ALIGNMENT_END
 
@@ -1549,6 +1554,8 @@ func _show_letters(sim) -> void:
 		said.append([letter["id"], sim.letter_months_left(letter)])
 	for st: Dictionary in sim.startups:
 		said.append([st["name"], sim.levels[int(st["tile"])], (sim.month - int(st["founded"])) / 12])
+	for deal: Dictionary in sim.deals:
+		said.append([deal["id"], deal.get("count", 0), deal.get("opened", false), sim.month - int(deal["month"])])
 	var key := str(said)
 	if key == _inbox_said:
 		return
@@ -1571,6 +1578,27 @@ func _show_letters(sim) -> void:
 		b.tooltip_text = "Read the letter"
 		b.pressed.connect(func(): open_letter(id))
 		_inbox_box.add_child(b)
+	# Data centres agreed but still waiting for a site.
+	for k: int in sim.deals.size():
+		var deal: Dictionary = sim.deals[k]
+		if int(deal.get("count", 0)) > 0 or bool(deal.get("opened", false)):
+			continue
+		var deal_id: int = deal["id"]
+		var left: int = sim.deal_months_left(k)
+		var row := _hbox(_inbox_box, 8)
+		var what := _label("%s needs a site: %d tiles in your Tech zone · %d %s left" % [sim.deal_name(k),
+			int(sim.deal_scale(deal)["tiles"]), left, "month" if left == 1 else "months"], 13, WARN)
+		what.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		what.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(what)
+		var place := _button("Place it", false)
+		place.theme_type_variation = "Primary"
+		place.custom_minimum_size = Vector2(90, 32)
+		place.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		place.pressed.connect(func():
+			close_inbox()
+			place_deal_pressed.emit(deal_id))
+		row.add_child(place)
 	_inbox_box.add_child(_divider())
 	_inbox_box.add_child(_caption("Who's interested · investors %s" % sim.appetite_word()))
 	for line: String in sim.interest_lines():
@@ -1601,6 +1629,21 @@ func open_letter(id: int) -> void:
 	_letter_note.add_theme_color_override("font_color", TEXT_DIM)
 	for child: Node in _letter_buttons.get_children():
 		child.queue_free()
+	for child: Node in _letter_options.get_children():
+		_letter_options.remove_child(child)
+		child.queue_free()
+	if String(letter.get("kind", "")) == "data_centre":
+		# One button per size, with what each needs and brings.
+		_letter_options.add_child(_caption("Pick a size"))
+		for k: int in Settings.DC_SCALES.size():
+			var scale: Dictionary = Settings.DC_SCALES[k]
+			var option := _menu_row("power", "%s: %s" % [String(scale["name"]), Companies.scale_terms(scale)])
+			option.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			option.custom_minimum_size = Vector2(500, 0)
+			option.tooltip_text = "Say yes to a %s data centre" % String(scale["name"]).to_lower()
+			option.pressed.connect(func(): letter_answered.emit(id, true, k))
+			_letter_options.add_child(option)
+	_letter_options.visible = _letter_options.get_child_count() > 0
 	var later := _button("Later", false)
 	later.tooltip_text = "Keep it in the inbox (Esc)"
 	later.custom_minimum_size = Vector2(88, 36)

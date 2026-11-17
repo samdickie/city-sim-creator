@@ -68,7 +68,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -105,6 +105,9 @@ const ROOF_TILE := Color(0.52, 0.26, 0.19)
 const SHED_METAL := Color(0.55, 0.58, 0.62)
 const SHED_GREEN := Color(0.36, 0.45, 0.40)
 const CONCRETE := Color(0.64, 0.64, 0.62)
+const DC_CLADDING := Color(0.60, 0.64, 0.68)   # a data centre's blue-grey cladding
+const DC_ROOF := Color(0.46, 0.48, 0.50)
+const DC_CHILLER := Color(0.34, 0.37, 0.40)    # the cooling units on its roof
 const PAVEMENT := Color(0.66, 0.65, 0.62)
 const DRIVEWAY := Color(0.58, 0.56, 0.53)
 const COURT := Color(0.55, 0.54, 0.50)
@@ -1285,6 +1288,10 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				# (Only the terminal needs the road: the hover text says what's missing.)
 				if sim.airport_role_at(i) == AIRPORT_TERMINAL and reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
+			elif t == Tile.DATA_CENTRE:
+				# (One road for the whole data centre: the hover text says what's missing.)
+				if not sim.building_working(i):
+					warn.g = 1.0
 			elif sim.is_building(t):
 				if not sim.makes_power(t) and not sim.needs_nothing(t):
 					if reach[i] > Settings.ROAD_REACH:
@@ -1602,7 +1609,7 @@ func _plan_lots() -> void:
 					kind = LOT_AIRPORT
 					detail = sim.airport_role[i] if i < sim.airport_role.size() else 4
 				Tile.FIRE, Tile.FIRE_SMALL, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
-						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR:
+						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE:
 					kind = LOT_YARD
 		_lot_kind[i] = kind
 		_lot_detail[i] = detail
@@ -4634,6 +4641,16 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
+		Tile.DATA_CENTRE:
+			# A company's data centre: one long windowless hall of servers per tile (tiles
+			# side by side read as one big building), rows of cooling units on the roof,
+			# and backup generators along the side.
+			var hall := _place(i, front, 0.0, 1.0, 49.0, 47.0)
+			_add_block(hall, 49.0, 47.0, 13.0, DC_CLADDING, STYLE_PAINT, 0.0, DC_ROOF, wall_list, roof_list)
+			for k in 6:
+				_prop(i, front, -16.0 + (k % 3) * 16.0, 9.0 + (k / 3) * 20.0, 10.0, 7.0, 2.6, DC_CHILLER, 13.0)
+			for k in 3:
+				_prop(i, front, -20.0 + k * 6.0, -1.5, 4.5, 2.4, 2.6, Color(0.30, 0.34, 0.38))   # generators
 		Tile.AIRPORT:
 			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
 		Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE, \
@@ -5806,7 +5823,7 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
-							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR:
+							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR or bt == Tile.DATA_CENTRE:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = road_hw + 2.6   # in the pavement in front of the buildings

@@ -456,7 +456,8 @@ func _report() -> void:
 		print("[shots]   showcase: %s" % line)
 	var have: Array[String] = []
 	for t: int in Simulation.BUILDING_KEYS:
-		if sim.count_of(t) == 0 and t != Simulation.Tile.WOODLAND:    # (woodland is planted by the 37-41 shots)
+		if sim.count_of(t) == 0 and t != Simulation.Tile.WOODLAND and t != Simulation.Tile.DATA_CENTRE:
+			# (woodland is planted by the 37-41 shots; data centres only come with a deal)
 			have.append(String(Simulation.BUILDING_KEYS[t]))
 	if not have.is_empty():
 		print("[shots]   missing buildings: %s" % ", ".join(have))
