@@ -289,6 +289,16 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - Say no and they go elsewhere; investor appetite (below) drops.
 - Letters go to an **inbox** with a count badge, like the advisors. Only big ones pause the game.
 
+### Letters, inbox and start-ups — built (Nov 2026), not yet played by Sam
+- **The envelope** (top left, after Undo) shows how many letters are waiting (a red count). It opens the **inbox**: each letter (subject, who from, months left to answer), **Who's interested** (each kind of company and what it's waiting for, e.g. "Start-ups: want an empty office plot with a road and power in your Tech zone") with how keen investors are (keen / warm / wary / cold), and the start-ups the town backed.
+- Clicking a letter opens it on a **card** in the middle over a dimmed town; the clock stops while it's open. Buttons: Later (or Esc: back to the inbox), No thanks, and the offer. If the offer can't be done right now (not enough money, no empty plot), the card says why in red and stays open.
+- A new letter flashes a message ("A letter from Leo and Amara (Sproutio): open it from the envelope, top left") and an advisor tip says how many are waiting (a warning when one lapses this month).
+- Letters lapse after **6 months** unanswered ("... went to a town that answers its post"). At most 3 wait at once.
+- **Investor appetite** (0-1, starts 0.5): +0.06 for a yes, -0.03 for a no or a lapsed letter, -0.02 when a backed start-up folds. More appetite, more letters.
+- **Start-ups** (made-up names, pitches and founders from `scripts/companies.gd`, e.g. "Sproutio: Airbnb for garden sheds") write from **500 people**, once there's an empty office plot with a road and power in a Tech zone: at best 20% a month x (0.5 + appetite) x (0.6 + 0.4 x the Tech zone's pull) x town size (0.75 at 500 people up to 1.5 at 3,000), so roughly every 4-8 months. They ask a grant of £1,000-£3,000. **Back them** and they move into the best such plot (the most valuable land) at level 1; the plot no longer grows or shrinks by itself. Hover: "Start-up: Sproutio, backed by the town".
+- Each year a start-up may **fold** (15%: its plot empties), be **bought** by a big firm (4%: the town's stake pays out 8x the grant) or **grow** a level (25%). Each is a message.
+- Saved (`letters`, `startups`, `investor_appetite`, `letter_count`); older saves have none. Numbers under Letters in `scripts/settings.gd`; rules under Letters in `scripts/simulation.gd`; words in `scripts/companies.gd`.
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -361,7 +371,7 @@ Data centre scales, as an example:
 
 ### Build order (one at a time, played before the next)
 1. **Tech zone** with its own tax rate. *Built Nov 2026, not yet played.*
-2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come.
+2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Letters, inbox and start-ups built Nov 2026, not yet played; the data centre next.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
 5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks.

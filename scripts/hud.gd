@@ -35,6 +35,8 @@ signal day_cycle_toggled(on: bool)
 signal overlay_chosen(kind: int)
 signal service_filter_chosen(service: int)  # the Services view's chips: -1 all, 0-3 police, fire, school, hospital
 signal funding_changed(step: float)
+signal letter_answered(id: int, yes: bool, choice: int)   # a letter's buttons (choice: which offer, for later letters)
+signal letter_shown(open: bool)             # the letter card opened or closed (the game pauses behind it)
 
 const Settings = preload("res://scripts/settings.gd")
 const Icons = preload("res://scripts/icons.gd")
@@ -96,6 +98,20 @@ var example_buttons: Dictionary = {}       # example id -> its row in the game m
 var _day_button: Button
 var speed_buttons := {}
 var undo_button: Button
+# Letters from companies: the envelope (top left), its drop-down and the letter card.
+var inbox_button: Button
+var inbox_panel: PanelContainer
+var letter_panel: PanelContainer
+var _inbox_badge: Label
+var _inbox_box: VBoxContainer
+var _inbox_said := ""                      # what the inbox last showed (it's rebuilt when that changes)
+var _letter_dim: ColorRect
+var _letter_id := -1
+var _letter_from: Label
+var _letter_subject: Label
+var _letter_body: Label
+var _letter_note: Label
+var _letter_buttons: HBoxContainer
 var date_label: Label
 var clock_label: Label
 
@@ -235,6 +251,7 @@ func build(categories: Array, demand_colours: Dictionary, sim) -> void:
 	_build_help()
 	_build_game_menu()
 	_build_new_city()
+	_build_letters()
 
 
 func _process(delta: float) -> void:
@@ -250,6 +267,13 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# The letter card takes every key while it's open: Esc puts it back in the inbox.
+	if letter_open() and event is InputEventKey:
+		get_viewport().set_input_as_handled()
+		var lk := event as InputEventKey
+		if lk.pressed and not lk.echo and lk.keycode == KEY_ESCAPE:
+			close_letter()
+		return
 	# While the New city dialog is open it takes every key: 1-3 or the arrows pick,
 	# Enter starts, Esc cancels. Nothing reaches the game behind it.
 	if is_modal() and event is InputEventKey:
@@ -258,9 +282,14 @@ func _input(event: InputEvent) -> void:
 		if k.pressed and not k.echo:
 			_new_city_key(k.keycode)
 		return
-	# A click anywhere outside the game menu closes it (the click still goes through).
+	# A click anywhere outside the game menu (or the inbox) closes it (the click still goes through).
 	var mb := event as InputEventMouseButton
-	if mb == null or not mb.pressed or _menu_panel == null or not _menu_panel.visible:
+	if mb == null or not mb.pressed:
+		return
+	if inbox_panel != null and inbox_panel.visible and not inbox_panel.get_global_rect().has_point(mb.position) \
+			and not inbox_button.get_global_rect().has_point(mb.position):
+		close_inbox()
+	if _menu_panel == null or not _menu_panel.visible:
 		return
 	if not _menu_panel.get_global_rect().has_point(mb.position) \
 			and not _menu_button.get_global_rect().has_point(mb.position):
@@ -294,6 +323,13 @@ func _layout() -> void:
 	# Drop-downs under their buttons.
 	if _menu_panel.visible:
 		_menu_panel.position = Vector2(EDGE, EDGE + ISLAND_H + GAP)
+	if inbox_panel.visible:
+		inbox_panel.size = Vector2(inbox_panel.custom_minimum_size.x, 0.0)
+		var ix := clampf(inbox_button.global_position.x - 24.0, EDGE, view.x - EDGE - inbox_panel.size.x)
+		inbox_panel.position = Vector2(ix, EDGE + ISLAND_H + GAP)
+	if letter_panel.visible:
+		letter_panel.size = Vector2.ZERO
+		letter_panel.position = ((view - letter_panel.size) * 0.5).floor()
 	if city_panel.visible:
 		# (It scrolls if the window is too short for it to clear the map views.)
 		var overhead := city_panel.get_combined_minimum_size().y - _city_scroll.custom_minimum_size.y
@@ -371,6 +407,22 @@ func _build_top_left() -> void:
 	undo_button.pressed.connect(func(): undo_pressed.emit())
 	undo_button.disabled = true
 	row.add_child(undo_button)
+
+	row.add_child(_vline())
+	inbox_button = _icon_button("mail", "Letters from companies", true)
+	inbox_button.toggled.connect(func(on: bool): _open(inbox_panel, on))
+	row.add_child(inbox_button)
+	_inbox_badge = _label("", 10, Color.WHITE, true)
+	var badge := _soft_box(BAD, 7)
+	badge.content_margin_left = 4
+	badge.content_margin_right = 4
+	_inbox_badge.add_theme_stylebox_override("normal", badge)
+	_inbox_badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_inbox_badge.custom_minimum_size = Vector2(14, 14)
+	_inbox_badge.position = Vector2(21, 0)
+	_inbox_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_inbox_badge.visible = false
+	inbox_button.add_child(_inbox_badge)
 
 
 func _build_game_menu() -> void:
@@ -1224,6 +1276,7 @@ func _build_help() -> void:
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
 			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry pay their own tax rate (set it in the City panel; below the town's draws firms in), or a conservation area kept low-rise.",
+			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1379,7 +1432,7 @@ func open_new_city(first: bool) -> void:
 
 
 func is_modal() -> bool:
-	return new_city_panel != null and new_city_panel.visible
+	return (new_city_panel != null and new_city_panel.visible) or letter_open()
 
 
 func new_city_level() -> int:
@@ -1434,6 +1487,177 @@ func _close_new_city(start: bool) -> void:
 		new_city_cancelled.emit()
 
 
+# ---------------------------------------------------------------- letters
+
+func _build_letters() -> void:
+	# The inbox: a drop-down under the envelope listing unanswered letters, who's
+	# interested in the town (and what they're waiting for) and the start-ups the
+	# town backed. Clicking a letter opens it on a card in the middle, over a
+	# dimmed town, with its offer and buttons.
+	inbox_panel = _panel(_root)
+	inbox_panel.theme_type_variation = "Card"
+	inbox_panel.visible = false
+	inbox_panel.custom_minimum_size.x = 400.0
+	_inbox_box = _vbox(inbox_panel, 6)
+
+	_letter_dim = ColorRect.new()
+	_letter_dim.color = Color(0.02, 0.03, 0.05, 0.45)
+	_letter_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_letter_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_letter_dim.visible = false
+	_letter_dim.gui_input.connect(func(e: InputEvent):
+		var click := e as InputEventMouseButton
+		if click and click.pressed:
+			close_letter())
+	_root.add_child(_letter_dim)
+	letter_panel = _panel(_root, 18.0)
+	letter_panel.visible = false
+	var box := _vbox(letter_panel, 10)
+	box.custom_minimum_size.x = 520.0
+	var head := _hbox(box, 10)
+	head.add_child(_icon_rect("mail", 22, ACCENT))
+	var who := _vbox(head, 0)
+	who.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_letter_from = _label("", 17, TEXT, true)
+	who.add_child(_letter_from)
+	_letter_subject = _label("", 12, TEXT_DIM)
+	_letter_subject.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	who.add_child(_letter_subject)
+	box.add_child(_divider())
+	_letter_body = _label("", 14, TEXT)
+	_letter_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_letter_body)
+	_letter_note = _label("", 12, TEXT_DIM)
+	_letter_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(_letter_note)
+	_letter_buttons = _hbox(box, 8)
+	_letter_buttons.alignment = BoxContainer.ALIGNMENT_END
+
+
+func _show_letters(sim) -> void:
+	# The envelope's count, and the inbox's contents.
+	if _letter_id >= 0 and letter_open() and sim.letter_by_id(_letter_id).is_empty():
+		close_letter()               # (it lapsed while open)
+	var waiting: int = sim.letters.size()
+	_inbox_badge.text = str(waiting)
+	_inbox_badge.visible = waiting > 0
+	inbox_button.tooltip_text = "Letters from companies: %s" % (
+		"none waiting" if waiting == 0 else "%d waiting" % waiting)
+	# Rebuilt only when something in it changes (so a click isn't lost mid-rebuild).
+	var said := [sim.appetite_word(), sim.interest_lines()]
+	for letter: Dictionary in sim.letters:
+		said.append([letter["id"], sim.letter_months_left(letter)])
+	for st: Dictionary in sim.startups:
+		said.append([st["name"], sim.levels[int(st["tile"])], (sim.month - int(st["founded"])) / 12])
+	var key := str(said)
+	if key == _inbox_said:
+		return
+	_inbox_said = key
+	for child: Node in _inbox_box.get_children():
+		_inbox_box.remove_child(child)
+		child.queue_free()
+	_inbox_box.add_child(_caption("Letters"))
+	if waiting == 0:
+		var none := _label("No letters waiting. Companies write when your town has something they want.", 13, TEXT_DIM)
+		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_inbox_box.add_child(none)
+	for letter: Dictionary in sim.letters:
+		var id: int = letter["id"]
+		var left: int = sim.letter_months_left(letter)
+		var b := _menu_row("mail", "%s\n%s" % [String(letter.get("subject", "")),
+			"From %s · %d %s left to answer" % [String(letter.get("from", "")), left, "month" if left == 1 else "months"]])
+		b.custom_minimum_size = Vector2(380, 0)
+		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		b.tooltip_text = "Read the letter"
+		b.pressed.connect(func(): open_letter(id))
+		_inbox_box.add_child(b)
+	_inbox_box.add_child(_divider())
+	_inbox_box.add_child(_caption("Who's interested · investors %s" % sim.appetite_word()))
+	for line: String in sim.interest_lines():
+		var l := _label(line, 13, TEXT)
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_inbox_box.add_child(l)
+	if not sim.startups.is_empty():
+		_inbox_box.add_child(_divider())
+		_inbox_box.add_child(_caption("Start-ups you backed"))
+		for st: Dictionary in sim.startups:
+			var age: int = (sim.month - int(st["founded"])) / 12
+			_inbox_box.add_child(_label("%s · level %d · %s" % [String(st["name"]), int(sim.levels[int(st["tile"])]),
+				"new this year" if age == 0 else "%d %s old" % [age, "year" if age == 1 else "years"]], 13, TEXT_DIM))
+
+
+func open_letter(id: int) -> void:
+	var letter: Dictionary = _sim.letter_by_id(id)
+	if letter.is_empty():
+		return
+	close_inbox()
+	_letter_id = id
+	_letter_from.text = "From %s" % String(letter.get("from", ""))
+	_letter_subject.text = String(letter.get("subject", ""))
+	_letter_body.text = String(letter.get("body", ""))
+	var left: int = _sim.letter_months_left(letter)
+	_letter_note.text = "%d %s left to answer. Saying yes keeps investors keen; saying no cools them a little." % [
+		left, "month" if left == 1 else "months"]
+	_letter_note.add_theme_color_override("font_color", TEXT_DIM)
+	for child: Node in _letter_buttons.get_children():
+		child.queue_free()
+	var later := _button("Later", false)
+	later.tooltip_text = "Keep it in the inbox (Esc)"
+	later.custom_minimum_size = Vector2(88, 36)
+	later.pressed.connect(close_letter)
+	_letter_buttons.add_child(later)
+	var no := _button("No thanks", false)
+	no.custom_minimum_size = Vector2(108, 36)
+	no.pressed.connect(func(): letter_answered.emit(id, false, 0))
+	_letter_buttons.add_child(no)
+	if String(letter.get("kind", "")) == "startup":
+		var yes := _button("Back them (%s)" % money_text(int(letter.get("grant", 0))), false)
+		yes.theme_type_variation = "Primary"
+		yes.custom_minimum_size = Vector2(150, 36)
+		yes.pressed.connect(func(): letter_answered.emit(id, true, 0))
+		_letter_buttons.add_child(yes)
+	var was_open := letter_open()
+	_open(_letter_dim, true)
+	_open(letter_panel, true)
+	if not was_open:
+		letter_shown.emit(true)
+
+
+func letter_result(ok: bool, text: String) -> void:
+	# What came of an answer: close the card, or say why it can't be done.
+	if ok:
+		close_letter()
+	else:
+		_letter_note.text = text
+		_letter_note.add_theme_color_override("font_color", BAD)
+
+
+func close_letter() -> void:
+	if not letter_open():
+		return
+	_letter_id = -1
+	for c: Control in [_letter_dim, letter_panel]:
+		if _tweens.has(c):
+			(_tweens[c] as Tween).kill()
+			_tweens.erase(c)
+		c.visible = false
+		c.modulate.a = 1.0
+	letter_shown.emit(false)
+
+
+func letter_open() -> bool:
+	return letter_panel != null and letter_panel.visible
+
+
+func shown_letter() -> int:
+	return _letter_id if letter_open() else -1
+
+
+func close_inbox() -> void:
+	_open(inbox_panel, false)
+	inbox_button.set_pressed_no_signal(false)
+
+
 func _radio_icon(on: bool) -> Texture2D:
 	var key := "radio:%s" % on
 	if not _icon_cache.has(key):
@@ -1469,6 +1693,7 @@ func set_clock(text: String) -> void:
 
 func show_city(sim, money_str: String, net_text: String, income_text: String, upkeep_text: String) -> void:
 	date_label.text = sim.date_text()
+	_show_letters(sim)
 	var low: bool = sim.money < Settings.LOW_MONEY
 	money_label.text = money_str
 	money_label.add_theme_color_override("font_color", BAD if low else TEXT)

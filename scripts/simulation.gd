@@ -5,6 +5,7 @@ extends RefCounted
 ## without touching any of this.
 
 const Settings = preload("res://scripts/settings.gd")
+const Companies = preload("res://scripts/companies.gd")
 
 enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	POLICE, FIRE, SCHOOL, HOSPITAL,
@@ -121,6 +122,13 @@ var funding: Array[float] = [1.0, 1.0, 1.0, 1.0]   # per service: 0 = closed, 1 
 var services := [0, 0, 0, 0]          # how many of each service the town has (big and small together)
 var small_services := [0, 0, 0, 0]    # ...of which small ones
 var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
+# Letters from companies (see Letters below). Saved.
+var letters: Array[Dictionary] = []   # unanswered: {id, kind, company, from, subject, body, month, ...}
+var startups: Array[Dictionary] = []  # start-ups the town backed: {tile, name, grant, founded}
+var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are on the town
+var letter_count := 0                 # letters ever sent (gives each its id)
+var new_letters: Array[int] = []      # ids of letters that came last month
+var news: Array[String] = []          # what happened to the town's companies last month
 var burned := PackedInt32Array()      # plots that burned down last month
 var service_score := 0.0              # 0-1: how well services cover the town's homes, on average
 var _coverage_dirty := true
@@ -205,6 +213,12 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	tax_rate = Settings.DEFAULT_TAX_RATE
 	tech_tax_rate = Settings.DEFAULT_TAX_RATE
 	last_tech_relief = 0
+	letters.clear()
+	startups.clear()
+	investor_appetite = Settings.APPETITE_START
+	letter_count = 0
+	new_letters.clear()
+	news.clear()
 	last_income = 0
 	last_upkeep = 0
 	last_loan = 0
@@ -669,12 +683,14 @@ func tick() -> void:
 		_value_dirty = true
 	recount()
 	_collect_taxes()
+	_update_letters()
 
 
 func _grow() -> void:
 	var zones: Array[int] = []
+	var startup_tiles := _startup_tiles()
 	for i in w * h:
-		if is_zone(tiles[i]):
+		if is_zone(tiles[i]) and not startup_tiles.has(i):   # (start-ups grow or fold by themselves)
 			zones.append(i)
 	zones.shuffle()                   # no corner of the map gets first pick
 	if tech_pull() > 0.0:
@@ -860,6 +876,230 @@ func _collect_taxes() -> void:
 		+ service_upkeep() + building_upkeep()) * upkeep_scale())
 	money += last_income - last_upkeep
 	_pay_loan()
+
+
+# ------------------------------------------------------------------- Letters
+# Companies write to the mayor (the tech layer). Each month there's a chance of
+# a letter, from how keen investors are and what the town offers; letters
+# lapse after LETTER_MONTHS. Words come from companies.gd; this decides when
+# and what saying yes does.
+
+func _update_letters() -> void:
+	new_letters.clear()
+	news.clear()
+	# Letters nobody answered lapse: the company goes elsewhere.
+	var kept: Array[Dictionary] = []
+	for letter: Dictionary in letters:
+		if month - int(letter.get("month", month)) >= Settings.LETTER_MONTHS:
+			news.append(Companies.expired_news(letter))
+			_change_appetite(-Settings.APPETITE_NO)
+		else:
+			kept.append(letter)
+	letters = kept
+	_update_startups()
+	# A new letter? (Rolled only when someone could write, so towns without a
+	# Tech zone play exactly as before.)
+	if letters.size() < Settings.MAX_LETTERS:
+		var chance := startup_chance()
+		if chance > 0.0 and not _has_letter("startup") and _rng.randf() < chance:
+			_send_letter(Companies.startup_letter(_rng, _company_names()))
+
+
+func _send_letter(letter: Dictionary) -> int:
+	letter_count += 1
+	letter["id"] = letter_count
+	letter["month"] = month
+	letters.append(letter)
+	new_letters.append(letter_count)
+	return letter_count
+
+
+func _has_letter(kind: String) -> bool:
+	for letter: Dictionary in letters:
+		if String(letter.get("kind", "")) == kind:
+			return true
+	return false
+
+
+func _company_names() -> Array:
+	var names := []
+	for letter: Dictionary in letters:
+		names.append(String(letter.get("company", "")))
+	for s: Dictionary in startups:
+		names.append(String(s.get("name", "")))
+	return names
+
+
+func letter_by_id(id: int) -> Dictionary:
+	for letter: Dictionary in letters:
+		if int(letter.get("id", -1)) == id:
+			return letter
+	return {}
+
+
+func letter_months_left(letter: Dictionary) -> int:
+	return maxi(Settings.LETTER_MONTHS - (month - int(letter.get("month", month))), 0)
+
+
+func _change_appetite(by: float) -> void:
+	investor_appetite = clampf(investor_appetite + by, 0.0, 1.0)
+
+
+func appetite_word() -> String:
+	if investor_appetite >= 0.7:
+		return "keen"
+	if investor_appetite >= 0.4:
+		return "warm"
+	if investor_appetite >= 0.2:
+		return "wary"
+	return "cold"
+
+
+func startup_chance() -> float:
+	# The chance a month of a start-up writing: none until the town is big
+	# enough and has an empty office plot in a Tech zone to offer; then more
+	# with keen investors, a Tech zone tax break and a bigger town.
+	if population < Settings.STARTUP_POP or _free_startup_plot() < 0:
+		return 0.0
+	var size := clampf(float(population) / 2000.0, 0.75, 1.5)
+	return Settings.STARTUP_CHANCE * (0.5 + investor_appetite) * (0.6 + 0.4 * tech_pull()) * size
+
+
+func _free_startup_plot() -> int:
+	# The best empty office plot in a Tech zone with a road and power (the most
+	# valuable land first), or -1.
+	_update_road_distance()
+	_update_power()
+	var best := -1
+	var taken := _startup_tiles()
+	for i in w * h:
+		if tiles[i] == Tile.OFFICES and district[i] == Settings.TECH_ZONE and levels[i] == 0 \
+				and abandoned[i] == 0 and powered[i] == 1 and _connected(i) and not taken.has(i):
+			if best < 0 or land_value[i] > land_value[best]:
+				best = i
+	return best
+
+
+func _startup_tiles() -> Dictionary:
+	var out := {}
+	for s: Dictionary in startups:
+		out[int(s["tile"])] = true
+	return out
+
+
+func is_startup(i: int) -> String:
+	# The name of the start-up on this plot ("" if none).
+	for s: Dictionary in startups:
+		if int(s["tile"]) == i:
+			return String(s.get("name", ""))
+	return ""
+
+
+func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
+	# The mayor's answer. Returns {ok, text}: ok false (and nothing changes) if
+	# yes can't be done right now, with text saying why.
+	var letter := letter_by_id(id)
+	if letter.is_empty():
+		return {"ok": false, "text": "That letter has gone."}
+	var company: String = letter.get("company", "")
+	if not yes:
+		letters.erase(letter)
+		_change_appetite(-Settings.APPETITE_NO)
+		return {"ok": true, "text": "You turned down %s." % company}
+	match String(letter.get("kind", "")):
+		"startup":
+			var grant: int = letter.get("grant", 0)
+			if money < grant:
+				return {"ok": false, "text": "Not enough money to back %s (it asks for %s)." % [company, Companies._pounds(grant)]}
+			var plot := _free_startup_plot()
+			if plot < 0:
+				return {"ok": false, "text": "%s needs an empty office plot with a road and power in your Tech zone." % company}
+			money -= grant
+			startups.append({"tile": plot, "name": company, "grant": grant, "founded": month})
+			levels[plot] = 1
+			abandoned[plot] = 0
+			decline[plot] = 0
+			_power_dirty = true
+			_value_dirty = true
+			layout_version += 1
+			letters.erase(letter)
+			_change_appetite(Settings.APPETITE_YES)
+			recount()
+			return {"ok": true, "text": "You backed %s with %s. They've moved into the Tech zone." % [company, Companies._pounds(grant)], "tile": plot}
+	return {"ok": false, "text": "Nothing to do."}
+
+
+func _update_startups() -> void:
+	# Start-ups the town backed: each year one may grow, fold or be bought out.
+	# One whose plot was bulldozed or rezoned has simply gone.
+	var kept: Array[Dictionary] = []
+	for s: Dictionary in startups:
+		var i: int = s["tile"]
+		if tiles[i] != Tile.OFFICES or levels[i] == 0:
+			continue
+		var age := month - int(s.get("founded", month))
+		if age > 0 and age % 12 == 0:
+			var roll := _rng.randf()
+			if roll < Settings.STARTUP_FOLD:
+				levels[i] = 0
+				layout_version += 1
+				_change_appetite(-Settings.APPETITE_FOLD)
+				news.append(Companies.startup_news("fold", s))
+				shrank.append(i)
+				continue
+			elif roll < Settings.STARTUP_FOLD + Settings.STARTUP_ACQUIRED:
+				var payout: int = int(s.get("grant", 0)) * Settings.STARTUP_PAYOUT
+				money += payout
+				_change_appetite(Settings.APPETITE_YES)
+				news.append(Companies.startup_news("acquired", s, payout))
+			elif roll < Settings.STARTUP_FOLD + Settings.STARTUP_ACQUIRED + Settings.STARTUP_GROW \
+					and levels[i] < max_level(i):
+				levels[i] += 1
+				layout_version += 1
+				news.append(Companies.startup_news("grow", s))
+				grew.append(i)
+		kept.append(s)
+	startups = kept
+
+
+func interest_lines() -> Array[String]:
+	# Who's interested in the town and what they're waiting for (the inbox).
+	var out: Array[String] = []
+	if population < Settings.STARTUP_POP:
+		out.append("Start-ups: waiting for a town of %d people" % Settings.STARTUP_POP)
+	elif not has_tech_zone():
+		out.append("Start-ups: want a Tech zone (Districts, Z) with office plots")
+	elif _free_startup_plot() < 0:
+		out.append("Start-ups: want an empty office plot with a road and power in your Tech zone")
+	else:
+		var months := roundi(1.0 / maxf(startup_chance(), 0.01))
+		out.append("Start-ups: interested (a letter every %d months or so)" % months)
+	return out
+
+
+func _load_letters(data: Dictionary) -> void:
+	# (Older saves: no letters, start-ups or investors' mood yet.)
+	letters.clear()
+	for item in data.get("letters", []):
+		if typeof(item) == TYPE_DICTIONARY:
+			var letter: Dictionary = item
+			letter["id"] = int(letter.get("id", 0))
+			letter["month"] = int(letter.get("month", 0))
+			if letter.has("grant"):
+				letter["grant"] = int(letter["grant"])
+			letters.append(letter)
+	startups.clear()
+	for item in data.get("startups", []):
+		if typeof(item) == TYPE_DICTIONARY:
+			var s: Dictionary = item
+			var i := int(s.get("tile", -1))
+			if i >= 0 and i < w * h:
+				startups.append({"tile": i, "name": String(s.get("name", "")), "grant": int(s.get("grant", 0)),
+					"founded": int(s.get("founded", 0))})
+	investor_appetite = clampf(float(data.get("investor_appetite", Settings.APPETITE_START)), 0.0, 1.0)
+	letter_count = int(data.get("letter_count", letters.size()))
+	new_letters.clear()
+	news.clear()
 
 
 # ------------------------------------------------------- difficulty and loans
@@ -3048,6 +3288,10 @@ func to_save() -> Dictionary:
 		"month": month,
 		"tax_rate": tax_rate,
 		"tech_tax_rate": tech_tax_rate,
+		"letters": letters.duplicate(true),
+		"startups": startups.duplicate(true),
+		"investor_appetite": investor_appetite,
+		"letter_count": letter_count,
 		"tiles": Array(tiles),
 		"levels": Array(levels),
 		"density": Array(density),
@@ -3128,6 +3372,7 @@ func from_save(data: Dictionary) -> void:
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
 	tech_tax_rate = clampf(float(data.get("tech_tax_rate", tax_rate)), 0.0, Settings.MAX_TAX_RATE)   # (older saves: the town's rate)
 	last_tech_relief = 0
+	_load_letters(data)
 	var saved_funding: Array = data.get("funding", [])
 	for s in 4:
 		funding[s] = clampf(float(saved_funding[s]), 0.0, Settings.MAX_FUNDING) \

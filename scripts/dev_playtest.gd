@@ -18,6 +18,7 @@ const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world3d.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
+const Companies = preload("res://scripts/companies.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")
 const Advisors = preload("res://scripts/advisors.gd")
@@ -51,6 +52,7 @@ var _buttons := 0
 var _passed := 0
 var _failed := 0
 var debug_drags := false             # print where each drag ended up
+var only: PackedStringArray = []        # parts to run on their own (--playtest-only=letters,tech_zone)
 var _origin := Vector2i(-1, -1)       # top left of the patch of land the town goes on
 
 
@@ -67,6 +69,8 @@ func _init(game_node: Node3D, args: PackedStringArray) -> void:
 	for a: String in args:
 		if a.begins_with("--playtest="):
 			out_dir = a.trim_prefix("--playtest=")
+		if a.begins_with("--playtest-only="):
+			only = a.trim_prefix("--playtest-only=").split(",", false)
 	if out_dir == "":
 		out_dir = "screenshots/playtest"
 	if out_dir.is_relative_path():
@@ -93,6 +97,17 @@ func _run() -> void:
 		get_window().size, get_window().content_scale_factor, roundi(get_viewport().scaling_3d_scale * 100.0)])
 	await _wait(1.0)
 	await _launch_dialog()
+	if not only.is_empty():
+		# Just these parts (tools/playtest.sh --only=letters,tech_zone).
+		for part: String in only:
+			if has_method("_" + part):
+				print("[play] only: %s" % part)
+				await call("_" + part)
+			else:
+				check(false, "no part of the play test called %s" % part)
+		print("[play] done: %d passed, %d failed" % [_passed, _failed])
+		get_tree().quit(1 if _failed > 0 else 0)
+		return
 	await _blank_start()
 	await _camera_controls()
 	await _build_first_streets()
@@ -112,6 +127,7 @@ func _run() -> void:
 	await _services()
 	await _feedback_fixes()
 	await _tech_zone()
+	await _letters()
 	await _examples()
 	await _new_buildings()
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
@@ -450,6 +466,156 @@ func _tech_zone() -> void:
 	await _click(hud.get("_city_button"))
 	await _shot("p29_tech_zone_city_panel")
 	await _click(hud.get("_city_button"))
+
+
+func _letters() -> void:
+	# Letters from start-ups (tech layer step 2, Nov 2026): they write once the
+	# town has 500 people and an empty office plot in a Tech zone; the envelope
+	# counts them; a letter opens on a card that pauses the game; backing one
+	# puts it on that plot; unanswered letters lapse; start-ups grow, fold or
+	# are bought each year.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(24, 10)
+	check(o.x >= 0, "letters: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 500000
+	_place("road", o + Vector2i(0, 4), o + Vector2i(21, 4))
+	_place("homes_1", o + Vector2i(0, 2), o + Vector2i(20, 3))
+	_place("offices_1", o + Vector2i(0, 5), o + Vector2i(9, 6))
+	_place("coal", o + Vector2i(21, 5))
+	_place("water_tower", o + Vector2i(21, 3))
+	_fill_plots(o + Vector2i(0, 2), o + Vector2i(20, 3))
+	sim.recount()
+	check(sim.population >= Settings.STARTUP_POP and sim.startup_chance() == 0.0
+		and sim.interest_lines()[0].contains("want a Tech zone"),
+		"letters: %d people but no Tech zone, so no start-ups write (%s)" % [sim.population, sim.interest_lines()[0]])
+	_place("tech_zone", o + Vector2i(0, 5), o + Vector2i(9, 6))
+	sim.recount()
+	check(sim.startup_chance() > 0.0 and sim.interest_lines()[0].contains("interested"),
+		"letters: with a Tech zone of empty office plots, start-ups are interested (%s)" % sim.interest_lines()[0])
+	var tries := 0
+	while sim.letters.is_empty() and tries < 200:
+		sim.call("_update_letters")
+		tries += 1
+	check(sim.letters.size() == 1 and String(sim.letters[0]["kind"]) == "startup",
+		"letters: a start-up writes (after %d months' worth of chances)" % tries)
+	if sim.letters.is_empty():
+		return
+	var letter: Dictionary = sim.letters[0]
+	var grant: int = letter["grant"]
+	game.call("_refresh_hud")
+	var badge: Label = hud.get("_inbox_badge")
+	check(badge.visible and badge.text == "1", "letters: the envelope shows 1 waiting")
+	check("letters" in _tip_ids(), "letters: the advisors mention the letter")
+
+	# Open the inbox and the letter with the mouse; the clock stops while it's open.
+	game.call("_set_speed", 1)
+	await _click(hud.get("inbox_button"))
+	await _frames(3)
+	var inbox: PanelContainer = hud.get("inbox_panel")
+	var row: Button = null
+	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
+		if child is Button:
+			row = child
+	check(inbox.visible and row != null and row.text.contains(String(letter["company"])),
+		"letters: the envelope opens the inbox with the letter in it")
+	await _shot("p30_inbox")
+	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
+		if child is Button:
+			row = child
+	await _click(row)
+	await _frames(3)
+	var body: Label = hud.get("_letter_body")
+	check(hud.call("letter_open") and not inbox.visible and body.text.contains(String(letter["company"]))
+		and body.text.contains(Hud.money_text(grant)), "letters: clicking it opens the letter (%s)" % letter["subject"])
+	check(int(game.get("speed")) == 0, "letters: the game pauses while it's open")
+	await _shot("p31_startup_letter")
+	await _key(KEY_ESCAPE)
+	check(not hud.call("letter_open") and int(game.get("speed")) == 1 and sim.letters.size() == 1,
+		"letters: Esc puts it back in the inbox, and the clock runs again")
+	game.call("_set_speed", 0)
+
+	# Back them: they move into the best empty office plot in the Tech zone.
+	hud.call("open_letter", int(letter["id"]))
+	await _frames(3)
+	var money0: int = sim.money
+	var yes := _find_button(hud.get("letter_panel"), "Back them (%s)" % Hud.money_text(grant))
+	await _click(yes)
+	await _frames(2)
+	check(not hud.call("letter_open") and sim.letters.is_empty() and sim.startups.size() == 1
+		and sim.money == money0 - grant, "letters: Back them costs %s and closes the letter" % Hud.money_text(grant))
+	var plot: int = sim.startups[0]["tile"] if not sim.startups.is_empty() else -1
+	check(plot >= 0 and sim.tiles[plot] == T.OFFICES and sim.levels[plot] == 1 and sim.district[plot] == Settings.TECH_ZONE
+		and String(game.call("_tile_text", plot)).contains("Start-up: %s" % letter["company"]),
+		"letters: the start-up moved into an office plot in the Tech zone, and its hover says so")
+	var appetite: float = sim.investor_appetite
+	check(appetite > Settings.APPETITE_START, "letters: investors are keener (%.2f)" % appetite)
+
+	# Another letter: No thanks. Another: left unanswered for 6 months, it lapses.
+	sim.call("_send_letter", Companies.startup_letter(RandomNumberGenerator.new(), []))
+	game.call("_refresh_hud")
+	hud.call("open_letter", int(sim.letters[0]["id"]))
+	await _frames(3)
+	await _click(_find_button(hud.get("letter_panel"), "No thanks"))
+	check(sim.letters.is_empty() and sim.investor_appetite < appetite, "letters: No thanks turns it down; investors cool a little")
+	sim.call("_send_letter", Companies.startup_letter(RandomNumberGenerator.new(), []))
+	sim.month += Settings.LETTER_MONTHS
+	sim.call("_update_letters")
+	check(sim.letters.size() <= 1 and sim.news.size() >= 1 and String(sim.news[0]).contains("gave up waiting"),
+		"letters: a letter left for %d months lapses (%s)" % [Settings.LETTER_MONTHS, sim.news[0] if not sim.news.is_empty() else ""])
+	sim.letters.clear()
+
+	# No empty plot left: the letter card says why it can't be done.
+	for y: int in range(o.y + 5, o.y + 7):
+		for x: int in range(o.x, o.x + 10):
+			if sim.levels[y * sim.w + x] == 0:
+				sim.levels[y * sim.w + x] = 1
+	sim.recount()
+	var id: int = sim.call("_send_letter", Companies.startup_letter(RandomNumberGenerator.new(), []))
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var ask := Hud.money_text(int(sim.letter_by_id(id)["grant"]))
+	await _click(_find_button(hud.get("letter_panel"), "Back them (%s)" % ask))
+	var note: Label = hud.get("_letter_note")
+	check(hud.call("letter_open") and note.text.contains("needs an empty office plot") and sim.startups.size() == 1,
+		"letters: with no empty plot it can't move in, and the card says so (%s)" % note.text)
+	check(sim.startup_chance() == 0.0 and sim.interest_lines()[0].contains("want an empty office plot"),
+		"letters: ...and no more start-ups write until there is one")
+	hud.call("close_letter")
+
+	# Saved and loaded with its letters, start-ups and investors' mood; an older save has none.
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(sim.letters.size() == 1 and int(sim.letters[0]["id"]) == id and sim.startups.size() == 1
+		and int(sim.startups[0]["tile"]) == plot, "letters: saved and loaded with the letter and the start-up")
+	for key: String in ["letters", "startups", "investor_appetite", "letter_count"]:
+		data.erase(key)
+	sim.from_save(data)
+	check(sim.letters.is_empty() and sim.startups.is_empty() and is_equal_approx(sim.investor_appetite, Settings.APPETITE_START),
+		"letters: an older save loads with none")
+
+	# Each year a start-up may grow, fold or be bought: ten years of them.
+	var outcomes := {}
+	for n: int in 40:
+		sim.startups.clear()
+		sim.startups.append({"tile": plot, "name": "Testly", "grant": 2000, "founded": 0})
+		sim.levels[plot] = 1
+		sim.month = 12
+		sim.call("_update_startups")
+		var said: String = sim.news[0] if not sim.news.is_empty() else "nothing"
+		var kind := "grew" if said.contains("raised") else ("folded" if said.contains("closed") else (
+			"bought" if said.contains("bought") else "nothing"))
+		outcomes[kind] = true
+		sim.news.clear()
+	check(outcomes.size() >= 3, "letters: start-ups' years go different ways (%s)" % ", ".join(outcomes.keys()))
+	sim.startups.clear()
 
 
 func _examples() -> void:

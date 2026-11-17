@@ -156,6 +156,7 @@ var _camera_seen := Transform3D()      # camera position last used to pick the h
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
 var _speed_before_dialog := 1          # the speed to go back to when the New city dialog closes
+var _speed_before_letter := 1          # the speed to go back to when the letter card closes
 # Undo: one step per drag, newest last: {"what", "month", "spent", "tiles": {tile index: sim.tile_state}}.
 var _undo: Array[Dictionary] = []
 
@@ -197,6 +198,8 @@ func _ready() -> void:
 	hud.speed_chosen.connect(_set_speed)
 	hud.tax_changed.connect(_change_tax)
 	hud.tech_tax_changed.connect(_change_tech_tax)
+	hud.letter_answered.connect(_answer_letter)
+	hud.letter_shown.connect(_letter_shown)
 	hud.new_city_pressed.connect(_ask_new_city.bind(false))
 	hud.new_city_chosen.connect(_new_city_chosen)
 	hud.new_city_cancelled.connect(_new_city_cancelled)
@@ -493,6 +496,12 @@ func _process(delta: float) -> void:
 				var gone := sim.abandoned_now.size()
 				hud.flash("%d %s abandoned. Point at one to see why, or bulldoze it." % [
 					gone, "building was" if gone == 1 else "buildings were"])
+			elif not sim.new_letters.is_empty():
+				var letter := sim.letter_by_id(sim.new_letters[0])
+				hud.flash("A letter from %s (%s): open it from the envelope, top left." % [
+					String(letter.get("from", "")), String(letter.get("company", ""))])
+			elif not sim.news.is_empty():
+				hud.flash(sim.news[0])
 
 	# Redraw at most once a frame, however many tiles changed. Roads, power lines
 	# and woods only change when the layout does. (Traffic watches for itself.)
@@ -1384,6 +1393,28 @@ func _change_tech_tax(step: float) -> void:
 	_refresh_hud()
 
 
+func _answer_letter(id: int, yes: bool, choice: int) -> void:
+	# The mayor's answer to a letter (the letter card's buttons).
+	var result: Dictionary = sim.answer_letter(id, yes, choice)
+	var ok: bool = result.get("ok", false)
+	hud.letter_result(ok, String(result.get("text", "")))
+	if ok:
+		_buildings_dirty = true
+		_ground_dirty = true
+		_refresh_hud()
+		hud.flash(String(result.get("text", "")))
+
+
+func _letter_shown(open: bool) -> void:
+	# The clock stops while a letter is open on its card.
+	if open:
+		_cancel_drag()
+		_speed_before_letter = speed
+		_set_speed(0)
+	else:
+		_set_speed(_speed_before_letter)
+
+
 func _set_speed(new_speed: int) -> void:
 	speed = new_speed
 	hud.set_speed(speed)
@@ -1420,6 +1451,8 @@ func _load_game(path: String = SAVE_FILE, done_text: String = "City loaded.") ->
 		hud.flash("That save doesn't match this map.")
 		return
 	_cancel_drag()
+	hud.close_letter()
+	hud.close_inbox()
 	sim.from_save(data)
 	_undo.clear()
 	clock = 0.0
@@ -1461,6 +1494,7 @@ func _new_city_cancelled() -> void:
 
 func _new_city(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	_cancel_drag()
+	hud.close_inbox()
 	sim.reset(level)
 	_undo.clear()
 	clock = 0.0
@@ -1607,6 +1641,9 @@ func _tile_text(i: int) -> String:
 	text += "\nLand value %s" % sim.land_value_word(i)
 	if sim.district[i] != 0:
 		text += "   ·   %s" % sim.district_name(i)
+	var startup := sim.is_startup(i)
+	if startup != "":
+		text += "\nStart-up: %s, backed by the town" % startup
 	if t != Tile.INDUSTRY and sim.pollution_band(i) >= 2:
 		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:

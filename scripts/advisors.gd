@@ -294,6 +294,20 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 			+ "has too many of, are left empty. Fix the problem and they'll be done up, or "
 			+ "bulldoze them. They're brown on the Growth map.", growth_kind)
 
+	# --- Letters from companies waiting for an answer ---
+	if not sim.letters.is_empty():
+		var soonest: Dictionary = sim.letters[0]
+		for letter: Dictionary in sim.letters:
+			if sim.letter_months_left(letter) < sim.letter_months_left(soonest):
+				soonest = letter
+		var left: int = sim.letter_months_left(soonest)
+		var n: int = sim.letters.size()
+		_add(out, "letters", WARNING if left <= 1 else ADVICE,
+			("%s's letter lapses this month: answer it in the inbox" % String(soonest.get("company", "")))
+				if left <= 1 else "%d %s waiting in the inbox (the envelope, top left)" % [n, "letter" if n == 1 else "letters"],
+			"Companies write when the town has something they want. Answer within %d months, or they go elsewhere "
+			% Settings.LETTER_MONTHS + "and investors cool on the town.", NO_OVERLAY)
+
 	# --- Tech zone: a tax break that does nothing, or one residents resent ---
 	if sim.has_tech_zone():
 		var unfair: float = -float(sim.happiness_parts.get("fairness", 0.0))

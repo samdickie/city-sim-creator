@@ -2,7 +2,10 @@
 # Dev tool: play a new game with real mouse and keyboard events, check every step
 # and save pictures along the way (see scripts/dev_playtest.gd).
 #
-#   tools/playtest.sh [outdir]
+#   tools/playtest.sh [outdir] [--only=letters,tech_zone]
+#
+# --only runs just those parts (the names of the _functions in _run(), without
+# the underscore), after the opening launch dialog; for working on one part.
 #
 # Opens the game in its normal window (maximized, full Retina resolution, like
 # real play), starts a blank game, builds a few streets from the Build menu with
@@ -15,13 +18,20 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 GODOT="${GODOT:-$HOME/Downloads/Godot.app/Contents/MacOS/Godot}"
-OUT="${1:-screenshots/playtest}"
+OUT="screenshots/playtest"
+ONLY=""
+for a in "$@"; do
+	case "$a" in
+		--only=*) ONLY="${a#--only=}" ;;
+		*) OUT="$a" ;;
+	esac
+done
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 LOG="$OUT/godot.log"
 
 START=$(date +%s)
-"$GODOT" --path . -- "--playtest=$OUT" 2>&1 | tee "$LOG"
+"$GODOT" --path . -- "--playtest=$OUT" ${ONLY:+"--playtest-only=$ONLY"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 echo "Took $(( $(date +%s) - START )) s. Pictures in $OUT"
 
