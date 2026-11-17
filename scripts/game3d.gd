@@ -17,7 +17,8 @@ const DevPromo = preload("res://scripts/dev_promo.gd")   # dev tool: tools/make_
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
 const MAP_FILE := "res://map/troon_map.json"
-const SAVE_FILE := "user://troon_save.json"
+const SAVE_FILE := "user://troon_save.json"           # the player's own city
+const DEV_SAVE_FILE := "user://dev_tools_save.json"   # what Save and Load use when a dev tool runs the game
 const EXAMPLES_DIR := "res://examples"   # ready-made cities (the game menu's Example cities)
 const SAVE_VERSION := 4               # 4: difficulty and loans (older saves load as Normal with no loans)
 
@@ -158,6 +159,7 @@ var _camera_seen := Transform3D()      # camera position last used to pick the h
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
 var _speed_before_dialog := 1          # the speed to go back to when the New city dialog closes
+var save_file := SAVE_FILE             # Save and Load (DEV_SAVE_FILE under the dev tools, so they never touch the player's)
 var _speed_before_letter := 1
 var _placing_deal := -1                # the deal whose data centre is being placed (Tool.DEAL)
 var _tool_before_deal := 0             # the tool to go back to once it's placed          # the speed to go back to when the letter card closes
@@ -230,6 +232,9 @@ func _ready() -> void:
 	# Dev tools only: `-- --shots=<dir>` builds a demo town and saves screenshots;
 	# `-- --playtest=<dir>` plays a new game with mouse and keyboard events.
 	var user_args := OS.get_cmdline_user_args()
+	if DevPromo.wanted_promo(user_args) or DevExamples.wanted_examples(user_args) or DevShots.wanted(user_args) \
+			or DevPlaytest.wanted(user_args):
+		save_file = DEV_SAVE_FILE      # (the play test presses Save: that must never overwrite the player's city)
 	if DevPromo.wanted_promo(user_args):
 		add_child(DevPromo.new(self, user_args))
 		return
@@ -1501,7 +1506,7 @@ func _set_speed(new_speed: int) -> void:
 # --------------------------------------------------------------- save / load
 
 func _save_game() -> void:
-	hud.flash("City saved." if _write_save(SAVE_FILE) else "Save failed.")
+	hud.flash("City saved." if _write_save(save_file) else "Save failed.")
 
 
 func _write_save(path: String) -> bool:
@@ -1518,7 +1523,9 @@ func _write_save(path: String) -> bool:
 	return true
 
 
-func _load_game(path: String = SAVE_FILE, done_text: String = "City loaded.") -> void:
+func _load_game(path: String = "", done_text: String = "City loaded.") -> void:
+	if path == "":
+		path = save_file
 	if not FileAccess.file_exists(path):
 		hud.flash("No saved city yet.")
 		return

@@ -95,6 +95,11 @@ func _run() -> void:
 	DevShots._skip_import(out_dir)
 	print("[play] saving to %s; window %s pixels, interface scale %.2f, 3D drawn at %d%%" % [out_dir,
 		get_window().size, get_window().content_scale_factor, roundi(get_viewport().scaling_3d_scale * 100.0)])
+	# The player's own save must come through untouched: the game saves to its
+	# dev file while a dev tool runs it (game3d.gd DEV_SAVE_FILE).
+	var players := "user://troon_save.json"
+	var players_time := FileAccess.get_modified_time(players) if FileAccess.file_exists(players) else 0
+	check(String(game.get("save_file")) != players, "the play test saves to its own file (%s), never the player's" % game.get("save_file"))
 	await _wait(1.0)
 	await _launch_dialog()
 	if not only.is_empty():
@@ -105,6 +110,7 @@ func _run() -> void:
 				await call("_" + part)
 			else:
 				check(false, "no part of the play test called %s" % part)
+		_check_players_save(players, players_time)
 		print("[play] done: %d passed, %d failed" % [_passed, _failed])
 		get_tree().quit(1 if _failed > 0 else 0)
 		return
@@ -131,8 +137,14 @@ func _run() -> void:
 	await _data_centre()
 	await _examples()
 	await _new_buildings()
+	_check_players_save(players, players_time)
 	print("[play] done: %d passed, %d failed" % [_passed, _failed])
 	get_tree().quit(1 if _failed > 0 else 0)
+
+
+func _check_players_save(path: String, was: int) -> void:
+	var now := FileAccess.get_modified_time(path) if FileAccess.file_exists(path) else 0
+	check(now == was, "the player's own save (%s) was left untouched" % path)
 
 
 func _new_buildings() -> void:
@@ -1390,7 +1402,7 @@ func _save_and_load() -> void:
 	check(menu.visible, "the ☰ button opens the game menu")
 	await _shot("p12_menu")
 	await _click(_find_button(menu, "Save"))
-	check(FileAccess.file_exists("user://troon_save.json"), "Save writes the save file")
+	check(FileAccess.file_exists(String(game.get("save_file"))), "Save writes the save file")
 	var saved := JSON.stringify(sim.to_save())
 	var money := sim.money
 	# Bulldoze a corner of the town.
@@ -1405,7 +1417,7 @@ func _save_and_load() -> void:
 	check(_count(Simulation.Tile.HOMES, o + Vector2i(0, 3), o + Vector2i(2, 4)) == 6, "Load brings the bulldozed homes back")
 	check(JSON.stringify(sim.to_save()) == saved, "save then load gives back exactly the same city")
 	# The save file itself loads (with the same reader as an old save).
-	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(String(game.get("save_file"))))
 	check(typeof(data) == TYPE_DICTIONARY and int((data as Dictionary).get("version", 0)) == 4, "the save file is version 4")
 
 
@@ -1618,7 +1630,7 @@ func _woodland() -> void:
 	# Save, bulldoze a row, load: it all comes back.
 	await _key(KEY_S, true)
 	var saved := JSON.stringify(sim.to_save())
-	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(String(game.get("save_file"))))
 	var saved_tiles: Array = (data as Dictionary).get("tiles", [])
 	check(int(saved_tiles[spot.y * sim.w + spot.x]) == wood, "the save file holds the woodland")
 	await _click(hud.bulldoze_button)
@@ -2283,7 +2295,7 @@ func _traffic() -> void:
 	# Saving and loading: traffic isn't saved, it's worked out again, the same.
 	await _key(KEY_S, true)
 	var saved_traffic: PackedFloat32Array = sim.traffic_map().duplicate()
-	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string("user://troon_save.json"))
+	var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(String(game.get("save_file"))))
 	check(typeof(data) == TYPE_DICTIONARY and not (data as Dictionary).has("traffic"), "traffic: nothing about traffic in the save")
 	await _click(hud.bulldoze_button)
 	await _drag(_screen_of(o + Vector2i(4, 5)), _screen_of(o + Vector2i(4, 6)))

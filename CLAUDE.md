@@ -35,6 +35,7 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - New saves must still load old ones: read new fields with defaults.
 - Every model swap keeps the old boxes as a fallback: `if _models.has("name"): _add_model(...) else: <boxes>`.
 - Syntax check: `gdparse <file>` (pip package `gdtoolkit`).
+- **Dev tools never touch Sam's save.** Started with `--playtest`, `--shots`, `--examples` or `--promo`, the game's Save and Load use `game3d.DEV_SAVE_FILE` (`user://dev_tools_save.json`, via `game.save_file`), never `SAVE_FILE` (`user://troon_save.json`, Sam's city). Tests read `game.save_file`, never the path. The play test checks Sam's file is untouched at the end. (A play test once overwrote Sam's saved city, Nov 2026: it couldn't be recovered.) Never write to `user://troon_save.json` from a script.
 
 ## How things work (short)
 - **Demand and happiness.** `happiness` (0–1) is built from parts: taxes vs services, services, leisure, rubbish, jobs, housing, power, water, pollution. `appeal() = 3 * happiness - 1` drives home demand: below 50% happiness nobody moves in, below 33% people leave. Shops and industry use `business_appeal()` (taxes, services, leisure, rubbish only). The `complaint_keys()`, `complaint_text()` and `complaint_fix()` wording is shared by the HUD, hover text and advisors.
