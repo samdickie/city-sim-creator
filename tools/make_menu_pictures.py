@@ -952,6 +952,35 @@ def conservation():
     _district((0.70, 0.45, 0.20), False)
 
 
+def college():
+    ground()
+    slab(0.0, 0.0, 49.0, 4.0, PAVEMENT)
+    model("classical3", -9.0, 4.0, 26.0, 14.0, 16.0, HONEY_STONE, r=0.4)
+    modern_block(14.0, 6.0, 16.0, 18.0, 3, (0.55, 0.66, 0.74), glassy=True)
+    slab(0.0, 26.0, 46.0, 20.0, LAWN)
+    for k in range(3):
+        tree(-20.0 + k * 13.0, 44.0, 9.0)
+
+
+def university():
+    ground()
+    slab(0.0, 0.0, 50.0, 50.0, LAWN)
+    model("classical4", 0.0, 3.0, 40.0, 10.0, 18.0, HONEY_STONE, r=0.4)
+    for side in (-15.0, 15.0):
+        model("classical3", side, 13.0, 10.0, 24.0, 15.0, HONEY_STONE, r=0.4, turn=1)
+    box(0.0, 2.0, 7.0, 7.0, 30.0, HONEY_STONE)
+    for (a, b) in ((-8.0, 42.0), (8.0, 42.0)):
+        tree(a, b, 10.0)
+
+
+def research_park():
+    ground()
+    slab(0.0, 0.0, 50.0, 50.0, LAWN)
+    modern_block(-4.0, 6.0, 30.0, 22.0, 3, (0.62, 0.72, 0.78), glassy=True)
+    for k in range(2):
+        tree(16.0, 8.0 + k * 16.0, 9.0)
+
+
 def tech_zone():
     # A glass office campus and a big shed (a data centre or works) on the zone's colour.
     ground()
@@ -978,7 +1007,7 @@ ITEMS = {
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
     "station": station, "harbour": harbour, "airport": airport,
     "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
-    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "tech_zone": tech_zone, "conservation": conservation, "normal": normal,
+    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "tech_zone": tech_zone, "college": college, "university": university, "research_park": research_park, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "incinerator": 1.7, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,

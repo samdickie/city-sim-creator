@@ -13,7 +13,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
+	COLLEGE, UNIVERSITY, RESEARCH_PARK }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -26,8 +27,9 @@ const BUILDING_KEYS := {
 	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
 	Tile.INCINERATOR: "incinerator", Tile.DATA_CENTRE: "data_centre", Tile.GIGAFACTORY: "gigafactory",
 	Tile.TECH_CAMPUS: "tech_campus", Tile.LAUNCH_SITE: "launch_site", Tile.AI_DATA_CENTRE: "ai_data_centre",
+	Tile.COLLEGE: "college", Tile.UNIVERSITY: "university", Tile.RESEARCH_PARK: "research_park",
 }
-const LAST_TILE := Tile.AI_DATA_CENTRE   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.RESEARCH_PARK   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
 const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
 	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE}
@@ -135,6 +137,8 @@ var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are
 var letter_count := 0                 # letters ever sent (gives each its id)
 var deals: Array[Dictionary] = []     # data centres agreed: {id, company, scale, month, tiles, opened, break_left, priority}
 var _launch_zone := PackedByteArray()  # 1 = inside a launch site's safety zone: homes can't grow (_index_deals)
+var tech_share := -1.0                # share of residents with tech skills (-1: not worked out yet; see Tech workers)
+var _group_ok := PackedByteArray()    # university and research park tiles: 1 if their joined-up group has a road
 var _campus_rise := 0.0               # how much campus salaries push home prices up (campus_price_rise)
 var company_jobs := 0                 # jobs at working data centres (from outside, on top of the town's own)
 var _deal_at := {}                      # data centre tile -> index in deals (see _index_deals)
@@ -224,6 +228,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	tax_rate = Settings.DEFAULT_TAX_RATE
 	tech_tax_rate = Settings.DEFAULT_TAX_RATE
 	last_tech_relief = 0
+	tech_share = -1.0
 	letters.clear()
 	startups.clear()
 	deals.clear()
@@ -699,6 +704,7 @@ func tick() -> void:
 		_value_dirty = true
 	recount()
 	_collect_taxes()
+	_update_tech()
 	_update_letters()
 
 
@@ -897,6 +903,103 @@ func _collect_taxes() -> void:
 	_pay_loan()
 
 
+# -------------------------------------------------------------- Tech workers
+# Residents with tech skills. Big companies want them (Settings.PROJECTS
+# tech_workers). Schools, colleges and a university make them; tech jobs draw
+# them in; a happy town keeps them. The share settles towards its target
+# slowly (TECH_SETTLE a month), as graduates take years to come through.
+
+func _update_area_groups() -> void:
+	# University and research park tiles work as one site: a group of joined-up
+	# tiles of the same kind works if a road is beside any of them.
+	_group_ok.resize(w * h)
+	_group_ok.fill(0)
+	if not tiles.has(Tile.UNIVERSITY) and not tiles.has(Tile.RESEARCH_PARK):
+		return
+	var seen := PackedByteArray()
+	seen.resize(w * h)
+	for start in w * h:
+		var t: int = tiles[start]
+		if (t != Tile.UNIVERSITY and t != Tile.RESEARCH_PARK) or seen[start] == 1:
+			continue
+		var group: Array[int] = [start]
+		seen[start] = 1
+		var head := 0
+		var road := false
+		while head < group.size():
+			var c := group[head]
+			head += 1
+			if near_road(c):
+				road = true
+			var x := c % w
+			for n: int in [c - 1 if x > 0 else -1, c + 1 if x < w - 1 else -1, c - w, c + w]:
+				if n >= 0 and n < w * h and seen[n] == 0 and tiles[n] == t:
+					seen[n] = 1
+					group.append(n)
+		if road:
+			for c in group:
+				_group_ok[c] = 1
+
+
+func _tech_target() -> float:
+	# Where the town's share of tech workers is heading.
+	var share := schooled_share() * Settings.TECH_SCHOOLS
+	var colleges := 0.0
+	var uni := 0.0
+	for i in w * h:
+		var t: int = tiles[i]
+		if t == Tile.COLLEGE and building_working(i):
+			colleges += float(info(t).get("tech", 0.0))
+		elif t == Tile.UNIVERSITY and building_working(i):
+			uni += float(info(t).get("tech", 0.0))
+	share += minf(colleges, Settings.TECH_COLLEGES_MAX) + minf(uni, Settings.TECH_UNIVERSITY_MAX)
+	if population > 0:
+		share += float(company_jobs + tech_zone_jobs()) * Settings.TECH_JOB_PULL / population
+	share *= 0.6 + 0.4 * happiness
+	return clampf(share, 0.0, Settings.TECH_SHARE_MAX)
+
+
+func _update_tech() -> void:
+	var target := _tech_target()
+	if tech_share < 0.0:
+		tech_share = target
+	else:
+		tech_share += (target - tech_share) * Settings.TECH_SETTLE
+
+
+func tech_workers() -> int:
+	return roundi(population * maxf(tech_share, 0.0))
+
+
+func tech_trend() -> String:
+	# Rising, falling or steady (for the City panel).
+	var target := _tech_target()
+	if target > maxf(tech_share, 0.0) + 0.005:
+		return "rising"
+	if target < tech_share - 0.005:
+		return "falling"
+	return "steady"
+
+
+func students() -> int:
+	var n := 0
+	var each: int = Settings.BUILDINGS["university"].get("students", 0)
+	for i in w * h:
+		if tiles[i] == Tile.UNIVERSITY and building_working(i):
+			n += each
+	return n
+
+
+func research_boost() -> float:
+	# How much keener big companies are thanks to research parks: 1 to 1 + RESEARCH_MAX.
+	var r := 0.0
+	var each: float = Settings.BUILDINGS["research_park"].get("research", 0.0)
+	for i in w * h:
+		if tiles[i] == Tile.RESEARCH_PARK and building_working(i):
+			r += each
+	return 1.0 + minf(r, Settings.RESEARCH_MAX)
+
+
 # ------------------------------------------------------------------- Letters
 # Companies write to the mayor (the tech layer). Each month there's a chance of
 # a letter, from how keen investors are and what the town offers; letters
@@ -993,7 +1096,8 @@ func startup_chance() -> float:
 	if population < Settings.STARTUP_POP or _free_startup_plot() < 0:
 		return 0.0
 	var size := clampf(float(population) / 2000.0, 0.75, 1.5)
-	return Settings.STARTUP_CHANCE * (0.5 + investor_appetite) * (0.6 + 0.4 * tech_pull()) * size
+	return Settings.STARTUP_CHANCE * (0.5 + investor_appetite) * (0.6 + 0.4 * tech_pull()) * size \
+		* (1.0 + 2.0 * maxf(tech_share, 0.0))
 
 
 func _free_startup_plot() -> int:
@@ -1371,7 +1475,11 @@ func project_chance(kind: String) -> float:
 	var tax_ok := 1.0 if tech_tax_rate <= tax_rate - 0.03 + 0.001 else 0.6
 	var road_ok := 0.5 if bool(p.get("wants_motorway", false)) and not has_motorway() else 1.0
 	var school_ok := 0.3 if p.has("wants_schools") and schooled_share() < float(p["wants_schools"]) else 1.0
-	return float(p["chance"]) * (0.5 + investor_appetite) * power_ok * tax_ok * road_ok * school_ok
+	var need := int(p.get("tech_workers", 0))
+	var tech_ok := 1.0
+	if need > 0:
+		tech_ok = (1.0 if tech_workers() >= need else 0.25) * research_boost()
+	return float(p["chance"]) * (0.5 + investor_appetite) * power_ok * tax_ok * road_ok * school_ok * tech_ok
 
 
 func has_motorway() -> bool:
@@ -1504,6 +1612,9 @@ func interest_lines() -> Array[String]:
 				wants.append("a Tech zone tax at least 3% below the town's")
 			if bool(p.get("wants_motorway", false)) and not has_motorway():
 				wants.append("a motorway for its lorries")
+			if tech_workers() < int(p.get("tech_workers", 0)):
+				wants.append("more tech workers (you have %s, they want %s)" % [Companies._pounds(tech_workers()).trim_prefix("£"),
+					Companies._pounds(int(p["tech_workers"])).trim_prefix("£")])
 			if p.has("wants_schools") and schooled_share() < float(p["wants_schools"]):
 				wants.append("schools near more homes (%d%% of residents at least)" % roundi(float(p["wants_schools"]) * 100.0))
 			out.append("%s: interested%s" % [who, "" if wants.is_empty() else ", but would like " + " and ".join(wants)])
@@ -1682,6 +1793,7 @@ static func _pounds(amount: int) -> String:
 
 func recount() -> void:
 	_index_deals()
+	_update_area_groups()
 	population = 0
 	shop_jobs = 0
 	industry_jobs = 0
@@ -1754,6 +1866,8 @@ func recount() -> void:
 			price_total += home_price(i) * units(i)
 			homes += units(i)
 	average_home_price = roundi(price_total / homes) if homes > 0 else 0
+	if tech_share < 0.0:
+		tech_share = _tech_target()       # (a new or older city: start where the town already is)
 
 
 func is_zone(t: int) -> bool:
@@ -1843,7 +1957,27 @@ func can_build_here(t: int, i: int) -> String:
 		return "The town already has a %s." % String(d["name"]).to_lower()
 	if bool(d.get("near_sea", false)) and not _beside_sea(i):
 		return "A %s has to be built right by the sea." % String(d["name"]).to_lower()
+	if d.has("near"):
+		var key: String = d["near"]
+		var near_t := -1
+		for bt: int in BUILDING_KEYS:
+			if String(BUILDING_KEYS[bt]) == key:
+				near_t = bt
+		if not _within(i, near_t, Settings.NEAR_TILES):
+			return "A %s has to be next to a %s (within %d tiles)." % [String(d["name"]).to_lower(),
+				String(Settings.BUILDINGS[key]["name"]).to_lower(), Settings.NEAR_TILES]
 	return ""
+
+
+func _within(i: int, t: int, r: int) -> bool:
+	# A tile of kind t within r tiles of i.
+	var cx := i % w
+	var cy := i / w
+	for y in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+		for x in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+			if tiles[y * w + x] == t:
+				return true
+	return false
 
 
 func _beside_sea(i: int) -> bool:
@@ -1864,6 +1998,9 @@ func building_working(i: int) -> bool:
 		return true
 	if t == Tile.AIRPORT:
 		return airport_problem(i) == ""
+	if t == Tile.UNIVERSITY or t == Tile.RESEARCH_PARK:
+		_update_power()
+		return _group_ok.size() == w * h and _group_ok[i] == 1 and powered[i] == 1
 	if is_project_tile(t):
 		return _deal_at.has(i) and deal_working(int(_deal_at[i]))
 	if not near_road(i):
@@ -1883,6 +2020,13 @@ func building_status(i: int) -> String:
 	if t == Tile.AIRPORT:
 		var why := airport_problem(i)
 		return "open, flights coming and going" if why == "" else "not open, " + why
+	if t == Tile.UNIVERSITY or t == Tile.RESEARCH_PARK:
+		if _group_ok.size() != w * h or _group_ok[i] == 0:
+			return "not working, no road beside any of its tiles"
+		_update_power()
+		if powered[i] == 0:
+			return "not working, no power"
+		return "teaching" if t == Tile.UNIVERSITY else "busy with research"
 	if is_project_tile(t):
 		if not _deal_at.has(i):
 			return "empty: no company runs it"
@@ -3109,7 +3253,7 @@ func _update_demand() -> void:
 	# Homes: people from the region who'd like to move here (more for a bigger,
 	# happier town), plus people coming for spare jobs (or put off by unemployment).
 	var homes := (Settings.TOWN_PULL + population * Settings.REGION_GROWTH) * a \
-		+ spare_jobs * Settings.JOB_PULL
+		+ spare_jobs * Settings.JOB_PULL + students() * Settings.STUDENT_HOMES
 	# Shops follow residents; offices and industry employ the workers they don't.
 	# (Visitors' shopping is extra: it adds jobs for more residents to come for,
 	# and takes nothing from offices or industry.)
@@ -3790,6 +3934,7 @@ func to_save() -> Dictionary:
 		"month": month,
 		"tax_rate": tax_rate,
 		"tech_tax_rate": tech_tax_rate,
+		"tech_share": tech_share,
 		"letters": letters.duplicate(true),
 		"startups": startups.duplicate(true),
 		"deals": deals.duplicate(true),
@@ -3875,6 +4020,7 @@ func from_save(data: Dictionary) -> void:
 	tax_rate = float(data.get("tax_rate", Settings.DEFAULT_TAX_RATE))
 	tech_tax_rate = clampf(float(data.get("tech_tax_rate", tax_rate)), 0.0, Settings.MAX_TAX_RATE)   # (older saves: the town's rate)
 	last_tech_relief = 0
+	tech_share = float(data.get("tech_share", -1.0))   # (older saves: worked out afresh)
 	_load_letters(data)
 	var saved_funding: Array = data.get("funding", [])
 	for s in 4:

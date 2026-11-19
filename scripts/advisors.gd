@@ -18,6 +18,7 @@ extends RefCounted
 const Settings = preload("res://scripts/settings.gd")
 const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world3d.gd")
+const Companies = preload("res://scripts/companies.gd")
 
 const URGENT := 3                 # stopping the town growing, or about to go wrong
 const WARNING := 2                # holding things back
@@ -327,6 +328,20 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 				_add(out, "deal_down", WARNING, "%s's %s isn't running: %s" % [company, sim.project_word(sim.deal_kind(deal)), problem],
 					"It pays nothing and brings no jobs until it has a road, its power and its water. "
 					+ "It uses as much as a small town.", view)
+
+	# --- Tech workers: big companies would come, but want more of them ---
+	if sim.has_tech_zone():
+		for kind: String in Settings.PROJECTS:
+			var p: Dictionary = Settings.PROJECTS[kind]
+			var need: int = p.get("tech_workers", 0)
+			if need > 0 and sim.population >= int(p["pop"]) and sim.tech_workers() < need:
+				_add(out, "tech_workers", ADVICE,
+					"%s wants more tech workers: build a college or university" % Companies.project_who(kind),
+					"You have %d tech workers; they want %d before they're keen to come. Schools near homes, a college "
+					% [sim.tech_workers(), need] + "and a university (Education, in the Build menu) turn residents into "
+					+ "tech workers over a few years; a research park beside the university makes companies keener still.",
+					NO_OVERLAY)
+				break
 
 	# --- Tech zone: a tax break that does nothing, or one residents resent ---
 	if sim.has_tech_zone():

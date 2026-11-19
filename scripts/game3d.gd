@@ -29,9 +29,10 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
+	COLLEGE, UNIVERSITY, RESEARCH_PARK }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
-	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
+	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION }   # DEAL: placing a company's data centre (not in the Build menu)
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -50,6 +51,7 @@ const TOOL_NAMES := {
 	Tool.OFFICES: "Offices",
 	Tool.LANDMARK: "Landmarks",
 	Tool.DEAL: "Data centre",
+	Tool.EDUCATION: "Education",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
@@ -71,6 +73,7 @@ const GROUPS := {
 	Tool.SERVICE: [Tile.POLICE_OFFICE, Tile.POLICE, Tile.FIRE_SMALL, Tile.FIRE, Tile.SCHOOL, Tile.CLINIC, Tile.HOSPITAL],
 	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
 	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR, Tile.AIRPORT],
+	Tool.EDUCATION: [Tile.COLLEGE, Tile.UNIVERSITY, Tile.RESEARCH_PARK],
 	Tool.LANDMARK: [Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE,
 		Tile.EIFFEL, Tile.EMPIRE_STATE],
 }
@@ -100,6 +103,7 @@ const TOOL_COLOURS := {
 	Tool.OFFICES: Color(0.10, 0.72, 0.68),
 	Tool.LANDMARK: Color(0.95, 0.78, 0.30),
 	Tool.DEAL: Color(0.16, 0.76, 0.78),
+	Tool.EDUCATION: Color(0.55, 0.45, 0.90),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -1126,7 +1130,7 @@ func _set_item(index: int, announce: bool = true) -> void:
 # Categories down the side of the Build menu: [id, name].
 const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"], ["power", "Power"],
 	["utilities", "Utilities"], ["services", "Services"], ["leisure", "Leisure"],
-	["transport", "Transport"], ["landmarks", "Landmarks"], ["districts", "Districts"]]
+	["transport", "Transport"], ["education", "Education"], ["landmarks", "Landmarks"], ["districts", "Districts"]]
 # One-line descriptions for the menu (the hover tooltip has the full story).
 const SHORT := {
 	"homes_0": "Villas and terraces", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
@@ -1150,7 +1154,8 @@ const SHORT := {
 	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade",
 	"big_ben": "The great clock tower", "colosseum": "The ancient amphitheatre", "great_pyramid": "A wonder of the ancient world",
 	"liberty": "Torch held high, by the sea", "taj_mahal": "White marble domes", "opera_house": "White sails by the water",
-	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "cbd": "Skyscrapers allowed", "tech_zone": "Its own tax rate, to draw firms", "conservation": "Keeps the old town low",
+	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
+	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Its own tax rate, to draw firms", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
 
@@ -1170,7 +1175,7 @@ func _menu_entries() -> Array:
 	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
 	out.append(["bulldoze", "roads", Tool.BULLDOZE, -1, -1, Tile.EMPTY])
 	var group_cats := {Tool.POWER: "power", Tool.UTILITY: "utilities", Tool.SERVICE: "services",
-		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport", Tool.LANDMARK: "landmarks"}
+		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport", Tool.LANDMARK: "landmarks", Tool.EDUCATION: "education"}
 	for tool_id: int in group_cats:
 		if tool_id == Tool.LEISURE:
 			out.append(["park", "leisure", Tool.PARK, -1, -1, Tile.PARK])
@@ -1702,6 +1707,13 @@ func _tile_text(i: int) -> String:
 		var text := "%s: %s\n%s" % [sim.building_name(t), sim.building_status(i), about]
 		if Simulation.RUBBISH_ORDER.has(t) and sim.building_working(i):
 			text += "\n" + _rubbish_text(i)
+		if t == Tile.COLLEGE or t == Tile.UNIVERSITY or t == Tile.RESEARCH_PARK:
+			text += "\nTech workers: %s (%d%% of residents), %s" % [Hud.thousands(sim.tech_workers()),
+				roundi(maxf(sim.tech_share, 0.0) * 100.0), sim.tech_trend()]
+			if t == Tile.UNIVERSITY:
+				text += " · %s students need homes" % Hud.thousands(sim.students())
+			elif t == Tile.RESEARCH_PARK:
+				text += " · big companies %d%% keener" % roundi((sim.research_boost() - 1.0) * 100.0)
 		return text
 	if t == Tile.PARK:
 		return "Park (trees and open space; costs £%d a month to look after)" % roundi(Settings.PARK_UPKEEP * sim.upkeep_scale())

@@ -139,6 +139,7 @@ func _run() -> void:
 	await _campus()
 	await _launch_site()
 	await _ai_data_centre()
+	await _education()
 	await _examples()
 	await _new_buildings()
 	_check_players_save(players, players_time)
@@ -948,10 +949,11 @@ func _campus() -> void:
 		if l.begins_with("Google's campus"):
 			line = l
 	check(sim.population >= 6000 and line.contains("schools near more homes"), "campus: %d people: %s" % [sim.population, line])
+	var no_schools: float = sim.project_chance("campus")
 	for at: Vector2i in [Vector2i(5, 3), Vector2i(13, 3), Vector2i(21, 3), Vector2i(5, 5), Vector2i(13, 5), Vector2i(21, 5)]:
 		_place("school", o + at)
 	sim.recount()
-	check(sim.schooled_share() >= 0.6 and sim.project_chance("campus") > 0.03,
+	check(sim.schooled_share() >= 0.6 and sim.project_chance("campus") > no_schools * 3.0,
 		"campus: with schools near %d%% of homes, Google is keener" % roundi(sim.schooled_share() * 100.0))
 	var tries := 0
 	while not sim.call("_has_letter", "campus") and tries < 600:
@@ -1342,6 +1344,99 @@ func _ai_data_centre() -> void:
 		"AI data centre: three no's and OpenAI leaves; its empty halls stay (%s)" % last)
 	sim.letters.clear()
 	game.call("_refresh_hud")
+
+
+func _education() -> void:
+	# Education and tech workers (tech layer step 3, Nov 2026): a college, a
+	# university dragged out as a campus and a research park beside it, from the
+	# Build menu's Education category; tech workers rise over the years; big
+	# companies are a quarter as keen without enough of them, keener with research.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(30, 16)
+	check(o.x >= 0, "education: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 3000000
+	for row: int in [0, 4, 8]:
+		_place("road", o + Vector2i(0, row), o + Vector2i(29, row))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(25, 3))
+	_place("homes_1", o + Vector2i(0, 5), o + Vector2i(25, 7))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(26, 1 + n))
+		_place("water_pump", o + Vector2i(26, 5 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(25, 7))
+	sim.population = 9000
+	_place("nuclear", o + Vector2i(28, 1))
+	_place("nuclear", o + Vector2i(28, 5))
+	sim.recount()
+	var before: float = sim.call("_tech_target")
+	game.call("_refresh_hud")
+	var row_label: Label = hud.get("tech_label")
+	check(row_label.text.begins_with("Tech workers:"), "education: the City panel shows tech workers (%s)" % row_label.text)
+
+	# The college: from the Build menu, clicked beside the road.
+	await _pick_item("education", "college")
+	check(_tool() == 16, "education: Education > College picks the Education tool")
+	await _look_at(o + Vector2i(8, 11), PLAY_DISTANCE * 1.3, -40.0, 50.0, [o + Vector2i(0, 8), o + Vector2i(16, 8), o + Vector2i(16, 14)])
+	await _click_at(_screen_of(o + Vector2i(1, 9)))
+	check(sim.tiles[(o.y + 9) * sim.w + o.x + 1] == T.COLLEGE, "education: clicking places a college")
+	# A university: drag out a 4 x 3 campus (inner tiles work through the group's road).
+	await _pick_item("education", "university")
+	await _drag(_screen_of(o + Vector2i(4, 9)), _screen_of(o + Vector2i(7, 11)))
+	var uni := _count(T.UNIVERSITY, o + Vector2i(4, 9), o + Vector2i(7, 11))
+	sim.recount()
+	var inner := (o.y + 11) * sim.w + o.x + 5
+	check(uni == 12 and sim.building_working(inner) and sim.students() == 12 * 150,
+		"education: a 4 x 3 university, all working (%d students need homes)" % sim.students())
+	# A research park: not away from the university; beside it, yes.
+	await _pick_item("education", "research_park")
+	var far := (o.y + 13) * sim.w + o.x + 15
+	var why: String = sim.can_build_here(T.RESEARCH_PARK, far)
+	check(why.contains("next to a university"), "education: a research park away from the university is refused (%s)" % why)
+	await _drag(_screen_of(o + Vector2i(8, 9)), _screen_of(o + Vector2i(9, 10)))
+	sim.recount()
+	check(_count(T.RESEARCH_PARK, o + Vector2i(8, 9), o + Vector2i(9, 10)) == 4 and sim.research_boost() > 1.2,
+		"education: a research park beside it: big companies %d%% keener" % roundi((sim.research_boost() - 1.0) * 100.0))
+	var after: float = sim.call("_tech_target")
+	check(after > before + 0.1, "education: the tech workers' target rises from %d%% to %d%%" % [roundi(before * 100.0), roundi(after * 100.0)])
+	var share0: float = sim.tech_share
+	for m: int in 24:
+		sim.tick()
+	check(sim.tech_share > share0 + 0.05 and sim.tech_trend() == "rising" or sim.tech_share > share0 + 0.1,
+		"education: two years on, tech workers are %s (%d%%, from %d%%)" % [Hud.thousands(sim.tech_workers()),
+		roundi(sim.tech_share * 100.0), roundi(share0 * 100.0)])
+	# Big companies: a quarter as keen without their tech workers.
+	_place("tech_zone", o + Vector2i(14, 9), o + Vector2i(29, 15))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	var keep: float = sim.tech_share
+	sim.tech_share = 0.0
+	var low: float = sim.project_chance("campus")
+	var line := ""
+	for l: String in sim.interest_lines():
+		if l.begins_with("Google's campus"):
+			line = l
+	sim.tech_share = 0.4
+	var high: float = sim.project_chance("campus")
+	sim.tech_share = keep
+	check(high > low * 3.5 and line.contains("more tech workers"),
+		"education: Google is 4x keener with its tech workers (%s)" % line)
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(is_equal_approx(sim.tech_share, keep), "education: tech workers saved and loaded")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_refresh_hud")
+	await _pick_item("education", "university")
+	await _look_at(o + Vector2i(5, 10), PLAY_DISTANCE * 0.8, -30.0, 36.0, [])
+	await _shot("p47_education")
 
 
 func _examples() -> void:

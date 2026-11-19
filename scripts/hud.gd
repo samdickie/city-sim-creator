@@ -158,6 +158,7 @@ var utility_label: Label                   # water
 var services_label: Label
 var rubbish_label: Label
 var traffic_label: Label
+var tech_label: Label                     # tech workers (City panel, Services)
 var growth_label: Label
 
 # Top centre: advisors.
@@ -664,6 +665,7 @@ func _build_city_panel() -> void:
 	services_label = _service_row(box, "services")
 	rubbish_label = _service_row(box, "bin")
 	traffic_label = _service_row(box, "traffic")
+	tech_label = _service_row(box, "school")
 
 	box.add_child(_divider())
 	box.add_child(_caption("Town"))
@@ -1280,6 +1282,7 @@ func _build_help() -> void:
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
 			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry pay their own tax rate (set it in the City panel; below the town's draws firms in), or a conservation area kept low-rise.",
 			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
+			"Education (Build menu): a college, then a university (drag out a campus) and a research park beside it. They turn residents into tech workers, which the big companies want before they'll come; a research park makes them keener. Students need homes, and universities are costly to run.",
 			"Data centres: Amazon, Microsoft or Google write once you have %s people and open land in a Tech zone. Pick a size, then drag out its site in the Tech zone. They pay well and bring a little work, but use power and water like a small town; on a stretched grid everyone's bills go up." % "1,500",
 			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
@@ -1875,6 +1878,11 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 	_set_row_colour(traffic_label, BAD if jams >= Settings.TRAFFIC_JAM_WARN else (
 		WARN if jams >= Settings.TRAFFIC_JAM_TIP else (GOOD if car_trips > 0 else TEXT_DIM)))
 
+	var techies: int = sim.tech_workers()
+	tech_label.text = "Tech workers: %s (%d%% of residents), %s" % [thousands(techies),
+		roundi(maxf(float(sim.tech_share), 0.0) * 100.0), sim.tech_trend()]
+	tech_label.tooltip_text = "Residents with tech skills. Big companies want them. Schools, a college and a university make them; tech jobs draw them in; a happy town keeps them"
+	_set_row_colour(tech_label, GOOD if sim.tech_trend() == "rising" else TEXT_DIM)
 	growth_label.text = "Last month: %d plots grew, %d shrank" % [sim.grew.size(), sim.shrank.size()]
 	if sim.abandoned_count > 0:
 		growth_label.text += "   ·   %d abandoned" % sim.abandoned_count

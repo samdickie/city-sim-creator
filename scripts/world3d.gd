@@ -68,7 +68,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
+	COLLEGE, UNIVERSITY, RESEARCH_PARK }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1288,6 +1289,10 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				# (Only the terminal needs the road: the hover text says what's missing.)
 				if sim.airport_role_at(i) == AIRPORT_TERMINAL and reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
+			elif t == Tile.UNIVERSITY or t == Tile.RESEARCH_PARK:
+				# (One road for the whole campus: only warn if it isn't working.)
+				if not sim.building_working(i):
+					warn.g = 1.0
 			elif sim.is_project_tile(t):
 				# (One road for the whole site, and nothing to warn about while it's being
 				# built: the hover text says what's missing.)
@@ -1616,6 +1621,11 @@ func _plan_lots() -> void:
 					kind = LOT_YARD
 				Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE:
 					kind = LOT_YARD
+				Tile.COLLEGE:
+					kind = LOT_CIVIC
+				Tile.UNIVERSITY, Tile.RESEARCH_PARK:
+					kind = LOT_PARK
+					detail = PARK_LAWN
 				Tile.TECH_CAMPUS:
 					# Landscaped lawns once it's open; bare concrete while it's being built.
 					var dk: int = sim._deal_at.get(i, -1)
@@ -1625,7 +1635,8 @@ func _plan_lots() -> void:
 		_lot_detail[i] = detail
 	# Parks: each tile picks a layout, knowing which of its sides join more park.
 	for i in tiles.size():
-		if _lot_kind[i] == LOT_PARK and tiles[i] != Tile.TECH_CAMPUS:   # (a campus is all lawn)
+		if _lot_kind[i] == LOT_PARK and tiles[i] != Tile.TECH_CAMPUS and tiles[i] != Tile.UNIVERSITY \
+				and tiles[i] != Tile.RESEARCH_PARK:   # (campuses are all lawn)
 			_lot_detail[i] = _park_layout(i)
 
 
@@ -5012,6 +5023,46 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_prop(i, front, -16.0 + (k % 3) * 16.0, 9.0 + (k / 3) * 20.0, 10.0, 7.0, 2.6, DC_CHILLER, 13.0)
 			for k in 3:
 				_prop(i, front, -20.0 + k * 6.0, -1.5, 4.5, 2.4, 2.6, Color(0.30, 0.34, 0.38))   # generators
+		Tile.COLLEGE:
+			# A sandstone college with a newer glass wing, steps and trees.
+			var old_block := _place(i, front, -9.0, 4.0, 26.0, 14.0)
+			_add_block(old_block, 26.0, 14.0, 12.0, HONEY_STONE, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
+			var wing := _place(i, front, 14.0, 6.0, 16.0, 18.0)
+			_add_block(wing, 16.0, 18.0, 10.0, Color(0.55, 0.66, 0.74), STYLE_GLASS, 0.0, MODERN_WHITE, wall_list, roof_list)
+			for k in 3:
+				var at := _place(i, front, -20.0 + k * 13.0, depth - 4.0, 1.0, 1.0)
+				var pos: Vector3 = at["pos"]
+				_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(8.0, 12.0), TreeKind.BROADLEAF])
+		Tile.UNIVERSITY:
+			# Old colleges round quads: on every other tile a sandstone range of three
+			# sides round a lawn (a tower on some), the tiles between left as lawns with trees.
+			var tx := i % map_w
+			var ty := i / map_w
+			if (tx + ty) % 2 == 0:
+				var stone := HONEY_STONE if (tx / 2 + ty) % 2 == 0 else RED_SANDSTONE
+				var range_front := _place(i, front, 0.0, 3.0, 40.0, 10.0)
+				_add_block(range_front, 40.0, 10.0, 13.0, stone, STYLE_CLASSICAL, 5.0, SLATE, wall_list, roof_list)
+				for side: float in [-15.0, 15.0]:
+					var wing := _place(i, front, side, 13.0, 10.0, 24.0)
+					_add_block(wing, 10.0, 24.0, 11.0, stone, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
+				if (tx * 7 + ty * 3) % 5 == 0:
+					var tower := _place(i, front, 0.0, 2.0, 7.0, 7.0)
+					_add_block(tower, 7.0, 7.0, 30.0, stone, STYLE_CLASSICAL, 6.0, SLATE, wall_list, roof_list)
+			else:
+				for k in 4:
+					var at := _place(i, front, -15.0 + (k % 2) * 30.0, 10.0 + (k / 2) * 22.0, 1.0, 1.0)
+					var pos: Vector3 = at["pos"]
+					_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(9.0, 14.0), TreeKind.BROADLEAF])
+		Tile.RESEARCH_PARK:
+			# A low glass lab with a white frame and plant on the roof, on a lawn with trees.
+			var lab := _place(i, front, -4.0, 6.0, 30.0, 22.0)
+			_add_block(lab, 30.0, 22.0, 9.0, Color(0.62, 0.72, 0.78), STYLE_MODERN, 0.0, MODERN_WHITE, wall_list, roof_list)
+			for k in 3:
+				_prop(i, front, -12.0 + k * 9.0, 12.0, 5.0, 4.0, 2.2, Color(0.80, 0.82, 0.84), 9.1)
+			for k in 2:
+				var at := _place(i, front, 16.0, 8.0 + k * 16.0, 1.0, 1.0)
+				var pos: Vector3 = at["pos"]
+				_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(7.0, 11.0), TreeKind.BIRCH])
 		Tile.AIRPORT:
 			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
 		Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE, \

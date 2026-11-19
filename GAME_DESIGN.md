@@ -442,6 +442,15 @@ Data centre scales, as an example:
 - It feeds itself: tech jobs bring in tech workers, who bring more companies.
 - Say yes to a big company without enough tech workers and it brings its own staff: more housing demand, higher prices, more people priced out.
 
+### Education and tech workers — built (Nov 2026), not yet played by Sam
+- A new **Education** category in the Build menu (after Transport):
+  - **College** (£6,000, £150 a month, from 1,500 people, one plot): +3% of residents become tech workers (colleges together at most +9%). Drawn as a sandstone college with a glass wing.
+  - **University** (£400 a tile, £40 a tile a month, from 5,000 people): dragged out as a campus; works as one site (a road beside any tile, and power). Each tile +1.2% tech workers (at most +24%, 20 tiles' worth) and **150 students** who want homes (0.5 a student). Land value +0.06. Drawn as old colleges round quads (honey or red sandstone, some with a tower) on lawns with paths and trees.
+  - **Research park** (£300 a tile, £20 a tile a month, from 5,000 people): only within 3 tiles of a university. Each tile makes big companies 6% keener (at most twice as keen). Drawn as low glass labs on lawns.
+- **Tech workers**: a share of residents. Its target: schools (5% when every home has one nearby) + colleges + university + tech jobs drawing people in (half a tech worker per job at company projects and Tech zone offices and industry), times how happy the town is (0.6 + 0.4 x happiness), at most 50%. Each month it moves 8% of the way there, so graduates take a few years to come through. City panel (Services): "Tech workers: 589 (9% of residents), rising". Saved; older cities start where they already are.
+- **Big companies want them** (`tech_workers` in `Settings.PROJECTS`): the Gigafactory 400, the launch site 600, OpenAI 1,000, Google's campus 1,500 (data centres none). Without enough they're a quarter as keen; Who's interested says "would like more tech workers (you have 589, they want 1,500)", and an advisor suggests a college or university. Start-ups write more often in a town with more tech workers (up to twice as often at 50%).
+- Not done: big companies bringing their own staff (more housing pressure) when you say yes without enough tech workers.
+
 ### New town problems
 - **Cost of living**: a happiness complaint when home prices rise faster than wages; this is where gentrification shows.
 - **Bills**: electricity bills rise when big users stretch the grid.
@@ -460,7 +469,7 @@ Data centre scales, as an example:
 ### Build order (one at a time, played before the next)
 1. **Tech zone** with its own tax rate. *Built Nov 2026, not yet played.*
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
-3. **College, university, research park** and tech workers.
+3. **College, university, research park** and tech workers. *Built Nov 2026, not yet played.*
 4. **Generated map** (no Troon); rebuild the examples.
 5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Built Nov 2026: company projects, Tesla's Gigafactory, Google's campus, SpaceX's launch site and OpenAI's AI data centre. Still to do: Elon threatening to leave if the Tech zone tax goes up; Apple, Meta and Nvidia.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.

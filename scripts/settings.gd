@@ -274,6 +274,19 @@ const AI_TAX_STEP := 0.15
 const AI_POWER_MAX := 3.0
 const AI_REFUSALS := 3
 const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect round about, however big it is
+# --- Tech workers: residents with tech skills (simulation.gd, Tech workers) ---
+# Each month the share moves TECH_SETTLE of the way to its target: schools (x the
+# share of residents with one nearby), colleges and university tiles (capped),
+# plus tech jobs drawing people in; kept by a happy town (0.6 + 0.4 x happiness).
+const TECH_SCHOOLS := 0.05          # share from schools, when every home has one nearby
+const TECH_COLLEGES_MAX := 0.09     # colleges together (three's worth)
+const TECH_UNIVERSITY_MAX := 0.24   # university tiles together (20 tiles' worth)
+const TECH_JOB_PULL := 0.5          # each tech job (company projects, Tech zone offices) draws this many tech workers
+const TECH_SHARE_MAX := 0.5
+const TECH_SETTLE := 0.08           # a month (graduates take years to come through)
+const RESEARCH_MAX := 1.0           # research parks make big companies at most this much keener (+100%)
+const STUDENT_HOMES := 0.5          # homes wanted per student
+const NEAR_TILES := 3
 # Company projects: what each kind of company asks to build in your Tech zone.
 #   name           in sentences ("Amazon data centre (small)")
 #   pop, chance    they write from this many people, at best this chance a month
@@ -283,18 +296,19 @@ const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect roun
 #   build_months   [shortest, longest] from placing it to opening
 #   wants_schools  (if set) much less keen until this share of residents has a school nearby
 #   near_sea       (if set) the site has to touch the coast
+#   tech_workers   a quarter as keen until the town has this many tech workers
 # Who writes and what they say: companies.gd. The tile each is: simulation.gd PROJECT_TILES.
 const PROJECTS := {
 	"data_centre": {"name": "data centre", "pop": DC_POP, "chance": DC_CHANCE, "scales": DC_SCALES,
-		"build_months": [0, 0], "wants_motorway": false},
+		"build_months": [0, 0], "wants_motorway": false, "tech_workers": 0},
 	"gigafactory": {"name": "Gigafactory", "pop": 4000, "chance": 0.05, "scales": GIGA_SCALES,
-		"build_months": [12, 36], "wants_motorway": true},
+		"build_months": [12, 36], "wants_motorway": true, "tech_workers": 400},
 	"campus": {"name": "campus", "pop": 6000, "chance": 0.05, "scales": CAMPUS_SCALES,
-		"build_months": [9, 9], "wants_motorway": false, "wants_schools": 0.6},
+		"build_months": [9, 9], "wants_motorway": false, "wants_schools": 0.6, "tech_workers": 1500},
 	"launch_site": {"name": "launch site", "pop": 5000, "chance": 0.04, "scales": LAUNCH_SCALES,
-		"build_months": [18, 48], "wants_motorway": false, "near_sea": true},
+		"build_months": [18, 48], "wants_motorway": false, "near_sea": true, "tech_workers": 600},
 	"ai_data_centre": {"name": "AI data centre", "pop": 10000, "chance": 0.03, "scales": AI_SCALES,
-		"build_months": [12, 18], "wants_motorway": false},
+		"build_months": [12, 18], "wants_motorway": false, "tech_workers": 1000},
 }
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
@@ -400,6 +414,19 @@ const BUILDINGS := {
 		"about": "SpaceX's rockets: tourists come to watch, but it's loud and nobody may live close by"},
 	"ai_data_centre": {"name": "AI data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.04, "radius": 4,
 		"about": "OpenAI's AI data centre: power like a city, a few hundred jobs, and it always wants more"},
+	# Education (the tech layer): they turn residents into tech workers (see Tech workers).
+	#   tech       share of residents it makes tech workers (a university: per tile)
+	#   students   residents' worth of students per tile (they need homes)
+	#   research   how much keener big companies are, per tile (a research park)
+	#   near       must be built within NEAR_TILES of this building
+	"college": {"name": "College", "cost": 6000, "upkeep": 150, "uses_power": 3, "unlock": 1500, "value": 0.04,
+		"radius": 5, "tech": 0.03, "about": "Coding and engineering courses: more residents become tech workers"},
+	"university": {"name": "University", "cost": 400, "upkeep": 40, "uses_power": 2, "area": true, "unlock": 5000,
+		"value": 0.06, "radius": 5, "tech": 0.012, "students": 150,
+		"about": "Drag out a campus of colleges and quads: graduates for tech firms, students who need homes, and land value. Costly to run"},
+	"research_park": {"name": "Research park", "cost": 300, "upkeep": 20, "uses_power": 2, "area": true, "unlock": 5000,
+		"value": 0.04, "radius": 4, "research": 0.06, "near": "university",
+		"about": "Labs beside a university (within 3 tiles): big tech companies are keener to come"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }
