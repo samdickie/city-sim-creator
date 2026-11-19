@@ -13,7 +13,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY }
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -25,10 +25,11 @@ const BUILDING_KEYS := {
 	Tile.BIG_BEN: "big_ben", Tile.COLOSSEUM: "colosseum", Tile.GREAT_PYRAMID: "great_pyramid", Tile.LIBERTY: "liberty",
 	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
 	Tile.INCINERATOR: "incinerator", Tile.DATA_CENTRE: "data_centre", Tile.GIGAFACTORY: "gigafactory",
+	Tile.TECH_CAMPUS: "tech_campus",
 }
-const LAST_TILE := Tile.GIGAFACTORY   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.TECH_CAMPUS   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
-const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY}
+const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS}
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -41,6 +42,7 @@ const COMPLAINTS := {
 	"water": ["homes without water", "build a water pump or tower"],
 	"pollution": ["polluted air near homes", "keep homes away from industry and coal, or plant parks or woodland between"],
 	"bills": ["electricity bills up: big tech is straining the grid", "build more power, or turn down the next power-hungry project"],
+	"cost": ["homes priced out of reach: big tech salaries push prices up", "zone more homes (denser) near the campus, or turn down the next big employer"],
 	"fairness": ["firms in the Tech zone pay less tax than everyone else", "raise the Tech zone's tax in the City panel, or keep the zone small"],
 }
 # The parts businesses weigh too. The rest (jobs, housing, power and water at
@@ -131,6 +133,7 @@ var startups: Array[Dictionary] = []  # start-ups the town backed: {tile, name, 
 var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are on the town
 var letter_count := 0                 # letters ever sent (gives each its id)
 var deals: Array[Dictionary] = []     # data centres agreed: {id, company, scale, month, tiles, opened, break_left, priority}
+var _campus_rise := 0.0               # how much campus salaries push home prices up (campus_price_rise)
 var company_jobs := 0                 # jobs at working data centres (from outside, on top of the town's own)
 var _deal_at := {}                      # data centre tile -> index in deals (see _index_deals)
 var new_letters: Array[int] = []      # ids of letters that came last month
@@ -918,7 +921,7 @@ func _update_letters() -> void:
 			continue
 		var odds := project_chance(kind)
 		if odds > 0.0 and _rng.randf() < odds:
-			var letter := Companies.project_letter(kind, _rng, _deal_companies())
+			var letter := Companies.project_letter(kind, _rng, _deal_companies(kind))
 			if not letter.is_empty():
 				_send_letter(letter)
 
@@ -1205,12 +1208,15 @@ func place_deal(id: int, spots: Array[int]) -> void:
 	recount()
 
 
-func _deal_companies() -> Array:
+func _deal_companies(kind: String) -> Array:
+	# Companies already building (or writing about) this kind of project here.
 	var names := []
 	for deal: Dictionary in deals:
-		names.append(String(deal["company"]))
+		if deal_kind(deal) == kind:
+			names.append(String(deal["company"]))
 	for letter: Dictionary in letters:
-		names.append(String(letter.get("company", "")))
+		if String(letter.get("kind", "")) == kind:
+			names.append(String(letter.get("company", "")))
 	return names
 
 
@@ -1221,6 +1227,27 @@ func company_tax() -> int:
 		if int(deals[k].get("break_left", 0)) <= 0 and deal_working(k):
 			total += int(deal_scale(deals[k])["tax"])
 	return total
+
+
+func campus_jobs() -> int:
+	# Jobs at working campuses (well paid: they push house prices up).
+	var n := 0
+	for k: int in deals.size():
+		if deal_kind(deals[k]) == "campus" and deal_working(k):
+			n += int(deal_scale(deals[k])["jobs"])
+	return n
+
+
+func campus_price_rise() -> float:
+	# 0 to COST_MAX_RISE: how much campus salaries have pushed home prices up
+	# (worked out in recount, as every home's price reads it).
+	return _campus_rise
+
+
+func _measure_campus_rise() -> void:
+	var jobs_here := campus_jobs()
+	_campus_rise = 0.0 if population <= 0 or jobs_here <= 0 else \
+		clampf(float(jobs_here) / population * Settings.CAMPUS_PRICE_EFFECT, 0.0, Settings.COST_MAX_RISE)
 
 
 func company_power() -> int:
@@ -1264,7 +1291,8 @@ func project_chance(kind: String) -> float:
 	var power_ok := 1.0 if spare >= int(small["power"]) else 0.4
 	var tax_ok := 1.0 if tech_tax_rate <= tax_rate - 0.03 + 0.001 else 0.6
 	var road_ok := 0.5 if bool(p.get("wants_motorway", false)) and not has_motorway() else 1.0
-	return float(p["chance"]) * (0.5 + investor_appetite) * power_ok * tax_ok * road_ok
+	var school_ok := 0.3 if p.has("wants_schools") and schooled_share() < float(p["wants_schools"]) else 1.0
+	return float(p["chance"]) * (0.5 + investor_appetite) * power_ok * tax_ok * road_ok * school_ok
 
 
 func has_motorway() -> bool:
@@ -1365,6 +1393,8 @@ func interest_lines() -> Array[String]:
 				wants.append("a Tech zone tax at least 3% below the town's")
 			if bool(p.get("wants_motorway", false)) and not has_motorway():
 				wants.append("a motorway for its lorries")
+			if p.has("wants_schools") and schooled_share() < float(p["wants_schools"]):
+				wants.append("schools near more homes (%d%% of residents at least)" % roundi(float(p["wants_schools"]) * 100.0))
 			out.append("%s: interested%s" % [who, "" if wants.is_empty() else ", but would like " + " and ".join(wants)])
 	return out
 
@@ -1591,6 +1621,7 @@ func recount() -> void:
 	for k: int in deals.size():
 		if deal_working(k):
 			company_jobs += int(deal_scale(deals[k])["jobs"])
+	_measure_campus_rise()
 	var open_before := airports_open
 	_update_airports()
 	if airports_open != open_before:
@@ -1743,9 +1774,12 @@ func building_status(i: int) -> String:
 		if deal_building(k):
 			if deal_kind(deals[k]) == "gigafactory":
 				return "being built: Elon says six more months"   # (it always is)
-			return "being built, opens in %d months" % (int(deals[k]["opens"]) - month)
+			var left := int(deals[k]["opens"]) - month
+			return "being built, opens in %d %s%s" % [left, "month" if left == 1 else "months",
+				" (exactly, says Google)" if deal_kind(deals[k]) == "campus" else ""]
 		var problem := deal_problem(k)
-		var busy := "running, servers humming" if t == Tile.DATA_CENTRE else "running day and night"
+		var busy := "running, servers humming" if t == Tile.DATA_CENTRE else (
+			"open, busy with well-paid staff" if t == Tile.TECH_CAMPUS else "running day and night")
 		return busy if problem == "" else "not running, " + problem
 	if not near_road(i):
 		return "not working, " + _no_road_text(i)
@@ -2073,7 +2107,7 @@ func home_price(i: int) -> int:
 	# What a home on this plot would sell for: land value times the housing shortage.
 	_update_land_value()
 	var price: float = Settings.BASE_HOME_PRICE * (0.5 + land_value[i]) \
-		* (1.0 + Settings.SHORTAGE_PRICE_EFFECT * shortage[Tile.HOMES])
+		* (1.0 + Settings.SHORTAGE_PRICE_EFFECT * shortage[Tile.HOMES]) * (1.0 + campus_price_rise())
 	return roundi(price / 1000.0) * 1000
 
 
@@ -2830,6 +2864,8 @@ func _measure_happiness() -> void:
 	parts["pollution"] = -pollution_feeling()
 	# Bills: data centres on a stretched grid push everyone's electricity bills up.
 	parts["bills"] = -bills_feeling()
+	# Cost of living: big tech salaries push house prices up for everyone.
+	parts["cost"] = -campus_price_rise() / Settings.COST_MAX_RISE * Settings.COST_EFFECT
 	# Fairness: residents resent a Tech zone paying far less tax than they do.
 	parts["fairness"] = -tech_unfairness() * Settings.TECH_FAIRNESS_EFFECT
 	happiness_parts = parts

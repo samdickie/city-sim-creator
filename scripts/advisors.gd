@@ -354,7 +354,8 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 		if not (tax_tip and key in ["taxes", "services"]):
 			var views := {"taxes": services_kind, "services": services_kind, "power": power_kind,
 				"water": water_kind, "pollution": WorldView.Overlay.POLLUTION,
-				"fairness": WorldView.Overlay.DISTRICTS, "bills": power_kind}
+				"fairness": WorldView.Overlay.DISTRICTS, "bills": power_kind,
+				"cost": WorldView.Overlay.LAND_VALUE}
 			var view: int = views.get(key, NO_OVERLAY)
 			var leaving: bool = sim.happiness < 1.0 / 3.0
 			_add(out, "happiness", URGENT if leaving else WARNING,

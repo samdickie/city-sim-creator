@@ -68,7 +68,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1614,11 +1614,16 @@ func _plan_lots() -> void:
 						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE, \
 						Tile.GIGAFACTORY:
 					kind = LOT_YARD
+				Tile.TECH_CAMPUS:
+					# Landscaped lawns once it's open; bare concrete while it's being built.
+					var dk: int = sim._deal_at.get(i, -1)
+					kind = LOT_YARD if dk >= 0 and sim.deal_building(dk) else LOT_PARK
+					detail = PARK_LAWN
 		_lot_kind[i] = kind
 		_lot_detail[i] = detail
 	# Parks: each tile picks a layout, knowing which of its sides join more park.
 	for i in tiles.size():
-		if _lot_kind[i] == LOT_PARK:
+		if _lot_kind[i] == LOT_PARK and tiles[i] != Tile.TECH_CAMPUS:   # (a campus is all lawn)
 			_lot_detail[i] = _park_layout(i)
 
 
@@ -4592,6 +4597,9 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	if sim.deal_building(k):
 		_plan_site_works(site, wide, deep, margin, front_strip, hall_w, hall_d, wall_list, roof_list)
 		return true
+	if sim.deal_kind(deal) == "campus":
+		_plan_campus(site, wide, deep, int(deal["id"]), wall_list, roof_list)
+		return true
 	for n: int in halls:
 		var back := margin + front_strip + n * (each_d + gap)
 		var spot := _site_spot(site, 0.0, back, hall_w, each_d)
@@ -4677,6 +4685,49 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 		_site_box(site, side * (wide * 0.5 - 1.0), deep * 0.5, 0.15, deep - 2.0, 2.2, Color(0.30, 0.32, 0.30))
 	_site_box(site, 0.0, deep - 1.0, wide - 2.0, 0.15, 2.2, Color(0.30, 0.32, 0.30))
 	return true
+
+
+func _plan_campus(site: Dictionary, wide: float, deep: float, seed_id: int, wall_list: Array, roof_list: Array) -> void:
+	# A tech campus: low glass pavilions with green roofs in a grid of 55 m
+	# squares, the middle ones left as a lawn quad, trees between them and
+	# racks of bright bikes by the doors.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_id * 7919 + 3
+	var cols := maxi(int(wide / 55.0), 1)
+	var rows := maxi(int(deep / 55.0), 1)
+	var cell_w := wide / cols
+	var cell_d := deep / rows
+	var bikes := [Color(0.85, 0.22, 0.20), Color(0.95, 0.75, 0.15), Color(0.20, 0.62, 0.30), Color(0.20, 0.45, 0.85)]
+	for r: int in rows:
+		for c: int in cols:
+			var along := -wide * 0.5 + (c + 0.5) * cell_w
+			var back := (r + 0.5) * cell_d
+			var quad := cols >= 3 and rows >= 3 and c > 0 and c < cols - 1 and r > 0 and r < rows - 1
+			if quad:
+				# The lawn: trees round its edge.
+				for n: int in 4:
+					var corner := Vector2(-0.3 if n % 2 == 0 else 0.3, -0.3 if n < 2 else 0.3)
+					var spot := _site_spot(site, along + corner.x * cell_w, back + corner.y * cell_d, 1.0, 1.0)
+					var p: Vector3 = spot["pos"]
+					_extra_trees.append([Vector2(p.x, p.z), rng.randf_range(8.0, 13.0), TreeKind.BROADLEAF])
+				continue
+			var pw := minf(cell_w - 16.0, 34.0)
+			var pd := minf(cell_d - 22.0, 22.0)
+			var storeys := 3 if rng.randf() < 0.6 else 4
+			var h := storeys * 3.6
+			var spot := _site_spot(site, along, back - pd * 0.5, pw, pd)
+			var glass := Color(0.55, 0.66, 0.74) if rng.randf() < 0.5 else Color(0.70, 0.76, 0.80)
+			_add_block(spot, pw, pd, h, glass, STYLE_GLASS, 0.0, glass, wall_list, roof_list)
+			var top := float((spot["pos"] as Vector3).y) + h + 0.1
+			_site_box(site, along, back - pd * 0.5 + 1.0, pw - 2.0, pd - 2.0, 0.4, Color(0.34, 0.52, 0.24), top)   # green roof
+			# Trees in front and a rack of bikes by the door.
+			for n: int in 2:
+				var tree_at := _site_spot(site, along + (-0.5 + n) * (pw + 6.0), back + pd * 0.5 + 4.0, 1.0, 1.0)
+				var tp: Vector3 = tree_at["pos"]
+				_extra_trees.append([Vector2(tp.x, tp.z), rng.randf_range(7.0, 11.0),
+					TreeKind.ORNAMENTAL if n == 0 else TreeKind.BIRCH])
+			for n: int in 6:
+				_site_box(site, along - 6.0 + n * 2.2, back - pd * 0.5 - 3.0, 0.5, 1.7, 1.0, bikes[(n + r + c) % bikes.size()])
 
 
 func _plan_site_works(site: Dictionary, wide: float, deep: float, margin: float, front_strip: float,
@@ -4881,7 +4932,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
-		Tile.DATA_CENTRE, Tile.GIGAFACTORY:
+		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS:
 			# A company's project (data centre, Gigafactory) is drawn whole, from the first tile of its site
 			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
 			# (or a tile with no deal) falls back to a hall per tile.

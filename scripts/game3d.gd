@@ -28,7 +28,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -1740,6 +1740,8 @@ func _tile_text(i: int) -> String:
 		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
+		if sim.campus_price_rise() >= 0.01:
+			text += " (up %d%% with tech salaries)" % roundi(sim.campus_price_rise() * 100.0)
 	return text
 
 
@@ -1764,8 +1766,12 @@ func _project_text(i: int) -> String:
 		text += " · pays %s tax a month" % Hud.money_text(int(scale["tax"]))
 	if bool(deal.get("priority", false)):
 		text += "\nGets power before homes when the grid runs short"
-	text += "\nIt hums: lowers land value nearby" if sim.tiles[i] == Tile.DATA_CENTRE \
-		else "\nLorries and a little smoke: lowers land value nearby"
+	if sim.tiles[i] == Tile.DATA_CENTRE:
+		text += "\nIt hums: lowers land value nearby"
+	elif sim.tiles[i] == Tile.TECH_CAMPUS:
+		text += "\nWell-paid staff push house prices up across town (up %d%% now)" % roundi(sim.campus_price_rise() * 100.0)
+	else:
+		text += "\nLorries and a little smoke: lowers land value nearby"
 	return text
 
 

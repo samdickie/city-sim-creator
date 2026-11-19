@@ -144,6 +144,16 @@ const GIGAFACTORY_LETTER := ["Tesla", "Elon Musk",
 	+ "great. Zero taxes would be even better.\n\nThis will be hardcore. Thousands of jobs. Let's go.\n\nElon"]
 
 
+# Google's campus: Sundar Pichai, endlessly polite, mentioning AI. Its quirk is
+# that it's the one company that opens exactly when it says (nine months).
+const CAMPUS_LETTER := ["Google", "Sundar Pichai",
+	"Dear Mayor,\n\nThank you so much for your time. We would be honoured to build a Google campus in your "
+	+ "Tech zone: thoughtful, AI-first offices round open lawns, a few slides, and thousands of wonderful jobs.\n\n"
+	+ "Our people love great schools and a nice place to live, so we do hope your town has both. Homes nearby "
+	+ "may become a little more popular.\n\nThe campus will open in exactly nine months. We checked this with AI.\n\n"
+	+ "Warm regards,\nSundar Pichai, Google"]
+
+
 static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array) -> Dictionary:
 	# A letter offering a company project (Settings.PROJECTS), or {} if everyone
 	# who'd write is already busy here.
@@ -156,6 +166,12 @@ static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array
 				return {}
 			return {"kind": "gigafactory", "company": e[0], "from": "%s, %s" % [e[1], e[0]],
 				"subject": "Tesla wants to build a Gigafactory in your Tech zone", "body": e[2], "big": true}
+		"campus":
+			var c: Array = CAMPUS_LETTER
+			if busy.has(c[0]):
+				return {}
+			return {"kind": "campus", "company": c[0], "from": "%s, %s" % [c[1], c[0]],
+				"subject": "Google would like to build a campus in your Tech zone", "body": c[2], "big": true}
 	return {}
 
 
@@ -166,6 +182,8 @@ static func project_who(kind: String) -> String:
 			return "Data centres (Amazon, Microsoft, Google)"
 		"gigafactory":
 			return "Tesla's Gigafactory"
+		"campus":
+			return "Google's campus"
 	return kind
 
 

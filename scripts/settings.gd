@@ -227,6 +227,21 @@ const GIGA_SCALES := [
 	{"name": "Mega", "tiles": 42, "power": 3000, "water": 800, "jobs": 4000, "tax": 12000, "investment": 300000,
 		"break_years": 15, "priority": true},
 ]
+# Google's campus (Sundar Pichai): thousands of well-paid office jobs (from
+# outside: they draw people in), and big tech salaries push house prices up
+# (CAMPUS_PRICE_EFFECT: "cost of living" in happiness). Reliable: it opens in
+# exactly nine months.
+const CAMPUS_SCALES := [
+	{"name": "Small", "tiles": 6, "power": 150, "water": 80, "jobs": 800, "tax": 3000, "investment": 30000,
+		"break_years": 0, "priority": false},
+	{"name": "Standard", "tiles": 15, "power": 400, "water": 200, "jobs": 2500, "tax": 8000, "investment": 100000,
+		"break_years": 3, "priority": false},
+	{"name": "Mega", "tiles": 36, "power": 900, "water": 450, "jobs": 7000, "tax": 20000, "investment": 250000,
+		"break_years": 6, "priority": false},
+]
+const CAMPUS_PRICE_EFFECT := 1.5    # home prices rise by this x campus jobs per resident (at most COST_MAX_RISE)
+const COST_MAX_RISE := 1.0          # (so at most double)
+const COST_EFFECT := 0.3            # appeal lost when campus salaries have doubled home prices
 # Company projects: what each kind of company asks to build in your Tech zone.
 #   name           in sentences ("Amazon data centre (small)")
 #   pop, chance    they write from this many people, at best this chance a month
@@ -234,12 +249,15 @@ const GIGA_SCALES := [
 #                  3 points below the town's, or a motorway if wants_motorway)
 #   scales         the sizes on the letter card
 #   build_months   [shortest, longest] from placing it to opening
+#   wants_schools  (if set) much less keen until this share of residents has a school nearby
 # Who writes and what they say: companies.gd. The tile each is: simulation.gd PROJECT_TILES.
 const PROJECTS := {
 	"data_centre": {"name": "data centre", "pop": DC_POP, "chance": DC_CHANCE, "scales": DC_SCALES,
 		"build_months": [0, 0], "wants_motorway": false},
 	"gigafactory": {"name": "Gigafactory", "pop": 4000, "chance": 0.05, "scales": GIGA_SCALES,
 		"build_months": [12, 36], "wants_motorway": true},
+	"campus": {"name": "campus", "pop": 6000, "chance": 0.05, "scales": CAMPUS_SCALES,
+		"build_months": [9, 9], "wants_motorway": false, "wants_schools": 0.6},
 }
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
@@ -339,6 +357,8 @@ const BUILDINGS := {
 		"about": "A company's data centre: rows of servers, cooled day and night. It hums: lowers land value nearby"},
 	"gigafactory": {"name": "Gigafactory", "cost": 0, "uses_power": 1, "area": true, "value": -0.06, "radius": 4,
 		"about": "Tesla's battery and car factory: thousands of jobs, round-the-clock lorries, a little smoke"},
+	"tech_campus": {"name": "Tech campus", "cost": 0, "uses_power": 1, "area": true, "value": 0.05, "radius": 4,
+		"about": "A big tech campus: glass pavilions round lawns, thousands of well-paid jobs. Pushes house prices up"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }

@@ -136,6 +136,7 @@ func _run() -> void:
 	await _letters()
 	await _data_centre()
 	await _gigafactory()
+	await _campus()
 	await _examples()
 	await _new_buildings()
 	_check_players_save(players, players_time)
@@ -908,6 +909,124 @@ func _gigafactory() -> void:
 	game.call("_refresh_hud")
 	await _look_at(o + Vector2i(1, 6), PLAY_DISTANCE * 0.6, -30.0, 32.0, [])
 	await _shot("p38_gigafactory_open")
+	sim.letters.clear()
+
+
+func _campus() -> void:
+	# Google's campus (tech layer step 5, Nov 2026): Sundar writes from 6,000
+	# people, keener with schools near homes; it opens in exactly nine months;
+	# then thousands of well-paid jobs push house prices up ("cost of living").
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(30, 16)
+	check(o.x >= 0, "campus: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 3000000
+	for row: int in [0, 4, 8]:
+		_place("road", o + Vector2i(0, row), o + Vector2i(29, row))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(25, 3))
+	_place("homes_1", o + Vector2i(0, 5), o + Vector2i(25, 7))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(26, 1 + n))
+		_place("water_pump", o + Vector2i(26, 5 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(25, 7))
+	sim.population = 9000
+	_place("nuclear", o + Vector2i(28, 1))
+	_place("nuclear", o + Vector2i(28, 5))
+	_place("tech_zone", o + Vector2i(0, 9), o + Vector2i(14, 14))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	var line := ""
+	for l: String in sim.interest_lines():
+		if l.begins_with("Google's campus"):
+			line = l
+	check(sim.population >= 6000 and line.contains("schools near more homes"), "campus: %d people: %s" % [sim.population, line])
+	for at: Vector2i in [Vector2i(5, 3), Vector2i(13, 3), Vector2i(21, 3), Vector2i(5, 5), Vector2i(13, 5), Vector2i(21, 5)]:
+		_place("school", o + at)
+	sim.recount()
+	check(sim.schooled_share() >= 0.6 and sim.project_chance("campus") > 0.03,
+		"campus: with schools near %d%% of homes, Google is keener" % roundi(sim.schooled_share() * 100.0))
+	var tries := 0
+	while not sim.call("_has_letter", "campus") and tries < 600:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters.duplicate():
+			if String(letter["kind"]) != "campus":
+				sim.letters.erase(letter)
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "campus":
+			id = letter["id"]
+	check(id >= 0 and String(sim.letter_by_id(id)["from"]).contains("Sundar Pichai"),
+		"campus: Google writes (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var sizes: Array[Button] = []
+	for child: Node in (hud.get("_letter_options") as VBoxContainer).get_children():
+		if child is Button:
+			sizes.append(child)
+	check(sizes.size() == 3 and sizes[0].text.begins_with("Small: 6 tiles") and sizes[0].text.contains("800 jobs"),
+		"campus: three sizes (%s)" % (sizes[0].text.replace("\n", " / ") if not sizes.is_empty() else ""))
+	await _shot("p39_campus_letter")
+	await _click(sizes[0])
+	await _frames(2)
+	await _look_at(o + Vector2i(2, 10), PLAY_DISTANCE, -40.0, 50.0, [o + Vector2i(0, 8), o + Vector2i(6, 8), o + Vector2i(6, 13)])
+	await _drag(_screen_of(o + Vector2i(0, 9)), _screen_of(o + Vector2i(2, 10)))
+	await _frames(2)
+	var k: int = sim.deal_by_id(id)
+	var tile := (o.y + 9) * sim.w + o.x
+	check(_count(T.TECH_CAMPUS, o + Vector2i(0, 9), o + Vector2i(14, 14)) == 6 and k >= 0 and sim.deal_building(k)
+		and int(sim.deals[k]["opens"]) - sim.month == 9 and String(game.call("_tile_text", tile)).contains("exactly, says Google"),
+		"campus: a 3 x 2 drag lays out its site; it opens in exactly nine months")
+	var price_before: int = sim.home_price((o.y + 2) * sim.w + o.x + 1)
+	var months := 0
+	var said := ""
+	while said == "" and months < 15:
+		sim.tick()
+		months += 1
+		for n: String in sim.news:
+			if n.contains("campus"):
+				said = n
+	check(months == 9 and said.contains("open"), "campus: open after %d months (%s)" % [months, said])
+	var rise: float = sim.campus_price_rise()
+	var cost: float = sim.happiness_parts.get("cost", 0.0)
+	var home := (o.y + 2) * sim.w + o.x + 1
+	check(sim.company_jobs >= 800 and rise > 0.05 and cost < 0.0,
+		"campus: %d jobs; home prices up %d%%, costing %.2f appeal" % [sim.company_jobs, roundi(rise * 100.0), cost])
+	check(String(game.call("_tile_text", home)).contains("with tech salaries"), "campus: a home's hover says prices are up")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(o + Vector2i(1, 10), PLAY_DISTANCE * 0.5, -30.0, 32.0, [])
+	await _shot("p40_campus_small")
+	# A bigger one shows the lawn quad: a Mega site, 6 x 6.
+	var spots: Array[int] = []
+	for y: int in 6:
+		for x: int in 6:
+			var ti := (o.y + 9 + y) * sim.w + o.x + 6 + x
+			sim.set_tile(ti, T.TECH_CAMPUS)
+			spots.append(ti)
+	sim.deals.append({"id": 900, "kind": "campus", "company": "Google", "scale": 2, "month": sim.month, "tiles": [],
+		"opened": true, "opens": 0, "break_left": 0, "priority": false, "investment": 0})
+	sim.place_deal(900, spots)
+	sim.deals[sim.deal_by_id(900)]["opens"] = 0
+	sim.recount()
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	await _look_at(o + Vector2i(9, 12), PLAY_DISTANCE * 0.9, -30.0, 40.0, [])
+	await _shot("p41_campus_mega")
 	sim.letters.clear()
 
 

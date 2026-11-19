@@ -336,6 +336,23 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - Running, it's a huge white factory with a black band, solar panels over the roof, rows of new cars out front and lorries at the loading bays. A little smoke (pollution 0.02 a tile, 200 m) and lower land value nearby (-0.06 within 4 tiles).
 - Still to come for Elon: threatening to leave if the Tech zone's tax goes up.
 
+### Google's campus — built (Nov 2026), not yet played by Sam
+- **Google (Sundar Pichai)** writes from **6,000 people** (at best 5% a month), only a third as keen until **60% of residents have a school nearby** (Who's interested: "would like schools near more homes"). Very polite; mentions AI.
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Tiles | 6 | 15 | 36 |
+| Power / water | 150 / 80 | 400 / 200 | 900 / 450 |
+| Jobs (well paid, from outside) | 800 | 2,500 | 7,000 |
+| Tax a month | £3,000 | £8,000 | £20,000 |
+| Invested when it opens | £30,000 | £100,000 | £250,000 |
+| Asks for | nothing | no tax for 3 years | 6 years |
+
+- **Google's quirk:** the one company that's on time. It opens in **exactly nine months** ("being built, opens in 5 months (exactly, says Google)").
+- **Cost of living**, a new happiness part: campus jobs per resident x 1.5 is how much **home prices rise across town** (at most double), shown on every home's hover ("homes here worth about £230,000 (up 16% with tech salaries)") and the campus's. Residents feel it: up to -0.3 appeal when prices have doubled ("homes priced out of reach: big tech salaries push prices up"; the advisor opens the Land value view). The jobs also draw newcomers in, so homes are wanted too.
+- Drawn as low glass pavilions (3 or 4 storeys) with green roofs, in 55 m squares on mown lawns with winding paths (the middle squares of a big one left as a lawn quad), trees, and racks of bikes in bright colours by the doors. It raises land value nearby (+0.05 within 4 tiles).
+- Not modelled yet: commuter traffic to it.
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -411,7 +428,7 @@ Data centre scales, as an example:
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
-5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects and Tesla's Gigafactory built; Google, SpaceX and OpenAI next.*
+5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects, Tesla's Gigafactory and Google's campus built; SpaceX and OpenAI next.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 
 ## Phases
