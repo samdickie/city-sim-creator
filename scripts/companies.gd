@@ -154,6 +154,13 @@ const CAMPUS_LETTER := ["Google", "Sundar Pichai",
 	+ "Warm regards,\nSundar Pichai, Google"]
 
 
+# SpaceX's launch site: Elon again. Explosions are "excellent data".
+const LAUNCH_LETTER := ["SpaceX", "Elon Musk",
+	"Mayor,\n\nWant to put a rocket launch site on your coast. Mars is the goal. Your town is step one.\n\n"
+	+ "Rockets are loud. Nobody should live too close. Occasionally one explodes, which gives us excellent data.\n\n"
+	+ "Tourists will love it. Done in 6 months.\n\nElon"]
+
+
 static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array) -> Dictionary:
 	# A letter offering a company project (Settings.PROJECTS), or {} if everyone
 	# who'd write is already busy here.
@@ -166,6 +173,12 @@ static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array
 				return {}
 			return {"kind": "gigafactory", "company": e[0], "from": "%s, %s" % [e[1], e[0]],
 				"subject": "Tesla wants to build a Gigafactory in your Tech zone", "body": e[2], "big": true}
+		"launch_site":
+			var e2: Array = LAUNCH_LETTER
+			if busy.has(e2[0]):
+				return {}
+			return {"kind": "launch_site", "company": e2[0], "from": "%s, %s" % [e2[1], e2[0]],
+				"subject": "SpaceX wants to launch rockets from your coast", "body": e2[2], "big": true}
 		"campus":
 			var c: Array = CAMPUS_LETTER
 			if busy.has(c[0]):
@@ -184,6 +197,8 @@ static func project_who(kind: String) -> String:
 			return "Tesla's Gigafactory"
 		"campus":
 			return "Google's campus"
+		"launch_site":
+			return "SpaceX's launch site"
 	return kind
 
 
@@ -205,15 +220,24 @@ static func deal_news(kind: String, deal: Dictionary) -> String:
 	var company: String = deal.get("company", "A company")
 	match kind:
 		"open":
-			if String(deal.get("kind", "")) == "gigafactory":
-				return "Tesla's Gigafactory is open at last, %d months after \"six months\": %s invested in the town." % [
-					int(deal.get("late", 0)), _pounds(int(deal.get("investment", 0)))]
+			if is_musk(deal):
+				return "%s's %s is open at last, %d months after \"six months\": %s invested in the town." % [
+					company, _word(deal), int(deal.get("late", 0)), _pounds(int(deal.get("investment", 0)))]
 			return "%s's %s is open: %s invested in the town." % [company, _word(deal), _pounds(int(deal.get("investment", 0)))]
 		"gave_up":
 			return "%s gave up waiting for a site and built its %s somewhere else." % [company, _word(deal)]
 		"left":
 			return "%s has closed its %s here and left." % [company, _word(deal)]
+		"launch":
+			return "SpaceX has launched %d rockets from your coast. Tourists line the beach to watch." % int(deal.get("launches", 0))
+		"boom":
+			return "SpaceX's rocket underwent a \"rapid unscheduled disassembly\" over the launch site. Elon says the data is excellent. No launches for %d months." % Settings.LAUNCH_REPAIR_MONTHS
 	return ""
+
+
+static func is_musk(deal: Dictionary) -> bool:
+	# Elon's companies: "done in 6 months" takes years.
+	return ["Tesla", "SpaceX"].has(String(deal.get("company", "")))
 
 
 static func _word(deal: Dictionary) -> String:

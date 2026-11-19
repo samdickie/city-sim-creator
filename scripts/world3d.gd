@@ -68,7 +68,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1292,7 +1292,7 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				# (One road for the whole site, and nothing to warn about while it's being
 				# built: the hover text says what's missing.)
 				var deal_k: int = sim._deal_at.get(i, -1)
-				if not sim.building_working(i) and not (deal_k >= 0 and sim.deal_building(deal_k)):
+				if not sim.building_working(i) and not (deal_k >= 0 and (sim.deal_building(deal_k) or sim.deal_repairing(deal_k))):
 					warn.g = 1.0
 			elif sim.is_building(t):
 				if not sim.makes_power(t) and not sim.needs_nothing(t):
@@ -1613,6 +1613,8 @@ func _plan_lots() -> void:
 				Tile.FIRE, Tile.FIRE_SMALL, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
 						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE, \
 						Tile.GIGAFACTORY:
+					kind = LOT_YARD
+				Tile.LAUNCH_SITE:
 					kind = LOT_YARD
 				Tile.TECH_CAMPUS:
 					# Landscaped lawns once it's open; bare concrete while it's being built.
@@ -4600,6 +4602,9 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	if sim.deal_kind(deal) == "campus":
 		_plan_campus(site, wide, deep, int(deal["id"]), wall_list, roof_list)
 		return true
+	if sim.deal_kind(deal) == "launch_site":
+		_plan_launch_site(site, wide, deep, deal, wall_list, roof_list, chimney_list)
+		return true
 	for n: int in halls:
 		var back := margin + front_strip + n * (each_d + gap)
 		var spot := _site_spot(site, 0.0, back, hall_w, each_d)
@@ -4728,6 +4733,46 @@ func _plan_campus(site: Dictionary, wide: float, deep: float, seed_id: int, wall
 					TreeKind.ORNAMENTAL if n == 0 else TreeKind.BIRCH])
 			for n: int in 6:
 				_site_box(site, along - 6.0 + n * 2.2, back - pd * 0.5 - 3.0, 0.5, 1.7, 1.0, bikes[(n + r + c) % bikes.size()])
+
+
+func _plan_launch_site(site: Dictionary, wide: float, deep: float, deal: Dictionary, wall_list: Array,
+		roof_list: Array, chimney_list: Array) -> void:
+	# A rocket launch site: a tall assembly hangar by the road, a tank farm, and at
+	# the back a concrete pad with a dark launch tower and a stainless rocket
+	# (bigger for bigger sites). After a rocket blows up: no rocket, a scorched pad.
+	var scale: Dictionary = sim.deal_scale(deal)
+	var big := clampf(float(scale.get("tiles", 6)) / 30.0, 0.35, 1.0)
+	var steel := Color(0.80, 0.82, 0.85)
+	var hangar_w := minf(wide * 0.45, 70.0)
+	var hangar := _site_spot(site, -wide * 0.5 + hangar_w * 0.5 + 6.0, 8.0, hangar_w, 28.0)
+	_add_block(hangar, hangar_w, 28.0, 30.0 + 40.0 * big, Color(0.90, 0.91, 0.92), STYLE_PAINT, 0.0,
+		Color(0.70, 0.72, 0.74), wall_list, roof_list)
+	for n: int in 4:
+		var tank := _site_spot(site, wide * 0.5 - 12.0 - (n % 2) * 9.0, 10.0 + (n / 2) * 9.0, 7.0, 7.0)
+		_cylinder(chimney_list, tank["pos"], 3.2, 12.0, Color(0.93, 0.93, 0.92))
+	var pad_back := deep - 8.0 - 30.0 * big
+	var pad := _site_spot(site, 0.0, pad_back, 50.0 * big + 20.0, 50.0 * big + 20.0)
+	var px: Vector3 = pad["x"]
+	var pz: Vector3 = pad["z"]
+	var repairing: bool = int(deal.get("repair_until", 0)) > int(sim.month)
+	var pad_colour := Color(0.20, 0.20, 0.20) if repairing else CONCRETE
+	_paving_items.append([Transform3D(Basis(px * (50.0 * big + 20.0), Vector3.UP * (float(pad["rise"]) + 0.6),
+		pz * (50.0 * big + 20.0)), pad["pos"]), Color(pad_colour, _surface_of(pad_colour))])
+	var tower_h := 50.0 + 90.0 * big
+	var mid_back := pad_back + (50.0 * big + 20.0) * 0.5
+	_site_box(site, -8.0, mid_back - 5.0, 9.0, 9.0, tower_h, Color(0.18, 0.19, 0.21))       # launch tower
+	_site_box(site, -2.5, mid_back - 2.0, 6.0, 1.5, 1.5, Color(0.18, 0.19, 0.21),
+		float((pad["pos"] as Vector3).y) + tower_h * 0.8)                                        # its arm
+	if not repairing:
+		var rocket := _site_spot(site, 4.0, mid_back - 4.5, 9.0, 9.0)
+		var base: Vector3 = rocket["pos"]
+		var booster := tower_h * 0.5
+		_cylinder(chimney_list, base + Vector3.UP * 1.0, 4.5, booster, steel)
+		_cylinder(chimney_list, base + Vector3.UP * (1.0 + booster), 4.5, tower_h * 0.4, Color(0.86, 0.87, 0.89))
+	# A fence round it all.
+	for side: float in [-1.0, 1.0]:
+		_site_box(site, side * (wide * 0.5 - 1.0), deep * 0.5, 0.15, deep - 2.0, 2.4, Color(0.30, 0.32, 0.30))
+	_site_box(site, 0.0, 1.0, wide - 2.0, 0.15, 2.4, Color(0.30, 0.32, 0.30))
 
 
 func _plan_site_works(site: Dictionary, wide: float, deep: float, margin: float, front_strip: float,
@@ -4932,7 +4977,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
-		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS:
+		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS, Tile.LAUNCH_SITE:
 			# A company's project (data centre, Gigafactory) is drawn whole, from the first tile of its site
 			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
 			# (or a tile with no deal) falls back to a hall per tile.

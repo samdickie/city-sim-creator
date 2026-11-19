@@ -9,6 +9,7 @@ const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world3d.gd")
 const CameraRig = preload("res://scripts/camera_rig.gd")
 const Hud = preload("res://scripts/hud.gd")
+const Companies = preload("res://scripts/companies.gd")
 const Traffic = preload("res://scripts/traffic.gd")
 const Advisors = preload("res://scripts/advisors.gd")
 const DevShots = preload("res://scripts/dev_shots.gd")   # dev tool: tools/screenshots.sh
@@ -28,7 +29,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -648,7 +649,7 @@ func _finish_drag() -> void:
 			var problem := sim.deal_problem(k) if k >= 0 else ""
 			if k >= 0 and sim.deal_building(k):
 				hud.flash("%s: building has started. %s" % [what, "Elon says it'll be done in six months."
-					if sim.deal_kind(sim.deals[k]) == "gigafactory" else "It opens in %d months." % (int(sim.deals[k]["opens"]) - sim.month)])
+					if Companies.is_musk(sim.deals[k]) else "It opens in %d months." % (int(sim.deals[k]["opens"]) - sim.month)])
 			else:
 				hud.flash("%s built. %s" % [what, "It opens next month." if problem == "" else
 					"It won't run yet: %s." % problem])
@@ -744,6 +745,14 @@ func _deal_too_small() -> String:
 			n += 1
 	if n < need:
 		return "it needs %d tiles of open land in your Tech zone (you have %d)" % [need, n]
+	if bool(Settings.PROJECTS[sim.deal_kind(sim.deals[k])].get("near_sea", false)):
+		var by_sea := false
+		for p in drag_plan:
+			if _why_cant_build(p, false) == "" and sim._beside_sea(p.y * map_w + p.x):
+				by_sea = true
+				break
+		if not by_sea:
+			return "it has to touch the coast"
 	if n > need * 2:
 		return "that's too big: at most %d tiles" % (need * 2)
 	return ""
@@ -1768,6 +1777,9 @@ func _project_text(i: int) -> String:
 		text += "\nGets power before homes when the grid runs short"
 	if sim.tiles[i] == Tile.DATA_CENTRE:
 		text += "\nIt hums: lowers land value nearby"
+	elif sim.tiles[i] == Tile.LAUNCH_SITE:
+		text += "\nTourists come to watch (%d launches so far) · nobody may live within %d tiles: homes there can't grow" % [
+			int(deal.get("launches", 0)), int(scale.get("zone", 0))]
 	elif sim.tiles[i] == Tile.TECH_CAMPUS:
 		text += "\nWell-paid staff push house prices up across town (up %d%% now)" % roundi(sim.campus_price_rise() * 100.0)
 	else:

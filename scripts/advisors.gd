@@ -319,7 +319,7 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 				"You agreed a %s. Drag out %d tiles of open land in your Tech zone for it (Place it, in the inbox), "
 				% [sim.deal_name(k), int(sim.deal_scale(deal)["tiles"])]
 				+ "or the company builds somewhere else and investors cool on the town.", WorldView.Overlay.DISTRICTS)
-		elif int(deal.get("count", 0)) > 0 and not sim.deal_building(k):
+		elif int(deal.get("count", 0)) > 0 and not sim.deal_building(k) and not sim.deal_repairing(k):
 			var problem: String = sim.deal_problem(k)
 			if problem != "":
 				var view := WorldView.Overlay.WATER if problem.contains("water") else (

@@ -137,6 +137,7 @@ func _run() -> void:
 	await _data_centre()
 	await _gigafactory()
 	await _campus()
+	await _launch_site()
 	await _examples()
 	await _new_buildings()
 	_check_players_save(players, players_time)
@@ -1027,6 +1028,197 @@ func _campus() -> void:
 	game.call("_refresh_hud")
 	await _look_at(o + Vector2i(9, 12), PLAY_DISTANCE * 0.9, -30.0, 40.0, [])
 	await _shot("p41_campus_mega")
+	sim.letters.clear()
+
+
+func _find_coast(wide: int, high: int) -> Vector2i:
+	# Flat land wide x high with the sea beside some tile below its first row
+	# (where a launch site goes); nearest the camera. (-1, -1) if none.
+	var water: PackedByteArray = game.get("water")
+	var slope: PackedFloat32Array = game.get("slope")
+	var start := Vector2i(roundi(rig.target.x / world.cell), roundi(rig.target.z / world.cell))
+	var best := Vector2i(-1, -1)
+	var best_d := 1 << 30
+	for y: int in range(2, sim.h - high - 2):
+		for x: int in range(2, sim.w - wide - 2):
+			var ok := true
+			var coast := false
+			for dy: int in high:
+				for dx: int in wide:
+					var i := (y + dy) * sim.w + x + dx
+					if water[i] == 1 or slope[i] > Settings.MAX_SLOPE_M * 0.5 or sim.tiles[i] != Simulation.Tile.EMPTY:
+						ok = false
+						break
+					if dy > 0 and sim.call("_beside_sea", i):
+						coast = true
+				if not ok:
+					break
+			var d := (Vector2i(x, y) - start).length_squared()
+			if ok and coast and d < best_d:
+				best = Vector2i(x, y)
+				best_d = d
+	return best
+
+
+func _launch_site() -> void:
+	# SpaceX's launch site (tech layer step 5, Nov 2026): Elon writes from 5,000
+	# people once a Tech zone has open land on the coast; the site must touch the
+	# sea; it takes years ("six months"); then tourists, jobs, launches, a safety
+	# zone where homes can't grow, and now and then a rocket blows up.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(30, 10)
+	check(o.x >= 0, "launch site: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 3000000
+	for row: int in [0, 4, 8]:
+		_place("road", o + Vector2i(0, row), o + Vector2i(29, row))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(25, 3))
+	_place("homes_1", o + Vector2i(0, 5), o + Vector2i(25, 7))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(26, 1 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(25, 7))
+	sim.population = 9000
+	_place("nuclear", o + Vector2i(28, 1))
+	var c := _find_coast(8, 6)
+	check(c.x >= 0, "launch site: open land on the coast at %s" % c)
+	if c.x < 0:
+		return
+	# A road along the top, a coal plant and a water pump beside the site, and a Tech zone.
+	_place("road", c, c + Vector2i(7, 0))
+	_place("coal", c + Vector2i(7, 1))
+	_place("water_pump", c + Vector2i(7, 2))
+	sim.recount()
+	var line := ""
+	for l: String in sim.interest_lines():
+		if l.begins_with("SpaceX"):
+			line = l
+	check(line.contains("wants open land on the coast") or line.contains("want at least"),
+		"launch site: no coastal Tech zone yet: %s" % line)
+	_place("tech_zone", c + Vector2i(0, 1), c + Vector2i(6, 5))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	check(sim.project_chance("launch_site") > 0.0, "launch site: with a Tech zone on the coast, SpaceX is interested")
+	var tries := 0
+	while not sim.call("_has_letter", "launch_site") and tries < 800:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters.duplicate():
+			if String(letter["kind"]) != "launch_site":
+				sim.letters.erase(letter)
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "launch_site":
+			id = letter["id"]
+	check(id >= 0 and String(sim.letter_by_id(id)["body"]).contains("excellent data"),
+		"launch site: Elon writes (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var sizes: Array[Button] = []
+	for child: Node in (hud.get("_letter_options") as VBoxContainer).get_children():
+		if child is Button:
+			sizes.append(child)
+	await _shot("p42_launch_letter")
+	await _click(sizes[0])
+	await _frames(2)
+	# Find a 3 x 2 box in the zone that touches the sea, and one that doesn't (if any).
+	var touching := Vector2i(-1, -1)
+	var inland := Vector2i(-1, -1)
+	for y: int in range(1, 5):
+		for x: int in range(0, 5):
+			var coast := false
+			for dy: int in 2:
+				for dx: int in 3:
+					if sim.call("_beside_sea", (c.y + y + dy) * sim.w + c.x + x + dx):
+						coast = true
+			if coast and touching.x < 0:
+				touching = Vector2i(x, y)
+			elif not coast and inland.x < 0:
+				inland = Vector2i(x, y)
+	await _look_at(c + Vector2i(3, 3), PLAY_DISTANCE, -40.0, 50.0, [c, c + Vector2i(7, 0), c + Vector2i(7, 5)])
+	if inland.x >= 0:
+		await _drag(_screen_of(c + inland), _screen_of(c + inland + Vector2i(2, 1)), MOUSE_BUTTON_LEFT, false)
+		var info: Label = hud.get("info_label")
+		check(info.text.contains("touch the coast"), "launch site: a drag away from the sea is red: %s" % info.text)
+		await _press(_screen_of(c + inland + Vector2i(2, 1)), MOUSE_BUTTON_LEFT, false)
+		await _frames(2)
+	await _drag(_screen_of(c + touching), _screen_of(c + touching + Vector2i(2, 1)))
+	await _frames(2)
+	# A road along its top edge (and down to the coal plant), as a player would lay.
+	var r := touching.y - 1
+	if r >= 1:
+		_place("road", c + Vector2i(0, r), c + Vector2i(6, r))
+		if r >= 3:
+			_place("road", c + Vector2i(7, 3), c + Vector2i(7, r))
+	sim.recount()
+	var k: int = sim.deal_by_id(id)
+	var tile := (c.y + touching.y) * sim.w + c.x + touching.x
+	check(k >= 0 and sim.deals[k]["count"] == 6 and sim.deal_building(k)
+		and String(game.call("_tile_text", tile)).contains("Elon says six more months"),
+		"launch site: built on the coast; \"six months\" will be %d" % (int(sim.deals[k]["opens"]) - sim.month if k >= 0 else -1))
+	# Homes can't grow in its safety zone.
+	var near := -1
+	for ti: int in range(sim.w * sim.h):
+		if near < 0 and sim.tiles[ti] == T.EMPTY and sim.in_launch_zone(ti) and sim.district[ti] == Settings.TECH_ZONE:
+			near = ti
+	if near >= 0:
+		sim.set_tile(near, T.HOMES)
+		sim.recount()
+		check(String(sim.zone_status(near)).contains("safety zone"), "launch site: homes in its safety zone can't grow (%s)" % sim.zone_status(near))
+		sim.set_tile(near, T.EMPTY)
+	var months := 0
+	var said := ""
+	while said == "" and months < 60:
+		sim.tick()
+		months += 1
+		for n: String in sim.news:
+			if n.contains("launch site is open"):
+				said = n
+	k = sim.deal_by_id(id)
+	check(said.contains("open at last") and is_equal_approx(sim.project_tourism(), 0.004) and sim.company_jobs >= 300,
+		"launch site: open after %d months: %d jobs, tourists (%s)" % [months, sim.company_jobs, said])
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(c + touching + Vector2i(1, 0), PLAY_DISTANCE * 0.7, -30.0, 28.0, [])
+	await _shot("p43_launch_site")
+	# Launches: now and then one blows up, and the site stops for repairs.
+	var boom := ""
+	for n: int in 3000:
+		sim.month += 1
+		sim.call("_update_deals")
+		for line2: String in sim.news:
+			if line2.contains("unscheduled"):
+				boom = line2
+		sim.news.clear()
+		if boom != "":
+			break
+	k = sim.deal_by_id(id)
+	sim.recount()
+	var launched: int = sim.deals[k].get("launches", 0) if k >= 0 else 0
+	check(boom != "" and String(sim.deal_problem(k)).contains("repaired") and sim.company_jobs == 0
+		and launched > 0, "launch site: after %d launches one blew up; repairs stop it (%s)" % [
+		launched, sim.deal_problem(k) if k >= 0 else ""])
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	await _frames(3)
+	await _shot("p44_launch_site_repairs")
+	var data := sim.to_save()
+	sim.from_save(data)
+	k = sim.deal_by_id(id)
+	check(k >= 0 and int(sim.deals[k].get("launches", 0)) > 0 and int(sim.deals[k].get("repair_until", 0)) > sim.month,
+		"launch site: saved and loaded with its launches and repairs")
 	sim.letters.clear()
 
 

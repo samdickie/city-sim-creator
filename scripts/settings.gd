@@ -242,6 +242,22 @@ const CAMPUS_SCALES := [
 const CAMPUS_PRICE_EFFECT := 1.5    # home prices rise by this x campus jobs per resident (at most COST_MAX_RISE)
 const COST_MAX_RISE := 1.0          # (so at most double)
 const COST_EFFECT := 0.3            # appeal lost when campus salaries have doubled home prices
+# SpaceX's launch site (Elon Musk): on the coast. Brings jobs and tourists (shop
+# demand, as a share of the population, like the landmarks); no homes can grow
+# within its safety zone (tiles); it launches some months, and now and then a
+# rocket blows up (LAUNCH_FAIL): the site stops for LAUNCH_REPAIR_MONTHS.
+const LAUNCH_SCALES := [
+	{"name": "Small", "tiles": 6, "power": 100, "water": 60, "jobs": 300, "tax": 1500, "investment": 40000,
+		"break_years": 0, "priority": false, "tourism": 0.004, "launches": 0.15, "zone": 3},
+	{"name": "Standard", "tiles": 12, "power": 250, "water": 150, "jobs": 900, "tax": 4000, "investment": 120000,
+		"break_years": 5, "priority": false, "tourism": 0.01, "launches": 0.3, "zone": 4},
+	{"name": "Mega", "tiles": 30, "power": 600, "water": 400, "jobs": 2500, "tax": 10000, "investment": 300000,
+		"break_years": 10, "priority": false, "tourism": 0.02, "launches": 0.5, "zone": 6},
+]
+const LAUNCH_FAIL := 0.05           # each launch: the chance the rocket blows up
+const LAUNCH_REPAIR_MONTHS := 6
+const LAUNCH_NEWS_EVERY := 5        # a news line every this many launches (and every failure)
+const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect round about, however big it is
 # Company projects: what each kind of company asks to build in your Tech zone.
 #   name           in sentences ("Amazon data centre (small)")
 #   pop, chance    they write from this many people, at best this chance a month
@@ -250,6 +266,7 @@ const COST_EFFECT := 0.3            # appeal lost when campus salaries have doub
 #   scales         the sizes on the letter card
 #   build_months   [shortest, longest] from placing it to opening
 #   wants_schools  (if set) much less keen until this share of residents has a school nearby
+#   near_sea       (if set) the site has to touch the coast
 # Who writes and what they say: companies.gd. The tile each is: simulation.gd PROJECT_TILES.
 const PROJECTS := {
 	"data_centre": {"name": "data centre", "pop": DC_POP, "chance": DC_CHANCE, "scales": DC_SCALES,
@@ -258,6 +275,8 @@ const PROJECTS := {
 		"build_months": [12, 36], "wants_motorway": true},
 	"campus": {"name": "campus", "pop": 6000, "chance": 0.05, "scales": CAMPUS_SCALES,
 		"build_months": [9, 9], "wants_motorway": false, "wants_schools": 0.6},
+	"launch_site": {"name": "launch site", "pop": 5000, "chance": 0.04, "scales": LAUNCH_SCALES,
+		"build_months": [18, 48], "wants_motorway": false, "near_sea": true},
 }
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
@@ -359,6 +378,8 @@ const BUILDINGS := {
 		"about": "Tesla's battery and car factory: thousands of jobs, round-the-clock lorries, a little smoke"},
 	"tech_campus": {"name": "Tech campus", "cost": 0, "uses_power": 1, "area": true, "value": 0.05, "radius": 4,
 		"about": "A big tech campus: glass pavilions round lawns, thousands of well-paid jobs. Pushes house prices up"},
+	"launch_site": {"name": "Launch site", "cost": 0, "uses_power": 1, "area": true, "value": -0.03, "radius": 6,
+		"about": "SpaceX's rockets: tourists come to watch, but it's loud and nobody may live close by"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }

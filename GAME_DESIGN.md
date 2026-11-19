@@ -353,6 +353,25 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - Drawn as low glass pavilions (3 or 4 storeys) with green roofs, in 55 m squares on mown lawns with winding paths (the middle squares of a big one left as a lawn quad), trees, and racks of bikes in bright colours by the doors. It raises land value nearby (+0.05 within 4 tiles).
 - Not modelled yet: commuter traffic to it.
 
+### SpaceX's launch site — built (Nov 2026), not yet played by Sam
+- **SpaceX (Elon Musk)** writes from **5,000 people** (at best 4% a month), once a Tech zone has open land **on the coast**. The site has to touch the sea (the drag says "it has to touch the coast" until it does). "Done in 6 months" takes **18 to 48 months** (Elon's quirk, as for Tesla).
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Tiles | 6 | 12 | 30 |
+| Power / water | 100 / 60 | 250 / 150 | 600 / 400 |
+| Jobs (from outside) | 300 | 900 | 2,500 |
+| Tourists (shop demand, share of the population) | 0.4% | 1% | 2% |
+| Safety zone (no homes grow) | 3 tiles | 4 | 6 |
+| Launches (chance a month) | 15% | 30% | 50% |
+| Tax a month / invested | £1,500 / £40,000 | £4,000 / £120,000 | £10,000 / £300,000 |
+| Asks for | nothing | no tax for 5 years | 10 years |
+
+- **Safety zone:** homes inside it can't grow ("can't grow: inside the launch site's safety zone") and slowly move out (they count as in decline, so they're boarded up in time).
+- **Launches:** a news line every 5th ("SpaceX has launched 10 rockets from your coast. Tourists line the beach to watch."). Each launch has a **5% chance of blowing up**: "SpaceX's rocket underwent a \"rapid unscheduled disassembly\" over the launch site. Elon says the data is excellent. No launches for 6 months." While it's repaired it brings no jobs, tax or tourists (no warnings: it isn't the player's doing).
+- Drawn as a white assembly hangar by the road, a tank farm, and a concrete pad with a dark launch tower and a stainless rocket (all bigger for bigger sites); after an explosion, a scorched pad and no rocket.
+- **Company projects' land value is now capped** (all kinds): every tile counts, but the effect round about is at most 0.15 either way, however big the site (before, a 36-tile campus maxed out land value and a big data centre flattened it).
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -428,7 +447,7 @@ Data centre scales, as an example:
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
-5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects, Tesla's Gigafactory and Google's campus built; SpaceX and OpenAI next.*
+5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects, Tesla's Gigafactory, Google's campus and SpaceX's launch site built; OpenAI next.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 
 ## Phases

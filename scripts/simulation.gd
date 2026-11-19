@@ -13,7 +13,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS }
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -25,11 +25,12 @@ const BUILDING_KEYS := {
 	Tile.BIG_BEN: "big_ben", Tile.COLOSSEUM: "colosseum", Tile.GREAT_PYRAMID: "great_pyramid", Tile.LIBERTY: "liberty",
 	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
 	Tile.INCINERATOR: "incinerator", Tile.DATA_CENTRE: "data_centre", Tile.GIGAFACTORY: "gigafactory",
-	Tile.TECH_CAMPUS: "tech_campus",
+	Tile.TECH_CAMPUS: "tech_campus", Tile.LAUNCH_SITE: "launch_site",
 }
-const LAST_TILE := Tile.TECH_CAMPUS   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.LAUNCH_SITE   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
-const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS}
+const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
+	"launch_site": Tile.LAUNCH_SITE}
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -133,6 +134,7 @@ var startups: Array[Dictionary] = []  # start-ups the town backed: {tile, name, 
 var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are on the town
 var letter_count := 0                 # letters ever sent (gives each its id)
 var deals: Array[Dictionary] = []     # data centres agreed: {id, company, scale, month, tiles, opened, break_left, priority}
+var _launch_zone := PackedByteArray()  # 1 = inside a launch site's safety zone: homes can't grow (_index_deals)
 var _campus_rise := 0.0               # how much campus salaries push home prices up (campus_price_rise)
 var company_jobs := 0                 # jobs at working data centres (from outside, on top of the town's own)
 var _deal_at := {}                      # data centre tile -> index in deals (see _index_deals)
@@ -526,6 +528,8 @@ func _zone_check(i: int) -> Array:
 		return [Growth.ABANDONED, "abandoned, " + abandoned_reason(i)]
 	if not has_road_access(i):
 		return [Growth.BLOCKED, "won't grow, " + _no_road_text(i)]
+	if t == Tile.HOMES and in_launch_zone(i):
+		return [Growth.BLOCKED, "can't grow: inside the launch site's safety zone (nobody may live this close to the rockets)"]
 	_update_power()
 	if powered[i] == 0:
 		if _net_id[i] < 0:
@@ -757,7 +761,7 @@ func _grow() -> void:
 	var tall_candidates: Array[int] = []
 	for i in zones:
 		if levels[i] < max_level(i) and stage_at(i, levels[i] + 1) > Settings.FREE_STAGE \
-				and _connected(i) and powered[i] == 1 and abandoned[i] == 0:
+				and _connected(i) and powered[i] == 1 and abandoned[i] == 0 and not (tiles[i] == Tile.HOMES and in_launch_zone(i)):
 			tall_candidates.append(i)
 	tall_candidates.sort_custom(func(a: int, b: int) -> bool: return land_value[a] > land_value[b])
 	var grown := {}
@@ -816,6 +820,7 @@ func _grow() -> void:
 		var step: int = step_size(i)
 		var down_step: int = units(i) - units_at_stage(t, stage_at(i, lv - 1)) if lv > 0 else 0
 		if connected and has_power and spare > 0 and can_rise and next_stage <= Settings.FREE_STAGE \
+				and not (t == Tile.HOMES and in_launch_zone(i)) \
 				and want >= step * 0.5 and not _needs_school(i, next_stage) and not _needs_water(i, next_stage) \
 				and _rng.randf() < Settings.GROWTH_CHANCE * _service_factor(i):
 			levels[i] = lv + 1
@@ -838,6 +843,8 @@ func _decline_reason(i: int, want: float) -> String:
 	var t: int = tiles[i]
 	if not _connected(i):
 		return "no road nearby"
+	if t == Tile.HOMES and in_launch_zone(i):
+		return "inside the launch site's safety zone"
 	_update_water()
 	var s: int = stage(i)
 	if abandoned[i] == 1:
@@ -1058,6 +1065,8 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 		if room < need:
 			return {"ok": false, "text": "A %s %s needs %d tiles of open land in your Tech zone (you have %d). Paint more Tech zone, or pick a smaller one." % [
 				String(scale["name"]).to_lower(), what, need, room]}
+		if bool(Settings.PROJECTS[kind].get("near_sea", false)) and not _tech_coast_open():
+			return {"ok": false, "text": "A %s has to be on the coast: paint a Tech zone over open land by the sea." % what}
 		var deal := {"id": int(letter["id"]), "kind": kind, "company": company, "scale": k, "month": month, "tiles": [],
 			"opened": false, "opens": 0, "break_left": int(scale.get("break_years", 0)) * 12,
 			"priority": bool(scale.get("priority", false)), "investment": int(scale["investment"])}
@@ -1071,6 +1080,27 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 
 
 # --- Company projects (deals): data centres, the Gigafactory... (Settings.PROJECTS) ---
+
+func in_launch_zone(i: int) -> bool:
+	return _launch_zone.size() == w * h and _launch_zone[i] == 1
+
+
+func project_tourism() -> float:
+	# Tourists come to watch the launches: shop demand, as a share of the population.
+	var total := 0.0
+	for k: int in deals.size():
+		if deal_working(k):
+			total += float(deal_scale(deals[k]).get("tourism", 0.0))
+	return total
+
+
+func _tech_coast_open() -> bool:
+	# Open land in a Tech zone right by the sea (for a launch site).
+	for i in w * h:
+		if district[i] == Settings.TECH_ZONE and tiles[i] == Tile.EMPTY and water[i] == 0 and _beside_sea(i):
+			return true
+	return false
+
 
 func project_tile(kind: String) -> int:
 	var t: int = PROJECT_TILES.get(kind, Tile.DATA_CENTRE)
@@ -1105,6 +1135,21 @@ func _index_deals() -> void:
 				_deal_at[i] = k
 				n += 1
 		deals[k]["count"] = n
+	# Launch sites' safety zones: no homes may grow there.
+	_launch_zone.resize(w * h)
+	_launch_zone.fill(0)
+	for k: int in deals.size():
+		if deal_kind(deals[k]) != "launch_site" or int(deals[k].get("count", 0)) == 0:
+			continue
+		var r: int = deal_scale(deals[k]).get("zone", 0)
+		for t in deals[k]["tiles"]:
+			var c := int(t)
+			var cx := c % w
+			var cy := c / w
+			for y in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+				for x in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+					if Vector2(x - cx, y - cy).length() <= r + 0.5:
+						_launch_zone[y * w + x] = 1
 
 
 func deal_scale(deal: Dictionary) -> Dictionary:
@@ -1143,6 +1188,11 @@ func deal_building(k: int) -> bool:
 	return int(deal.get("count", 0)) > 0 and not bool(deal.get("opened", false)) and month < int(deal.get("opens", 0))
 
 
+func deal_repairing(k: int) -> bool:
+	# A launch site mending itself after a rocket blew up (not the player's doing).
+	return int(deals[k].get("repair_until", 0)) > month
+
+
 func deal_problem(k: int) -> String:
 	# "" if this project is running; otherwise why not, in plain words.
 	var deal: Dictionary = deals[k]
@@ -1155,6 +1205,8 @@ func deal_problem(k: int) -> String:
 		return "no site yet"
 	if deal_building(k):
 		return "still being built"
+	if int(deal.get("repair_until", 0)) > month:
+		return "being repaired after a rocket blew up (%d more months)" % (int(deal["repair_until"]) - month)
 	var road := false
 	for i in mine:
 		if near_road(i):
@@ -1287,6 +1339,8 @@ func project_chance(kind: String) -> float:
 	var small: Dictionary = (p["scales"] as Array)[0]
 	if population < int(p["pop"]) or tech_open_land() < int(small["tiles"]):
 		return 0.0
+	if bool(p.get("near_sea", false)) and not _tech_coast_open():
+		return 0.0
 	var spare := power_supply - power_used
 	var power_ok := 1.0 if spare >= int(small["power"]) else 0.4
 	var tax_ok := 1.0 if tech_tax_rate <= tax_rate - 0.03 + 0.001 else 0.6
@@ -1327,6 +1381,14 @@ func _update_deals() -> void:
 				news.append(Companies.deal_news("open", deal))
 			elif int(deal.get("break_left", 0)) > 0:
 				deal["break_left"] = int(deal["break_left"]) - 1
+			if deal_kind(deal) == "launch_site" and _rng.randf() < float(deal_scale(deal).get("launches", 0.0)):
+				# Lift-off. Now and then the rocket blows up and the site stops for repairs.
+				deal["launches"] = int(deal.get("launches", 0)) + 1
+				if _rng.randf() < Settings.LAUNCH_FAIL:
+					deal["repair_until"] = month + Settings.LAUNCH_REPAIR_MONTHS
+					news.append(Companies.deal_news("boom", deal))
+				elif int(deal["launches"]) % Settings.LAUNCH_NEWS_EVERY == 0:
+					news.append(Companies.deal_news("launch", deal))
 		kept.append(deal)
 	deals = kept
 	_index_deals()
@@ -1385,6 +1447,8 @@ func interest_lines() -> Array[String]:
 			out.append("%s: waiting for a town of %s people" % [who, Companies._pounds(int(p["pop"])).trim_prefix("£")])
 		elif tech_open_land() < int(small["tiles"]):
 			out.append("%s: want at least %d tiles of open land in your Tech zone" % [who, int(small["tiles"])])
+		elif bool(p.get("near_sea", false)) and not _tech_coast_open():
+			out.append("%s: wants open land on the coast in your Tech zone" % who)
 		else:
 			var wants: Array[String] = []
 			if power_supply - power_used < int(small["power"]):
@@ -1430,7 +1494,8 @@ func _load_letters(data: Dictionary) -> void:
 				"company": String(d.get("company", "")),
 				"scale": int(d.get("scale", 0)), "month": int(d.get("month", 0)), "tiles": list,
 				"opened": bool(d.get("opened", false)), "break_left": int(d.get("break_left", 0)),
-				"priority": bool(d.get("priority", false)), "investment": int(d.get("investment", 0))})
+				"priority": bool(d.get("priority", false)), "investment": int(d.get("investment", 0)),
+				"launches": int(d.get("launches", 0)), "repair_until": int(d.get("repair_until", 0))})
 	_index_deals()
 	investor_appetite = clampf(float(data.get("investor_appetite", Settings.APPETITE_START)), 0.0, 1.0)
 	letter_count = int(data.get("letter_count", letters.size()))
@@ -1772,12 +1837,14 @@ func building_status(i: int) -> String:
 			return "empty: no company runs it"
 		var k: int = _deal_at[i]
 		if deal_building(k):
-			if deal_kind(deals[k]) == "gigafactory":
+			if Companies.is_musk(deals[k]):
 				return "being built: Elon says six more months"   # (it always is)
 			var left := int(deals[k]["opens"]) - month
 			return "being built, opens in %d %s%s" % [left, "month" if left == 1 else "months",
 				" (exactly, says Google)" if deal_kind(deals[k]) == "campus" else ""]
 		var problem := deal_problem(k)
+		if t == Tile.LAUNCH_SITE and problem == "":
+			return "ready for launch (%d so far)" % int(deals[k].get("launches", 0))
 		var busy := "running, servers humming" if t == Tile.DATA_CENTRE else (
 			"open, busy with well-paid staff" if t == Tile.TECH_CAMPUS else "running day and night")
 		return busy if problem == "" else "not running, " + problem
@@ -2518,7 +2585,7 @@ func _update_land_value() -> void:
 				if levels[i] > 0:
 					_spread(i, 3, Settings.OFFICE_BONUS * stage(i))
 			_:
-				if is_building(t):
+				if is_building(t) and not is_project_tile(t):   # (company projects: capped, below)
 					var amount: float = info(t).get("value", 0.0)
 					var radius: int = info(t).get("radius", 0)
 					if amount != 0.0:
@@ -2533,6 +2600,14 @@ func _update_land_value() -> void:
 		_sum_woodland(Settings.AIRPORT_NOISE_RADIUS, Settings.AIRPORT_NOISE, Tile.AIRPORT)
 		for i in w * h:
 			land_value[i] -= minf(_wood_effect[i], Settings.AIRPORT_NOISE_MAX)
+	# Company projects: every tile counts, but a big one is no stronger than PROJECT_VALUE_MAX.
+	for t: int in PROJECT_TILES.values():
+		var amount: float = info(t).get("value", 0.0)
+		if amount == 0.0 or not tiles.has(t):
+			continue
+		_sum_woodland(int(info(t).get("radius", 0)), amount, t)
+		for i in w * h:
+			land_value[i] += clampf(_wood_effect[i], -Settings.PROJECT_VALUE_MAX, Settings.PROJECT_VALUE_MAX)
 	# Motorway noise, the same way.
 	if road_kind.has(Settings.MOTORWAY):
 		_sum_woodland(Settings.MOTORWAY_NOISE_RADIUS, Settings.MOTORWAY_NOISE, MOTORWAY_TILES)
@@ -2997,7 +3072,7 @@ func _update_demand() -> void:
 	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
 	# Landmarks bring tourists (more of them with an airport to fly in to).
-	shop_target += population * tourism * (Settings.AIRPORT_TOURISM if airports_open > 0 else 1.0)
+	shop_target += population * (tourism + project_tourism()) * (Settings.AIRPORT_TOURISM if airports_open > 0 else 1.0)
 	# An airport brings visitors, business and freight.
 	var office_boost := 1.0
 	if airports_open > 0:
