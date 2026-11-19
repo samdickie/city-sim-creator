@@ -1632,15 +1632,16 @@ func open_letter(id: int) -> void:
 	for child: Node in _letter_options.get_children():
 		_letter_options.remove_child(child)
 		child.queue_free()
-	if String(letter.get("kind", "")) == "data_centre":
+	if Settings.PROJECTS.has(String(letter.get("kind", ""))):
 		# One button per size, with what each needs and brings.
 		_letter_options.add_child(_caption("Pick a size"))
-		for k: int in Settings.DC_SCALES.size():
-			var scale: Dictionary = Settings.DC_SCALES[k]
+		var scales: Array = Settings.PROJECTS[String(letter["kind"])]["scales"]
+		for k: int in scales.size():
+			var scale: Dictionary = scales[k]
 			var option := _menu_row("power", "%s: %s" % [String(scale["name"]), Companies.scale_terms(scale)])
 			option.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			option.custom_minimum_size = Vector2(500, 0)
-			option.tooltip_text = "Say yes to a %s data centre" % String(scale["name"]).to_lower()
+			option.tooltip_text = "Say yes to the %s size" % String(scale["name"]).to_lower()
 			option.pressed.connect(func(): letter_answered.emit(id, true, k))
 			_letter_options.add_child(option)
 	_letter_options.visible = _letter_options.get_child_count() > 0

@@ -319,6 +319,23 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - It hums: land value -0.05 within 3 tiles. Drawn whole, as one site (when its tiles fill a rectangle; otherwise a hall per tile): one or two long windowless halls with a band along the top, an entrance block and car park on the road side, a yard behind, and a fence. Each company looks its own, with no logos (`DC_LOOKS` in world3d.gd): **Amazon** sand-coloured precast with a dark band, rows of air handlers on the roof and a long yard of generators; **Microsoft** pale grey with a glass entrance and a roof of solar panels; **Google** white with pipes painted red, yellow, green and blue on the roof and a row of round cooling towers.
 - Bulldoze it and the company leaves (investors cool, 3x a no). Saved (`deals`); older saves have none. Tile `DATA_CENTRE` (on the end of the list); it's never in the Build menu (the `Tool.DEAL` placing tool).
 
+### Company projects, and Tesla's Gigafactory — built (Nov 2026), not yet played by Sam
+- Data centres are now one kind of **company project** (`Settings.PROJECTS`): each kind has its building tile (`PROJECT_TILES` in simulation.gd), its town size and chance of writing, its sizes, how long it takes to build after it's placed (`build_months`) and whether it wants a motorway. Everything else (the letter card's sizes, placing the site, power and water, jobs, investment, tax-free years, power before homes, bills, the inbox and advisors) works the same for every kind. Older saves' deals load as data centres.
+- **Tesla's Gigafactory** (Elon Musk): writes from **4,000 people** (at best 5% a month; half as keen without a motorway: "would like a motorway for its lorries").
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Tiles | 9 | 20 | 42 |
+| Power / water | 500 / 150 | 1,200 / 350 | 3,000 / 800 |
+| Jobs (from outside) | 600 | 1,500 | 4,000 |
+| Tax a month | £2,000 | £5,000 | £12,000 |
+| Invested when it opens | £40,000 | £120,000 | £300,000 |
+| Asks for | no tax for 5 years | 10 years | 15 years, power before homes |
+
+- **Elon's quirk:** the letter says "Construction done in 6 months (definitely)". Once placed it takes **12 to 36 months**; until then it's a building site (a concrete frame, yellow cranes, cabins, hoarding), uses no power, and its hover always says "being built: Elon says six more months". When it opens: "Tesla's Gigafactory is open at last, 25 months after \"six months\": £40,000 invested in the town."
+- Running, it's a huge white factory with a black band, solar panels over the roof, rows of new cars out front and lorries at the loading bays. A little smoke (pollution 0.02 a tile, 200 m) and lower land value nearby (-0.06 within 4 tiles).
+- Still to come for Elon: threatening to leave if the Tech zone's tax goes up.
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -394,7 +411,7 @@ Data centre scales, as an example:
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
-5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks.
+5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects and Tesla's Gigafactory built; Google, SpaceX and OpenAI next.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 
 ## Phases

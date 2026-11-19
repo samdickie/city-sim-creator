@@ -68,7 +68,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1288,9 +1288,11 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				# (Only the terminal needs the road: the hover text says what's missing.)
 				if sim.airport_role_at(i) == AIRPORT_TERMINAL and reach[i] > Settings.ROAD_REACH:
 					warn.r = 1.0
-			elif t == Tile.DATA_CENTRE:
-				# (One road for the whole data centre: the hover text says what's missing.)
-				if not sim.building_working(i):
+			elif sim.is_project_tile(t):
+				# (One road for the whole site, and nothing to warn about while it's being
+				# built: the hover text says what's missing.)
+				var deal_k: int = sim._deal_at.get(i, -1)
+				if not sim.building_working(i) and not (deal_k >= 0 and sim.deal_building(deal_k)):
 					warn.g = 1.0
 			elif sim.is_building(t):
 				if not sim.makes_power(t) and not sim.needs_nothing(t):
@@ -1609,7 +1611,8 @@ func _plan_lots() -> void:
 					kind = LOT_AIRPORT
 					detail = sim.airport_role[i] if i < sim.airport_role.size() else 4
 				Tile.FIRE, Tile.FIRE_SMALL, Tile.POWER_PLANT, Tile.GAS, Tile.NUCLEAR, Tile.WATER_PUMP, Tile.WATER_TOWER, \
-						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE:
+						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE, \
+						Tile.GIGAFACTORY:
 					kind = LOT_YARD
 		_lot_kind[i] = kind
 		_lot_detail[i] = detail
@@ -4510,6 +4513,10 @@ const DC_LOOKS := {
 	# on the roof painted in bright colours.
 	"Google": {"wall": Color(0.84, 0.86, 0.86), "roof": Color(0.60, 0.63, 0.64), "band": Color(0.42, 0.46, 0.50),
 		"trim": Color(0.26, 0.42, 0.70), "entrance": STYLE_MODERN, "kit": "cooling_towers"},
+	# Tesla's Gigafactory: a huge white factory with a black band, solar panels on the
+	# roof, rows of new cars out front and lorries at the back.
+	"Tesla": {"wall": Color(0.93, 0.93, 0.92), "roof": Color(0.52, 0.54, 0.56), "band": Color(0.12, 0.12, 0.13),
+		"trim": Color(0.16, 0.16, 0.17), "entrance": STYLE_GLASS, "kit": "factory"},
 }
 const DC_DEFAULT_LOOK := {"wall": Color(0.60, 0.64, 0.68), "roof": Color(0.46, 0.48, 0.50), "band": Color(0.34, 0.37, 0.40),
 	"trim": Color(0.34, 0.37, 0.40), "entrance": STYLE_PAINT, "kit": "air_handlers"}
@@ -4520,7 +4527,7 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	# Draw a whole data centre from the first tile of its site, if its tiles fill
 	# a rectangle. Returns true if this tile is taken care of (drawn, or part of
 	# a site drawn from its first tile); false to draw it as a plain hall.
-	var k: int = sim._dc_at.get(i, -1)
+	var k: int = sim._deal_at.get(i, -1)
 	if k < 0:
 		return false
 	var deal: Dictionary = sim.deals[k]
@@ -4531,7 +4538,7 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	var mine := 0
 	for t in deal["tiles"]:
 		var ti := int(t)
-		if sim.tiles[ti] != Tile.DATA_CENTRE:
+		if sim.tiles[ti] != sim.project_tile(sim.deal_kind(deal)):
 			continue
 		mine += 1
 		x0 = mini(x0, ti % map_w)
@@ -4581,7 +4588,10 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	var band: Color = look["band"]
 	var trim: Color = look["trim"]
 	var kit: String = look["kit"]
-	var hall_h := 14.0
+	var hall_h := 22.0 if kit == "factory" else 14.0
+	if sim.deal_building(k):
+		_plan_site_works(site, wide, deep, margin, front_strip, hall_w, hall_d, wall_list, roof_list)
+		return true
 	for n: int in halls:
 		var back := margin + front_strip + n * (each_d + gap)
 		var spot := _site_spot(site, 0.0, back, hall_w, each_d)
@@ -4600,6 +4610,11 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 					for c: int in cols:
 						_site_box(site, -hall_w * 0.5 + (c + 0.5) * hall_w / cols, back + (r + 0.5) * each_d / rows - 3.0,
 							8.0, 5.0, 2.8, Color(0.55, 0.56, 0.57), top)
+			"factory":
+				# Solar panels over the whole roof, in long rows.
+				var rows := maxi(int(each_d / 6.0) - 1, 1)
+				for r: int in rows:
+					_site_box(site, 0.0, back + 3.0 + r * 6.0, hall_w - 6.0, 3.6, 0.5, Color(0.10, 0.14, 0.24), top)
 			"solar":
 				# Solar panels in long rows, with a strip of cooling units down the middle.
 				var rows := maxi(int(each_d / 5.0) - 1, 1)
@@ -4622,7 +4637,13 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 						Color(0.82, 0.84, 0.84), top)
 	# The yard behind: generators, or cooling towers.
 	var yard_back := deep - margin - back_strip + 2.0
-	if kit == "cooling_towers":
+	if kit == "factory":
+		# Lorries backed up to the loading bays.
+		var bays := maxi(int(hall_w / 10.0), 2)
+		for n: int in bays:
+			_site_box(site, -hall_w * 0.5 + (n + 0.5) * hall_w / bays, yard_back - 2.0, 2.6, 12.0, 3.8,
+				Color(0.85, 0.86, 0.86) if n % 3 else Color(0.20, 0.22, 0.25))
+	elif kit == "cooling_towers":
 		var towers := maxi(int(hall_w / 22.0), 2)
 		for n: int in towers:
 			var spot := _site_spot(site, -hall_w * 0.5 + (n + 0.5) * hall_w / towers, yard_back, 9.0, 9.0)
@@ -4637,6 +4658,15 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	var entrance := _site_spot(site, -hall_w * 0.5 + entrance_w * 0.5, margin + 1.0, entrance_w, front_strip - 3.0)
 	var entrance_style: int = look["entrance"]
 	_add_block(entrance, entrance_w, front_strip - 3.0, 7.0, trim, entrance_style, 0.0, roof, wall_list, roof_list)
+	if kit == "factory":
+		# Rows of brand-new cars waiting to go.
+		var paints := [Color(0.80, 0.10, 0.10), Color(0.95, 0.95, 0.95), Color(0.10, 0.10, 0.11),
+			Color(0.55, 0.57, 0.60), Color(0.15, 0.30, 0.65)]
+		var cars := maxi(int((hall_w - entrance_w - 8.0) / 2.6), 4)
+		for row: int in 2:
+			for n: int in cars:
+				_site_box(site, -hall_w * 0.5 + entrance_w + 6.0 + n * 2.6, margin + 2.0 + row * 6.0, 1.9, 4.6, 1.5,
+					paints[(n * 7 + row * 3) % paints.size()])
 	var park := _site_spot(site, entrance_w * 0.5 + 2.0, margin, hall_w - entrance_w - 4.0, front_strip - 2.0)
 	var x_axis: Vector3 = park["x"]
 	var z_axis: Vector3 = park["z"]
@@ -4647,6 +4677,28 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 		_site_box(site, side * (wide * 0.5 - 1.0), deep * 0.5, 0.15, deep - 2.0, 2.2, Color(0.30, 0.32, 0.30))
 	_site_box(site, 0.0, deep - 1.0, wide - 2.0, 0.15, 2.2, Color(0.30, 0.32, 0.30))
 	return true
+
+
+func _plan_site_works(site: Dictionary, wide: float, deep: float, margin: float, front_strip: float,
+		hall_w: float, hall_d: float, wall_list: Array, roof_list: Array) -> void:
+	# A site being built: bare earth, a concrete frame going up, cranes and cabins.
+	var frame := _site_spot(site, 0.0, margin + front_strip, hall_w, hall_d)
+	_add_block(frame, hall_w, hall_d, 6.0, CONCRETE, STYLE_PLANT, 0.0, CONCRETE, wall_list, roof_list)
+	var cranes := maxi(int(hall_w / 45.0), 1) + (1 if hall_d > 80.0 else 0)
+	for n: int in cranes:
+		var along := -hall_w * 0.5 + (n + 0.5) * hall_w / cranes
+		var back := margin + front_strip + hall_d * (0.3 if n % 2 == 0 else 0.7)
+		_site_box(site, along, back, 2.0, 2.0, 42.0, Color(0.95, 0.75, 0.15))                    # mast
+		var mast := _site_spot(site, along, back, 2.0, 2.0)
+		var top := float((mast["pos"] as Vector3).y) + 42.0
+		_site_box(site, along + 12.0, back, 36.0, 1.4, 1.4, Color(0.95, 0.75, 0.15), top)       # jib
+		_site_box(site, along - 10.0, back, 5.0, 2.4, 2.4, Color(0.40, 0.42, 0.44), top - 0.5)   # counterweight
+	for n: int in 4:
+		_site_box(site, -hall_w * 0.5 + 4.0 + n * 7.0, margin + 2.0, 6.0, 2.6, 2.7, Color(0.85, 0.82, 0.30))   # site cabins
+	# Hoarding round the site.
+	_site_box(site, 0.0, 0.5, wide - 2.0, 0.2, 2.4, Color(0.16, 0.18, 0.20))
+	for side: float in [-1.0, 1.0]:
+		_site_box(site, side * (wide * 0.5 - 1.0), deep * 0.5, 0.2, deep - 2.0, 2.4, Color(0.16, 0.18, 0.20))
 
 
 func _site_spot(site: Dictionary, along: float, back: float, w: float, d: float) -> Dictionary:
@@ -4829,8 +4881,8 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
-		Tile.DATA_CENTRE:
-			# A company's data centre is drawn whole, from the first tile of its site
+		Tile.DATA_CENTRE, Tile.GIGAFACTORY:
+			# A company's project (data centre, Gigafactory) is drawn whole, from the first tile of its site
 			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
 			# (or a tile with no deal) falls back to a hall per tile.
 			if _plan_data_centre(i, wall_list, roof_list, chimney_list):
@@ -6013,7 +6065,8 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 				if beside.x >= 0 and beside.y >= 0 and beside.x < map_w and beside.y < map_h:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
-							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR or bt == Tile.DATA_CENTRE:
+							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR \
+							or bt == Tile.DATA_CENTRE or bt == Tile.GIGAFACTORY:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = road_hw + 2.6   # in the pavement in front of the buildings

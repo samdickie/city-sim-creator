@@ -217,6 +217,30 @@ const DC_SCALES := [
 	{"name": "Mega", "tiles": 30, "power": 1200, "water": 600, "jobs": 120, "tax": 4000, "investment": 60000,
 		"break_years": 10, "priority": true},
 ]
+# Tesla's Gigafactory (Elon Musk): thousands of factory jobs (from outside: they
+# draw people in), heavy power, some smoke. "Done in 6 months" takes 1-3 years.
+const GIGA_SCALES := [
+	{"name": "Small", "tiles": 9, "power": 500, "water": 150, "jobs": 600, "tax": 2000, "investment": 40000,
+		"break_years": 5, "priority": false},
+	{"name": "Standard", "tiles": 20, "power": 1200, "water": 350, "jobs": 1500, "tax": 5000, "investment": 120000,
+		"break_years": 10, "priority": false},
+	{"name": "Mega", "tiles": 42, "power": 3000, "water": 800, "jobs": 4000, "tax": 12000, "investment": 300000,
+		"break_years": 15, "priority": true},
+]
+# Company projects: what each kind of company asks to build in your Tech zone.
+#   name           in sentences ("Amazon data centre (small)")
+#   pop, chance    they write from this many people, at best this chance a month
+#                  (x investor appetite; less without spare power, a Tech zone tax
+#                  3 points below the town's, or a motorway if wants_motorway)
+#   scales         the sizes on the letter card
+#   build_months   [shortest, longest] from placing it to opening
+# Who writes and what they say: companies.gd. The tile each is: simulation.gd PROJECT_TILES.
+const PROJECTS := {
+	"data_centre": {"name": "data centre", "pop": DC_POP, "chance": DC_CHANCE, "scales": DC_SCALES,
+		"build_months": [0, 0], "wants_motorway": false},
+	"gigafactory": {"name": "Gigafactory", "pop": 4000, "chance": 0.05, "scales": GIGA_SCALES,
+		"build_months": [12, 36], "wants_motorway": true},
+}
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
 const CONSERVATION_MAX_STAGE := 3   # tenements (4 storeys) at most
@@ -313,6 +337,8 @@ const BUILDINGS := {
 	# placed for a deal (see DC_SCALES); its power, water, jobs and tax come from the deal.
 	"data_centre": {"name": "Data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.05, "radius": 3,
 		"about": "A company's data centre: rows of servers, cooled day and night. It hums: lowers land value nearby"},
+	"gigafactory": {"name": "Gigafactory", "cost": 0, "uses_power": 1, "area": true, "value": -0.06, "radius": 4,
+		"about": "Tesla's battery and car factory: thousands of jobs, round-the-clock lorries, a little smoke"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }
@@ -354,6 +380,7 @@ const POLLUTION_SOURCES := {
 	"incinerator": [0.45, 6],             # a tall chimney: less than coal, more than gas nearby
 	"harbour": [0.35, 5],                 # ships' engines
 	"airport": [0.012, 4],                # per tile: jet fumes round a working airport
+	"gigafactory": [0.02, 4],             # per tile: paint shops and lorries
 }
 const PARK_CLEANING := 0.1                # each park tile soaks up this much within its spread (golf half)
 const PARK_CLEANING_SPREAD := 2

@@ -136,6 +136,39 @@ static func data_centre_letter(rng: RandomNumberGenerator, busy: Array) -> Dicti
 		"subject": "%s wants to build a data centre in your Tech zone" % e[0], "body": e[2], "big": true}
 
 
+# Tesla's Gigafactory: Elon Musk, in his public posting style. (The timeline
+# joke is the gameplay: "six months" takes one to three years.)
+const GIGAFACTORY_LETTER := ["Tesla", "Elon Musk",
+	"Mayor,\n\nGigafactory. Your town. The Mega one would be the biggest factory on Earth, possibly Mars later.\n\n"
+	+ "Construction done in 6 months (definitely).\n\nNeed: power. All of it. A motorway for the lorries would be "
+	+ "great. Zero taxes would be even better.\n\nThis will be hardcore. Thousands of jobs. Let's go.\n\nElon"]
+
+
+static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array) -> Dictionary:
+	# A letter offering a company project (Settings.PROJECTS), or {} if everyone
+	# who'd write is already busy here.
+	match kind:
+		"data_centre":
+			return data_centre_letter(rng, busy)
+		"gigafactory":
+			var e: Array = GIGAFACTORY_LETTER
+			if busy.has(e[0]):
+				return {}
+			return {"kind": "gigafactory", "company": e[0], "from": "%s, %s" % [e[1], e[0]],
+				"subject": "Tesla wants to build a Gigafactory in your Tech zone", "body": e[2], "big": true}
+	return {}
+
+
+static func project_who(kind: String) -> String:
+	# Who's interested, for the inbox.
+	match kind:
+		"data_centre":
+			return "Data centres (Amazon, Microsoft, Google)"
+		"gigafactory":
+			return "Tesla's Gigafactory"
+	return kind
+
+
 static func scale_terms(scale: Dictionary) -> String:
 	# One line for a size of data centre: what it needs and what it brings.
 	var asks := []
@@ -154,12 +187,21 @@ static func deal_news(kind: String, deal: Dictionary) -> String:
 	var company: String = deal.get("company", "A company")
 	match kind:
 		"open":
-			return "%s's data centre is open: %s invested in the town." % [company, _pounds(int(deal.get("investment", 0)))]
+			if String(deal.get("kind", "")) == "gigafactory":
+				return "Tesla's Gigafactory is open at last, %d months after \"six months\": %s invested in the town." % [
+					int(deal.get("late", 0)), _pounds(int(deal.get("investment", 0)))]
+			return "%s's %s is open: %s invested in the town." % [company, _word(deal), _pounds(int(deal.get("investment", 0)))]
 		"gave_up":
-			return "%s gave up waiting for a site and built its data centre somewhere else." % company
+			return "%s gave up waiting for a site and built its %s somewhere else." % [company, _word(deal)]
 		"left":
-			return "%s has closed its data centre here and left." % company
+			return "%s has closed its %s here and left." % [company, _word(deal)]
 	return ""
+
+
+static func _word(deal: Dictionary) -> String:
+	var kind: String = deal.get("kind", "data_centre")
+	var word: String = (Settings.PROJECTS.get(kind, Settings.PROJECTS["data_centre"]) as Dictionary)["name"]
+	return word
 
 
 static func _pick(rng: RandomNumberGenerator, list: Array) -> String:

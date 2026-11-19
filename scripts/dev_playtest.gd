@@ -135,6 +135,7 @@ func _run() -> void:
 	await _tech_zone()
 	await _letters()
 	await _data_centre()
+	await _gigafactory()
 	await _examples()
 	await _new_buildings()
 	_check_players_save(players, players_time)
@@ -801,6 +802,113 @@ func _data_centre() -> void:
 		drawn += 1 if sim.deals[n]["count"] == 12 else 0
 	check(drawn == 3, "data centre: three companies' data centres, 12 tiles each, drawn whole")
 	game.call("_refresh_hud")
+
+
+func _gigafactory() -> void:
+	# Tesla's Gigafactory (tech layer step 5, Nov 2026): Elon writes from 4,000
+	# people, wants a motorway; you pick a size and drag out its site; "done in
+	# 6 months" takes 1-3 years (a building site with cranes until then); then it
+	# invests, brings hundreds of jobs and a little smoke.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(30, 14)
+	check(o.x >= 0, "gigafactory: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 2000000
+	_place("road", o, o + Vector2i(29, 0))
+	_place("road", o + Vector2i(0, 4), o + Vector2i(29, 4))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(26, 3))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(27, 1 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(26, 3))
+	sim.recount()
+	sim.population = 6000
+	_place("nuclear", o + Vector2i(28, 1))
+	_place("nuclear", o + Vector2i(28, 2))
+	_place("tech_zone", o + Vector2i(0, 5), o + Vector2i(14, 10))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	var line := ""
+	for l: String in sim.interest_lines():
+		if l.begins_with("Tesla"):
+			line = l
+	check(sim.population >= 4000 and line.contains("interested") and line.contains("motorway"),
+		"gigafactory: %d people: %s" % [sim.population, line])
+	_place("motorway", o + Vector2i(0, 12), o + Vector2i(29, 12))
+	sim.recount()
+	check(sim.has_motorway() and sim.project_chance("gigafactory") > 0.0, "gigafactory: with a motorway Tesla is keener")
+	var tries := 0
+	while not sim.call("_has_letter", "gigafactory") and tries < 600:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters.duplicate():
+			if String(letter["kind"]) != "gigafactory":
+				sim.letters.erase(letter)
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "gigafactory":
+			id = letter["id"]
+	check(id >= 0 and String(sim.letter_by_id(id)["body"]).contains("6 months (definitely)"),
+		"gigafactory: Elon writes (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var sizes: Array[Button] = []
+	for child: Node in (hud.get("_letter_options") as VBoxContainer).get_children():
+		if child is Button:
+			sizes.append(child)
+	check(sizes.size() == 3 and sizes[0].text.begins_with("Small: 9 tiles") and sizes[0].text.contains("600 jobs"),
+		"gigafactory: three sizes (%s)" % (sizes[0].text.replace("\n", " / ") if not sizes.is_empty() else ""))
+	await _shot("p36_gigafactory_letter")
+	await _click(sizes[0])
+	await _frames(2)
+	check(int(game.get("_placing_deal")) == id, "gigafactory: yes to Small: placing its site")
+	await _look_at(o + Vector2i(2, 7), PLAY_DISTANCE, -40.0, 50.0, [o + Vector2i(0, 4), o + Vector2i(6, 4), o + Vector2i(6, 10)])
+	await _drag(_screen_of(o + Vector2i(0, 5)), _screen_of(o + Vector2i(2, 7)))
+	await _frames(2)
+	var k: int = sim.deal_by_id(id)
+	var tile := (o.y + 5) * sim.w + o.x
+	check(_count(T.GIGAFACTORY, o + Vector2i(0, 5), o + Vector2i(14, 10)) == 9 and k >= 0 and sim.deal_building(k),
+		"gigafactory: a 3 x 3 drag lays out its site, and building starts")
+	var opens: int = sim.deals[k]["opens"] - sim.month
+	check(opens >= 12 and opens <= 36 and String(game.call("_tile_text", tile)).contains("Elon says six more months")
+		and sim.power_use(tile) == 0, "gigafactory: \"six months\" will really be %d; its hover says six more months" % opens)
+	game.set("_buildings_dirty", true)
+	hud.call("set_build_open", false)
+	await _look_at(o + Vector2i(1, 6), PLAY_DISTANCE * 0.6, -30.0, 32.0, [])
+	await _shot("p37_gigafactory_being_built")
+
+	# Months go by... it opens late, invests, and the jobs arrive.
+	var months := 0
+	var said := ""
+	while said == "" and months < 40:
+		sim.tick()
+		months += 1
+		for n: String in sim.news:
+			if n.contains("Gigafactory"):
+				said = n
+	k = sim.deal_by_id(id)
+	check(k >= 0 and bool(sim.deals[k]["opened"]) and said.contains("open at last"),
+		"gigafactory: open after %d months (%s)" % [months, said])
+	check(sim.company_jobs >= 600 and sim.pollution_at(tile + 3 * sim.w) > 0.0,
+		"gigafactory: %d jobs, and a little smoke nearby" % sim.company_jobs)
+	var data := sim.to_save()
+	sim.from_save(data)
+	k = sim.deal_by_id(id)
+	check(k >= 0 and sim.deal_kind(sim.deals[k]) == "gigafactory" and bool(sim.deals[k]["opened"]),
+		"gigafactory: saved and loaded")
+	game.set("_buildings_dirty", true)
+	game.call("_refresh_hud")
+	await _look_at(o + Vector2i(1, 6), PLAY_DISTANCE * 0.6, -30.0, 32.0, [])
+	await _shot("p38_gigafactory_open")
+	sim.letters.clear()
 
 
 func _examples() -> void:

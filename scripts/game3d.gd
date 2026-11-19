@@ -28,7 +28,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -646,8 +646,12 @@ func _finish_drag() -> void:
 			sim.place_deal(_placing_deal, spots)
 			var k := sim.deal_by_id(_placing_deal)
 			var problem := sim.deal_problem(k) if k >= 0 else ""
-			hud.flash("%s built. %s" % [what, "It opens next month." if problem == "" else
-				"It won't run yet: %s." % problem])
+			if k >= 0 and sim.deal_building(k):
+				hud.flash("%s: building has started. %s" % [what, "Elon says it'll be done in six months."
+					if sim.deal_kind(sim.deals[k]) == "gigafactory" else "It opens in %d months." % (int(sim.deals[k]["opens"]) - sim.month)])
+			else:
+				hud.flash("%s built. %s" % [what, "It opens next month." if problem == "" else
+					"It won't run yet: %s." % problem])
 			_placing_deal = -1
 			_select_tool(_tool_before_deal)
 		sim.recount()
@@ -941,9 +945,9 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	# "" = OK to build; "-" = nothing to do (no message); otherwise the reason.
 	var i := p.y * map_w + p.x
 	var here := sim.tiles[i]
-	if current_tool == Tool.DEAL and here != Tile.DATA_CENTRE and water[i] == 0 \
+	if current_tool == Tool.DEAL and here != _target_tile() and water[i] == 0 \
 			and sim.district[i] != Settings.TECH_ZONE:
-		return "A data centre has to go in your Tech zone."
+		return "It has to go in your Tech zone."
 	if current_tool == Tool.DISTRICT:
 		# Districts are free and go over anything on land.
 		return "-" if water[i] == 1 or sim.district[i] == _district_choice() else ""
@@ -1037,7 +1041,8 @@ func _road_choice() -> int:
 func _target_tile() -> int:
 	# The tile the current tool builds.
 	if current_tool == Tool.DEAL:
-		return Tile.DATA_CENTRE
+		var k := sim.deal_by_id(_placing_deal)
+		return sim.project_tile(sim.deal_kind(sim.deals[k])) if k >= 0 else Tile.DATA_CENTRE
 	if GROUPS.has(current_tool):
 		var items: Array = GROUPS[current_tool]
 		var picked: int = items[_item_index()]
@@ -1678,8 +1683,8 @@ func _tile_text(i: int) -> String:
 	if t == Tile.WOODLAND:
 		return "Woodland (planted trees: cleans the air a little and raises land value nearby; no upkeep)\nLand value %s   ·   %s" % [
 			sim.land_value_word(i), sim.pollution_word(i)]
-	if t == Tile.DATA_CENTRE:
-		return _data_centre_text(i)
+	if sim.is_project_tile(t):
+		return _project_text(i)
 	if sim.is_building(t):
 		var about: String = sim.info(t).get("about", "")
 		var reach := sim.pollution_reach_m(t, cell_size_m)
@@ -1738,7 +1743,7 @@ func _tile_text(i: int) -> String:
 	return text
 
 
-func _data_centre_text(i: int) -> String:
+func _project_text(i: int) -> String:
 	# "Amazon data centre (standard): running, servers humming" and its terms.
 	var k := -1
 	for d: int in sim.deals.size():
@@ -1746,7 +1751,7 @@ func _data_centre_text(i: int) -> String:
 			if int(t) == i:
 				k = d
 	if k < 0:
-		return "Data centre: %s" % sim.building_status(i)
+		return "%s: %s" % [sim.building_name(sim.tiles[i]), sim.building_status(i)]
 	var deal: Dictionary = sim.deals[k]
 	var scale: Dictionary = sim.deal_scale(deal)
 	var text := "%s: %s\nUses %d power and %d water · %d jobs" % [sim.deal_name(k), sim.building_status(i), int(scale["power"]), int(scale["water"]), int(scale["jobs"])]
@@ -1759,7 +1764,8 @@ func _data_centre_text(i: int) -> String:
 		text += " · pays %s tax a month" % Hud.money_text(int(scale["tax"]))
 	if bool(deal.get("priority", false)):
 		text += "\nGets power before homes when the grid runs short"
-	text += "\nIt hums: lowers land value nearby"
+	text += "\nIt hums: lowers land value nearby" if sim.tiles[i] == Tile.DATA_CENTRE \
+		else "\nLorries and a little smoke: lowers land value nearby"
 	return text
 
 
