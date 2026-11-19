@@ -4492,6 +4492,194 @@ func _cylinder(chimney_list: Array, at: Vector3, radius: float, height: float, c
 		at + Vector3.UP * height * 0.5), colour])
 
 
+# ------------------------------------------------------------ data centres
+
+# Each company's data centre looks its own (no logos: colours and kit only).
+#   wall, roof, band (a strip along the top), trim (entrance and fittings)
+#   entrance: the front block's style; kit: what's on the roof and in the yard
+const DC_LOOKS := {
+	# Amazon: vast, plain, sand-coloured precast boxes with a dark band, rows of
+	# rooftop air handlers and a long yard of backup generators.
+	"Amazon": {"wall": Color(0.76, 0.69, 0.56), "roof": Color(0.46, 0.44, 0.40), "band": Color(0.28, 0.25, 0.22),
+		"trim": Color(0.32, 0.29, 0.26), "entrance": STYLE_PAINT, "kit": "air_handlers"},
+	# Microsoft: pale grey halls with a glass entrance pavilion and a roof
+	# covered in solar panels.
+	"Microsoft": {"wall": Color(0.80, 0.82, 0.84), "roof": Color(0.56, 0.58, 0.60), "band": Color(0.36, 0.48, 0.62),
+		"trim": Color(0.30, 0.40, 0.52), "entrance": STYLE_GLASS, "kit": "solar"},
+	# Google: white halls, a row of round cooling towers in the yard and pipes
+	# on the roof painted in bright colours.
+	"Google": {"wall": Color(0.84, 0.86, 0.86), "roof": Color(0.60, 0.63, 0.64), "band": Color(0.42, 0.46, 0.50),
+		"trim": Color(0.26, 0.42, 0.70), "entrance": STYLE_MODERN, "kit": "cooling_towers"},
+}
+const DC_DEFAULT_LOOK := {"wall": Color(0.60, 0.64, 0.68), "roof": Color(0.46, 0.48, 0.50), "band": Color(0.34, 0.37, 0.40),
+	"trim": Color(0.34, 0.37, 0.40), "entrance": STYLE_PAINT, "kit": "air_handlers"}
+const DC_PIPES := [Color(0.85, 0.22, 0.20), Color(0.95, 0.75, 0.15), Color(0.20, 0.62, 0.30), Color(0.20, 0.45, 0.85)]
+
+
+func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list: Array) -> bool:
+	# Draw a whole data centre from the first tile of its site, if its tiles fill
+	# a rectangle. Returns true if this tile is taken care of (drawn, or part of
+	# a site drawn from its first tile); false to draw it as a plain hall.
+	var k: int = sim._dc_at.get(i, -1)
+	if k < 0:
+		return false
+	var deal: Dictionary = sim.deals[k]
+	var x0 := map_w
+	var y0 := map_h
+	var x1 := -1
+	var y1 := -1
+	var mine := 0
+	for t in deal["tiles"]:
+		var ti := int(t)
+		if sim.tiles[ti] != Tile.DATA_CENTRE:
+			continue
+		mine += 1
+		x0 = mini(x0, ti % map_w)
+		x1 = maxi(x1, ti % map_w)
+		y0 = mini(y0, ti / map_w)
+		y1 = maxi(y1, ti / map_w)
+	if mine == 0 or mine != (x1 - x0 + 1) * (y1 - y0 + 1):
+		return false                     # (not a full rectangle: a hall per tile)
+	if i != y0 * map_w + x0:
+		return true                      # (drawn from its first tile)
+	var look: Dictionary = DC_LOOKS.get(String(deal["company"]), DC_DEFAULT_LOOK)
+	# Which side faces a road: the entrance and car park go there.
+	var best := Vector2i(0, 1)
+	var best_n := -1
+	for side: Vector2i in [Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 0), Vector2i(-1, 0)]:
+		var n := 0
+		var span := range(x0, x1 + 1) if side.x == 0 else range(y0, y1 + 1)
+		for a: int in span:
+			var p := Vector2i(a, y1 + 1 if side.y > 0 else y0 - 1) if side.x == 0 \
+				else Vector2i(x1 + 1 if side.x > 0 else x0 - 1, a)
+			if p.x >= 0 and p.y >= 0 and p.x < map_w and p.y < map_h and sim.tiles[p.y * map_w + p.x] == Tile.ROAD:
+				n += 1
+		if n > best_n:
+			best_n = n
+			best = side
+	var fwd := Vector2(best)
+	var away := -fwd
+	var across := Vector2(away.y, -away.x)
+	var lo := Vector2(x0 * cell, y0 * cell)
+	var hi := Vector2((x1 + 1) * cell, (y1 + 1) * cell)
+	var mid := (lo + hi) * 0.5
+	var size := hi - lo
+	var wide := size.x if best.x == 0 else size.y     # along the front
+	var deep := size.y if best.x == 0 else size.x     # back from the front
+	var front_edge := mid + fwd * deep * 0.5
+	var site := {"front": front_edge, "away": away, "across": across}
+	var margin := 5.0
+	var front_strip := 16.0                           # entrance and car park
+	var back_strip := 14.0 if deep >= 90.0 else 9.0   # generators, chillers, cooling towers
+	var hall_w := wide - margin * 2.0
+	var hall_d := deep - margin * 2.0 - front_strip - back_strip
+	var halls := 2 if hall_d > 110.0 else 1
+	var gap := 8.0
+	var each_d := (hall_d - gap * (halls - 1)) / halls
+	var wall: Color = look["wall"]
+	var roof: Color = look["roof"]
+	var band: Color = look["band"]
+	var trim: Color = look["trim"]
+	var kit: String = look["kit"]
+	var hall_h := 14.0
+	for n: int in halls:
+		var back := margin + front_strip + n * (each_d + gap)
+		var spot := _site_spot(site, 0.0, back, hall_w, each_d)
+		_add_block(spot, hall_w, each_d, hall_h, wall, STYLE_PAINT, 0.0, roof, wall_list, roof_list)
+		# A band along the top of the walls, a little proud of them.
+		var crown := _site_spot(site, 0.0, back - 0.3, hall_w + 0.6, each_d + 0.6)
+		crown["pos"] = (crown["pos"] as Vector3) + Vector3.UP * (hall_h - 1.6)
+		_add_block(crown, hall_w + 0.6, each_d + 0.6, 1.8, band, STYLE_PAINT, 0.0, band, wall_list, roof_list)
+		var top := float((spot["pos"] as Vector3).y) + hall_h + 0.2
+		match kit:
+			"air_handlers":
+				# Rows of grey boxes over the server rooms.
+				var cols := maxi(int(hall_w / 14.0), 2)
+				var rows := maxi(int(each_d / 16.0), 1)
+				for r: int in rows:
+					for c: int in cols:
+						_site_box(site, -hall_w * 0.5 + (c + 0.5) * hall_w / cols, back + (r + 0.5) * each_d / rows - 3.0,
+							8.0, 5.0, 2.8, Color(0.55, 0.56, 0.57), top)
+			"solar":
+				# Solar panels in long rows, with a strip of cooling units down the middle.
+				var rows := maxi(int(each_d / 5.0) - 1, 1)
+				for r: int in rows:
+					if r == rows / 2:
+						for c: int in maxi(int(hall_w / 12.0), 2):
+							_site_box(site, -hall_w * 0.5 + 6.0 + c * 12.0, back + 2.5 + r * 5.0, 7.0, 3.5, 2.4,
+								Color(0.70, 0.72, 0.74), top)
+						continue
+					_site_box(site, 0.0, back + 2.5 + r * 5.0, hall_w - 4.0, 3.2, 0.5, Color(0.10, 0.16, 0.30), top)
+			"cooling_towers":
+				# Pipes in bright colours running the length of the roof, spread across it,
+				# and a few units.
+				for c: int in DC_PIPES.size():
+					var along := -hall_w * 0.5 + (c + 0.5) * hall_w / DC_PIPES.size()
+					_site_box(site, along, back + 3.0, 1.2, each_d - 6.0, 1.2, DC_PIPES[c], top)
+				var units := maxi(int(hall_w / 30.0), 1)
+				for u: int in units:
+					_site_box(site, hall_w * 0.1 + u * 14.0, back + each_d * 0.5 - 4.0, 9.0, 8.0, 3.0,
+						Color(0.82, 0.84, 0.84), top)
+	# The yard behind: generators, or cooling towers.
+	var yard_back := deep - margin - back_strip + 2.0
+	if kit == "cooling_towers":
+		var towers := maxi(int(hall_w / 22.0), 2)
+		for n: int in towers:
+			var spot := _site_spot(site, -hall_w * 0.5 + (n + 0.5) * hall_w / towers, yard_back, 9.0, 9.0)
+			_cylinder(chimney_list, spot["pos"], 4.5, 11.0, Color(0.92, 0.93, 0.92))
+	else:
+		var sets := maxi(int(hall_w / 8.0), 2)
+		for n: int in sets:
+			_site_box(site, -hall_w * 0.5 + (n + 0.5) * hall_w / sets, yard_back, 5.0, back_strip - 5.0, 3.0,
+				Color(0.26, 0.28, 0.30) if kit == "air_handlers" else Color(0.40, 0.44, 0.48))
+	# The entrance block and a car park at the front.
+	var entrance_w := minf(28.0, hall_w * 0.4)
+	var entrance := _site_spot(site, -hall_w * 0.5 + entrance_w * 0.5, margin + 1.0, entrance_w, front_strip - 3.0)
+	var entrance_style: int = look["entrance"]
+	_add_block(entrance, entrance_w, front_strip - 3.0, 7.0, trim, entrance_style, 0.0, roof, wall_list, roof_list)
+	var park := _site_spot(site, entrance_w * 0.5 + 2.0, margin, hall_w - entrance_w - 4.0, front_strip - 2.0)
+	var x_axis: Vector3 = park["x"]
+	var z_axis: Vector3 = park["z"]
+	_paving_items.append([Transform3D(Basis(x_axis * (hall_w - entrance_w - 4.0), Vector3.UP * (float(park["rise"]) + 0.45),
+		z_axis * (front_strip - 2.0)), park["pos"]), Color(CAR_PARK, _surface_of(CAR_PARK))])
+	# A fence round the site.
+	for side: float in [-1.0, 1.0]:
+		_site_box(site, side * (wide * 0.5 - 1.0), deep * 0.5, 0.15, deep - 2.0, 2.2, Color(0.30, 0.32, 0.30))
+	_site_box(site, 0.0, deep - 1.0, wide - 2.0, 0.15, 2.2, Color(0.30, 0.32, 0.30))
+	return true
+
+
+func _site_spot(site: Dictionary, along: float, back: float, w: float, d: float) -> Dictionary:
+	# Like _place, for a whole site: along its front, back from it.
+	var away: Vector2 = site["away"]
+	var across: Vector2 = site["across"]
+	var front: Vector2 = site["front"]
+	var c := front + across * along + away * (back + d * 0.5)
+	var base := INF
+	var top := -INF
+	for sx: float in [-0.5, 0.5]:
+		for sz: float in [-0.5, 0.5]:
+			var q: Vector2 = c + across * (w * sx) + away * (d * sz)
+			var corner := height_at(q.x, q.y)
+			base = minf(base, corner)
+			top = maxf(top, corner)
+	base = maxf(base, 0.3) - 0.3
+	return {"pos": Vector3(c.x, base, c.y), "x": Vector3(across.x, 0.0, across.y), "z": Vector3(away.x, 0.0, away.y),
+		"rise": maxf(top, 0.3) - 0.3 - base, "ground": maxf(height_at(c.x, c.y), 0.0)}
+
+
+func _site_box(site: Dictionary, along: float, back: float, w: float, d: float, h: float, colour: Color,
+		at_height: float = -INF) -> void:
+	# A box on a site (or on a roof: at_height is its base, in metres above sea level).
+	var away: Vector2 = site["away"]
+	var across: Vector2 = site["across"]
+	var front: Vector2 = site["front"]
+	var c := front + across * along + away * (back + d * 0.5)
+	var y := at_height if at_height > -INF else maxf(height_at(c.x, c.y), 0.0) - 0.1
+	_prop_items.append([Transform3D(Basis(Vector3(across.x, 0.0, across.y) * w, Vector3.UP * h,
+		Vector3(away.x, 0.0, away.y) * d), Vector3(c.x, y, c.y)), colour])
+
+
 func _sea_side(i: int) -> Vector2i:
 	# The direction of the sea from a tile by the shore (or (0, 0)).
 	var tile := Vector2i(i % map_w, i / map_w)
@@ -4642,9 +4830,11 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
 		Tile.DATA_CENTRE:
-			# A company's data centre: one long windowless hall of servers per tile (tiles
-			# side by side read as one big building), rows of cooling units on the roof,
-			# and backup generators along the side.
+			# A company's data centre is drawn whole, from the first tile of its site
+			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
+			# (or a tile with no deal) falls back to a hall per tile.
+			if _plan_data_centre(i, wall_list, roof_list, chimney_list):
+				return
 			var hall := _place(i, front, 0.0, 1.0, 49.0, 47.0)
 			_add_block(hall, 49.0, 47.0, 13.0, DC_CLADDING, STYLE_PAINT, 0.0, DC_ROOF, wall_list, roof_list)
 			for k in 6:

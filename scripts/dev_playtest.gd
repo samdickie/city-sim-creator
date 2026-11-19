@@ -770,6 +770,36 @@ func _data_centre() -> void:
 	sim.call("_update_letters")
 	check(sim.deals.is_empty() and String(sim.news[0]).contains("gave up waiting"), "data centre: a deal with no site for 6 months lapses")
 	sim.letters.clear()
+
+	# Each company's data centre looks its own: three side by side, drawn whole.
+	var lots := [["Amazon", Vector2i(0, 5)], ["Microsoft", Vector2i(4, 5)], ["Google", Vector2i(8, 5)]]
+	for n: int in lots.size():
+		var at: Vector2i = o + lots[n][1]
+		var spots: Array[int] = []
+		for y: int in 3:
+			for x: int in 4:
+				var ti := (at.y + y) * sim.w + at.x + x
+				sim.set_tile(ti, T.DATA_CENTRE)
+				spots.append(ti)
+		sim.deals.append({"id": 500 + n, "company": lots[n][0], "scale": 1, "month": sim.month, "tiles": [],
+			"opened": true, "break_left": 0, "priority": false, "investment": 0})
+		sim.place_deal(500 + n, spots)
+	sim.population = 6000
+	_place("nuclear", o + Vector2i(25, 6))
+	sim.recount()
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(o + Vector2i(6, 7), PLAY_DISTANCE * 1.1, -20.0, 40.0, [])
+	await _frames(5)
+	await _shot("p34_data_centres")
+	await _look_at(o + Vector2i(10, 6), PLAY_DISTANCE * 0.45, 140.0, 30.0, [])
+	await _shot("p35_data_centre_google_close")
+	var drawn := 0
+	for n: int in 3:
+		drawn += 1 if sim.deals[n]["count"] == 12 else 0
+	check(drawn == 3, "data centre: three companies' data centres, 12 tiles each, drawn whole")
 	game.call("_refresh_hud")
 
 
