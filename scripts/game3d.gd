@@ -29,7 +29,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -1765,7 +1765,8 @@ func _project_text(i: int) -> String:
 		return "%s: %s" % [sim.building_name(sim.tiles[i]), sim.building_status(i)]
 	var deal: Dictionary = sim.deals[k]
 	var scale: Dictionary = sim.deal_scale(deal)
-	var text := "%s: %s\nUses %d power and %d water · %d jobs" % [sim.deal_name(k), sim.building_status(i), int(scale["power"]), int(scale["water"]), int(scale["jobs"])]
+	var text := "%s: %s\nUses %s power and %s water · %s jobs" % [sim.deal_name(k), sim.building_status(i),
+		Hud.thousands(sim.deal_power(deal)), Hud.thousands(int(scale["water"])), Hud.thousands(int(scale["jobs"]))]
 	var years_left: int = ceili(int(deal.get("break_left", 0)) / 12.0)
 	if not bool(deal.get("opened", false)):
 		text += " · pays %s when it opens" % Hud.money_text(int(deal.get("investment", 0)))
@@ -1780,6 +1781,9 @@ func _project_text(i: int) -> String:
 	elif sim.tiles[i] == Tile.LAUNCH_SITE:
 		text += "\nTourists come to watch (%d launches so far) · nobody may live within %d tiles: homes there can't grow" % [
 			int(deal.get("launches", 0)), int(scale.get("zone", 0))]
+	elif sim.tiles[i] == Tile.AI_DATA_CENTRE:
+		text += "\nIt hums, and it always wants more: uses %s power now (x%.2f since it opened; no's so far: %d of %d)" % [
+			Hud.thousands(sim.deal_power(deal)), float(deal.get("power_x", 1.0)), int(deal.get("refusals", 0)), Settings.AI_REFUSALS]
 	elif sim.tiles[i] == Tile.TECH_CAMPUS:
 		text += "\nWell-paid staff push house prices up across town (up %d%% now)" % roundi(sim.campus_price_rise() * 100.0)
 	else:

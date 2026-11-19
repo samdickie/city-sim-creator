@@ -372,6 +372,21 @@ The next direction: blend town planning with today's big-tech issues. You're the
 - Drawn as a white assembly hangar by the road, a tank farm, and a concrete pad with a dark launch tower and a stainless rocket (all bigger for bigger sites); after an explosion, a scorched pad and no rocket.
 - **Company projects' land value is now capped** (all kinds): every tile counts, but the effect round about is at most 0.15 either way, however big the site (before, a 36-tile campus maxed out land value and a big data centre flattened it).
 
+### OpenAI's AI data centre — built (Nov 2026), not yet played by Sam
+- **OpenAI (Sam Altman)** writes from **10,000 people** (at best 3% a month), in all lowercase: "a big one. to benefit all of humanity... if you have room for a nuclear plant or three, that would be amazing." It takes 12-18 months to build.
+
+| | Small | Standard | Mega |
+| --- | --- | --- | --- |
+| Tiles | 16 | 36 | 64 |
+| Power / water | 1,000 / 500 | 2,500 / 1,200 | 6,000 / 3,000 |
+| Jobs (from outside) | 60 | 150 | 400 |
+| Tax a month | £6,000 | £15,000 | £40,000 |
+| Invested when it opens | £100,000 | £300,000 | £1,000,000 |
+| Asks for | no tax for 5 years | 10 years, power before homes | 15 years, power before homes |
+
+- **Sam's quirk: it always wants more.** Every year after it opens, a letter: "we need a bit more power. maybe a quarter more. then probably a quarter more after that." **Give it more power**: it uses a quarter more (of what it started with; up to 3x) and pays 15% more tax. **No thanks**, or no answer within 6 months, is a no ("Sam Altman says that's totally fine. (That's 2 no's now. OpenAI has noticed.)"). **Three no's and OpenAI moves** "to a town with more power"; its empty halls stay (no company, no power used, no warnings) for you to bulldoze.
+- Drawn as vast near-black halls with a pale band, roofs packed with cooling units, and a yard of its own gas turbines (with stacks) and transformers.
+
 ### The company ladder
 How often letters come, and how big the companies are, grows with the town:
 
@@ -447,7 +462,7 @@ Data centre scales, as an example:
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers.
 4. **Generated map** (no Troon); rebuild the examples.
-5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Started Nov 2026: company projects, Tesla's Gigafactory, Google's campus and SpaceX's launch site built; OpenAI next.*
+5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Built Nov 2026: company projects, Tesla's Gigafactory, Google's campus, SpaceX's launch site and OpenAI's AI data centre. Still to do: Elon threatening to leave if the Tech zone tax goes up; Apple, Meta and Nvidia.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 
 ## Phases

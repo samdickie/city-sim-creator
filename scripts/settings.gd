@@ -257,6 +257,22 @@ const LAUNCH_SCALES := [
 const LAUNCH_FAIL := 0.05           # each launch: the chance the rocket blows up
 const LAUNCH_REPAIR_MONTHS := 6
 const LAUNCH_NEWS_EVERY := 5        # a news line every this many launches (and every failure)
+# OpenAI's AI data centre (Sam Altman): power like a city, few jobs, huge money.
+# Each year after it opens Sam asks for AI_POWER_STEP more power (a letter): yes
+# and it uses more (and pays AI_TAX_STEP more tax), up to AI_POWER_MAX x; say no
+# AI_REFUSALS times (or leave the letter) and OpenAI leaves.
+const AI_SCALES := [
+	{"name": "Small", "tiles": 16, "power": 1000, "water": 500, "jobs": 60, "tax": 6000, "investment": 100000,
+		"break_years": 5, "priority": false},
+	{"name": "Standard", "tiles": 36, "power": 2500, "water": 1200, "jobs": 150, "tax": 15000, "investment": 300000,
+		"break_years": 10, "priority": true},
+	{"name": "Mega", "tiles": 64, "power": 6000, "water": 3000, "jobs": 400, "tax": 40000, "investment": 1000000,
+		"break_years": 15, "priority": true},
+]
+const AI_POWER_STEP := 0.25
+const AI_TAX_STEP := 0.15
+const AI_POWER_MAX := 3.0
+const AI_REFUSALS := 3
 const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect round about, however big it is
 # Company projects: what each kind of company asks to build in your Tech zone.
 #   name           in sentences ("Amazon data centre (small)")
@@ -277,6 +293,8 @@ const PROJECTS := {
 		"build_months": [9, 9], "wants_motorway": false, "wants_schools": 0.6},
 	"launch_site": {"name": "launch site", "pop": 5000, "chance": 0.04, "scales": LAUNCH_SCALES,
 		"build_months": [18, 48], "wants_motorway": false, "near_sea": true},
+	"ai_data_centre": {"name": "AI data centre", "pop": 10000, "chance": 0.03, "scales": AI_SCALES,
+		"build_months": [12, 18], "wants_motorway": false},
 }
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
@@ -380,6 +398,8 @@ const BUILDINGS := {
 		"about": "A big tech campus: glass pavilions round lawns, thousands of well-paid jobs. Pushes house prices up"},
 	"launch_site": {"name": "Launch site", "cost": 0, "uses_power": 1, "area": true, "value": -0.03, "radius": 6,
 		"about": "SpaceX's rockets: tourists come to watch, but it's loud and nobody may live close by"},
+	"ai_data_centre": {"name": "AI data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.04, "radius": 4,
+		"about": "OpenAI's AI data centre: power like a city, a few hundred jobs, and it always wants more"},
 	"airport": {"name": "Airport", "cost": 200, "upkeep": 2, "area": true, "unlock": 5000,
 		"about": "Drag out a box at least 16 tiles long (an 800 m runway) and 40 tiles in all, e.g. 16 x 3; it shows green once it's big enough. Leave room beside the runway and a road at one side for the terminal. Flights bring visitors (shops), business (offices) and freight (industry). Noisy: lowers land value round about"},
 }

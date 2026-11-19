@@ -68,7 +68,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }   # same order as simulation.gd
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1292,7 +1292,7 @@ func refresh_ground(layout_changed: bool = true) -> void:
 				# (One road for the whole site, and nothing to warn about while it's being
 				# built: the hover text says what's missing.)
 				var deal_k: int = sim._deal_at.get(i, -1)
-				if not sim.building_working(i) and not (deal_k >= 0 and (sim.deal_building(deal_k) or sim.deal_repairing(deal_k))):
+				if deal_k >= 0 and not sim.building_working(i) and not sim.deal_building(deal_k) and not sim.deal_repairing(deal_k):
 					warn.g = 1.0
 			elif sim.is_building(t):
 				if not sim.makes_power(t) and not sim.needs_nothing(t):
@@ -1614,7 +1614,7 @@ func _plan_lots() -> void:
 						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE, \
 						Tile.GIGAFACTORY:
 					kind = LOT_YARD
-				Tile.LAUNCH_SITE:
+				Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE:
 					kind = LOT_YARD
 				Tile.TECH_CAMPUS:
 					# Landscaped lawns once it's open; bare concrete while it's being built.
@@ -4524,6 +4524,10 @@ const DC_LOOKS := {
 	# roof, rows of new cars out front and lorries at the back.
 	"Tesla": {"wall": Color(0.93, 0.93, 0.92), "roof": Color(0.52, 0.54, 0.56), "band": Color(0.12, 0.12, 0.13),
 		"trim": Color(0.16, 0.16, 0.17), "entrance": STYLE_GLASS, "kit": "factory"},
+	# OpenAI: vast near-black halls, roofs packed with cooling units, and a yard of
+	# its own gas turbines and transformers (it needs power like a city).
+	"OpenAI": {"wall": Color(0.20, 0.21, 0.23), "roof": Color(0.30, 0.31, 0.33), "band": Color(0.85, 0.86, 0.86),
+		"trim": Color(0.12, 0.12, 0.13), "entrance": STYLE_GLASS, "kit": "ai"},
 }
 const DC_DEFAULT_LOOK := {"wall": Color(0.60, 0.64, 0.68), "roof": Color(0.46, 0.48, 0.50), "band": Color(0.34, 0.37, 0.40),
 	"trim": Color(0.34, 0.37, 0.40), "entrance": STYLE_PAINT, "kit": "air_handlers"}
@@ -4615,6 +4619,14 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 		_add_block(crown, hall_w + 0.6, each_d + 0.6, 1.8, band, STYLE_PAINT, 0.0, band, wall_list, roof_list)
 		var top := float((spot["pos"] as Vector3).y) + hall_h + 0.2
 		match kit:
+			"ai":
+				# Cooling units packed edge to edge.
+				var cols := maxi(int(hall_w / 9.0), 2)
+				var rows := maxi(int(each_d / 10.0), 1)
+				for r: int in rows:
+					for c: int in cols:
+						_site_box(site, -hall_w * 0.5 + (c + 0.5) * hall_w / cols, back + (r + 0.5) * each_d / rows - 3.0,
+							6.5, 6.0, 3.2, Color(0.62, 0.64, 0.66), top)
 			"air_handlers":
 				# Rows of grey boxes over the server rooms.
 				var cols := maxi(int(hall_w / 14.0), 2)
@@ -4656,6 +4668,17 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 		for n: int in bays:
 			_site_box(site, -hall_w * 0.5 + (n + 0.5) * hall_w / bays, yard_back - 2.0, 2.6, 12.0, 3.8,
 				Color(0.85, 0.86, 0.86) if n % 3 else Color(0.20, 0.22, 0.25))
+	elif kit == "ai":
+		# Its own gas turbines (with short stacks) and transformers.
+		var sets := maxi(int(hall_w / 12.0), 2)
+		for n: int in sets:
+			var along := -hall_w * 0.5 + (n + 0.5) * hall_w / sets
+			if n % 3 == 2:
+				_site_box(site, along, yard_back - 3.0, 6.0, 6.0, 4.5, Color(0.45, 0.48, 0.42))
+				continue
+			var spot := _site_spot(site, along, yard_back - 3.0, 6.0, 6.0)
+			_cylinder(chimney_list, spot["pos"], 2.6, 7.0, Color(0.72, 0.74, 0.76))
+			_cylinder(chimney_list, (spot["pos"] as Vector3) + Vector3.UP * 7.0, 0.9, 6.0, Color(0.40, 0.42, 0.44))
 	elif kit == "cooling_towers":
 		var towers := maxi(int(hall_w / 22.0), 2)
 		for n: int in towers:
@@ -4977,7 +5000,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
-		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS, Tile.LAUNCH_SITE:
+		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS, Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE:
 			# A company's project (data centre, Gigafactory) is drawn whole, from the first tile of its site
 			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
 			# (or a tile with no deal) falls back to a hall per tile.
@@ -6162,7 +6185,7 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
 							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR \
-							or bt == Tile.DATA_CENTRE or bt == Tile.GIGAFACTORY:
+							or bt == Tile.DATA_CENTRE or bt == Tile.GIGAFACTORY or bt == Tile.AI_DATA_CENTRE:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = road_hw + 2.6   # in the pavement in front of the buildings

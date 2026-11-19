@@ -138,6 +138,7 @@ func _run() -> void:
 	await _gigafactory()
 	await _campus()
 	await _launch_site()
+	await _ai_data_centre()
 	await _examples()
 	await _new_buildings()
 	_check_players_save(players, players_time)
@@ -1220,6 +1221,127 @@ func _launch_site() -> void:
 	check(k >= 0 and int(sim.deals[k].get("launches", 0)) > 0 and int(sim.deals[k].get("repair_until", 0)) > sim.month,
 		"launch site: saved and loaded with its launches and repairs")
 	sim.letters.clear()
+
+
+func _ai_data_centre() -> void:
+	# OpenAI's AI data centre (tech layer step 5, Nov 2026): Sam writes from
+	# 10,000 people (all lowercase); each year after it opens he asks for a bit
+	# more power; yes and it grows; no (or no answer) three times and it leaves.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(34, 16)
+	check(o.x >= 0, "AI data centre: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 5000000
+	for row: int in [0, 4, 8]:
+		_place("road", o + Vector2i(0, row), o + Vector2i(33, row))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(29, 3))
+	_place("homes_1", o + Vector2i(0, 5), o + Vector2i(29, 7))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(30, 1 + n))
+		_place("water_pump", o + Vector2i(30, 5 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(29, 7))
+	sim.population = 12000
+	for n: int in 3:
+		_place("nuclear", o + Vector2i(32, 1 + n * 2))
+	_place("tech_zone", o + Vector2i(0, 9), o + Vector2i(15, 14))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	check(sim.population >= 10000 and sim.project_chance("ai_data_centre") > 0.0,
+		"AI data centre: %d people and a Tech zone: OpenAI is interested" % sim.population)
+	var tries := 0
+	while not sim.call("_has_letter", "ai_data_centre") and tries < 1000:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters.duplicate():
+			if String(letter["kind"]) != "ai_data_centre":
+				sim.letters.erase(letter)
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "ai_data_centre":
+			id = letter["id"]
+	check(id >= 0 and String(sim.letter_by_id(id)["body"]).begins_with("hi mayor"),
+		"AI data centre: Sam writes, all lowercase (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var sizes: Array[Button] = []
+	for child: Node in (hud.get("_letter_options") as VBoxContainer).get_children():
+		if child is Button:
+			sizes.append(child)
+	await _click(sizes[0])
+	await _frames(2)
+	await _look_at(o + Vector2i(2, 11), PLAY_DISTANCE, -40.0, 50.0, [o + Vector2i(0, 8), o + Vector2i(6, 8), o + Vector2i(6, 14)])
+	await _drag(_screen_of(o + Vector2i(0, 9)), _screen_of(o + Vector2i(3, 12)))
+	await _frames(2)
+	var k: int = sim.deal_by_id(id)
+	check(k >= 0 and int(sim.deals[k]["count"]) == 16 and sim.deal_building(k), "AI data centre: a 4 x 4 site, being built")
+	var months := 0
+	var said := ""
+	while said == "" and months < 30:
+		sim.tick()
+		months += 1
+		for n: String in sim.news:
+			if n.contains("AI data centre is open"):
+				said = n
+	k = sim.deal_by_id(id)
+	check(said != "" and sim.company_jobs >= 60 and sim.deal_power(sim.deals[k]) == 1000,
+		"AI data centre: open after %d months, using 1,000 power (%s)" % [months, said])
+	# A year on: "we need a bit more power".
+	var ask := -1
+	for n: int in 14:
+		sim.tick()
+		for letter: Dictionary in sim.letters:
+			if String(letter["kind"]) == "more_power":
+				ask = letter["id"]
+		if ask >= 0:
+			break
+	check(ask >= 0, "AI data centre: a year after opening, Sam asks for more power")
+	if ask < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", ask)
+	await _frames(3)
+	var more := _find_button(hud.get("letter_panel"), "Give it more power")
+	check(more != null and String((hud.get("_letter_body") as Label).text).contains("a bit more power"),
+		"AI data centre: the letter offers Give it more power")
+	await _shot("p45_more_power_letter")
+	await _click(more)
+	await _frames(2)
+	k = sim.deal_by_id(id)
+	check(sim.deal_power(sim.deals[k]) == 1250 and String(game.call("_tile_text", (o.y + 9) * sim.w + o.x)).contains("1,250 power now (x1.25"),
+		"AI data centre: yes: it now uses 1,250 power")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(o + Vector2i(2, 11), PLAY_DISTANCE * 0.6, -30.0, 32.0, [])
+	await _shot("p46_ai_data_centre")
+	# Ignored once, then no twice: OpenAI leaves, its empty halls stay.
+	var first: int = sim.call("_send_letter", Companies.more_power_letter(id))
+	sim.month += Settings.LETTER_MONTHS
+	sim.call("_update_letters")
+	k = sim.deal_by_id(id)
+	check(k >= 0 and int(sim.deals[k]["refusals"]) == 1 and sim.letter_by_id(first).is_empty(),
+		"AI data centre: a request left unanswered counts as a no (1 of %d)" % Settings.AI_REFUSALS)
+	var last := ""
+	for n: int in 2:
+		var again: int = sim.call("_send_letter", Companies.more_power_letter(id))
+		last = String(sim.answer_letter(again, false)["text"])
+	check(sim.deal_by_id(id) < 0 and last.contains("moved its data centre") and sim.tiles[(o.y + 9) * sim.w + o.x] == T.AI_DATA_CENTRE
+		and String(game.call("_tile_text", (o.y + 9) * sim.w + o.x)).contains("no company runs it"),
+		"AI data centre: three no's and OpenAI leaves; its empty halls stay (%s)" % last)
+	sim.letters.clear()
+	game.call("_refresh_hud")
 
 
 func _examples() -> void:

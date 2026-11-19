@@ -161,6 +161,23 @@ const LAUNCH_LETTER := ["SpaceX", "Elon Musk",
 	+ "Tourists will love it. Done in 6 months.\n\nElon"]
 
 
+# OpenAI's AI data centre: Sam Altman, all lowercase, calm, grateful, needing
+# more power every year (MORE_POWER_LETTER).
+const AI_LETTER := ["OpenAI", "Sam Altman",
+	"hi mayor,\n\nwe'd love to build a data centre in your town. a big one. to benefit all of humanity.\n\n"
+	+ "it needs about as much power as a city. maybe twice. we'll figure it out together. if you have room "
+	+ "for a nuclear plant or three, that would be amazing.\n\ngrateful for you,\nsam"]
+const MORE_POWER_LETTER := "hi mayor,\n\nthe data centre is going really well. we're so grateful.\n\n" \
+	+ "we need a bit more power. maybe a quarter more. then probably a quarter more after that. it's for agi, " \
+	+ "which will benefit everyone, including your town (probably).\n\nsay no and we'll understand. we might " \
+	+ "have to understand somewhere else, though.\n\ngrateful for you,\nsam"
+
+
+static func more_power_letter(deal_id: int) -> Dictionary:
+	return {"kind": "more_power", "company": "OpenAI", "from": "Sam Altman, OpenAI", "deal": deal_id,
+		"subject": "openai would like a bit more power", "body": MORE_POWER_LETTER, "big": true}
+
+
 static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array) -> Dictionary:
 	# A letter offering a company project (Settings.PROJECTS), or {} if everyone
 	# who'd write is already busy here.
@@ -179,6 +196,12 @@ static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array
 				return {}
 			return {"kind": "launch_site", "company": e2[0], "from": "%s, %s" % [e2[1], e2[0]],
 				"subject": "SpaceX wants to launch rockets from your coast", "body": e2[2], "big": true}
+		"ai_data_centre":
+			var a: Array = AI_LETTER
+			if busy.has(a[0]):
+				return {}
+			return {"kind": "ai_data_centre", "company": a[0], "from": "%s, %s" % [a[1], a[0]],
+				"subject": "openai wants to build a very big data centre in your town", "body": a[2], "big": true}
 		"campus":
 			var c: Array = CAMPUS_LETTER
 			if busy.has(c[0]):
@@ -199,6 +222,8 @@ static func project_who(kind: String) -> String:
 			return "Google's campus"
 		"launch_site":
 			return "SpaceX's launch site"
+		"ai_data_centre":
+			return "OpenAI's AI data centre"
 	return kind
 
 
@@ -230,6 +255,13 @@ static func deal_news(kind: String, deal: Dictionary) -> String:
 			return "%s has closed its %s here and left." % [company, _word(deal)]
 		"launch":
 			return "SpaceX has launched %d rockets from your coast. Tourists line the beach to watch." % int(deal.get("launches", 0))
+		"more_power":
+			return "OpenAI's data centre now uses %s power (x%.2f since it opened)." % [_pounds(int(deal.get("power_now", 0))).trim_prefix("£"),
+				float(deal.get("power_x", 1.0))]
+		"sulk":
+			return "Sam Altman says that's totally fine. (That's %d no's now. OpenAI has noticed.)" % int(deal.get("refusals", 0))
+		"moved":
+			return "OpenAI has moved its data centre to a town with more power. Its empty halls are still yours."
 		"boom":
 			return "SpaceX's rocket underwent a \"rapid unscheduled disassembly\" over the launch site. Elon says the data is excellent. No launches for %d months." % Settings.LAUNCH_REPAIR_MONTHS
 	return ""

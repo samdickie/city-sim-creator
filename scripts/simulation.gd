@@ -13,7 +13,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	GOLF, LIBRARY, MUSEUM, STADIUM, MARINA, TOWN_HALL, BUS_DEPOT, STATION, HARBOUR,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
-	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE }
+	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -25,12 +25,12 @@ const BUILDING_KEYS := {
 	Tile.BIG_BEN: "big_ben", Tile.COLOSSEUM: "colosseum", Tile.GREAT_PYRAMID: "great_pyramid", Tile.LIBERTY: "liberty",
 	Tile.TAJ_MAHAL: "taj_mahal", Tile.OPERA_HOUSE: "opera_house", Tile.EIFFEL: "eiffel", Tile.EMPIRE_STATE: "empire_state",
 	Tile.INCINERATOR: "incinerator", Tile.DATA_CENTRE: "data_centre", Tile.GIGAFACTORY: "gigafactory",
-	Tile.TECH_CAMPUS: "tech_campus", Tile.LAUNCH_SITE: "launch_site",
+	Tile.TECH_CAMPUS: "tech_campus", Tile.LAUNCH_SITE: "launch_site", Tile.AI_DATA_CENTRE: "ai_data_centre",
 }
-const LAST_TILE := Tile.LAUNCH_SITE   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.AI_DATA_CENTRE   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
 const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
-	"launch_site": Tile.LAUNCH_SITE}
+	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE}
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -910,7 +910,10 @@ func _update_letters() -> void:
 	var kept: Array[Dictionary] = []
 	for letter: Dictionary in letters:
 		if month - int(letter.get("month", month)) >= Settings.LETTER_MONTHS:
-			news.append(Companies.expired_news(letter))
+			if String(letter.get("kind", "")) == "more_power":
+				news.append(_refuse_more_power(int(letter.get("deal", -1))))
+			else:
+				news.append(Companies.expired_news(letter))
 			_change_appetite(-Settings.APPETITE_NO)
 		else:
 			kept.append(letter)
@@ -1033,6 +1036,8 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 	if not yes:
 		letters.erase(letter)
 		_change_appetite(-Settings.APPETITE_NO)
+		if String(letter.get("kind", "")) == "more_power":
+			return {"ok": true, "text": _refuse_more_power(int(letter.get("deal", -1)))}
 		return {"ok": true, "text": "You turned down %s." % company}
 	match String(letter.get("kind", "")):
 		"startup":
@@ -1055,6 +1060,19 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			recount()
 			return {"ok": true, "text": "You backed %s with %s. They've moved into the Tech zone." % [company, Companies._pounds(grant)], "tile": plot}
 	var kind: String = letter.get("kind", "")
+	if kind == "more_power":
+		var dk := deal_by_id(int(letter.get("deal", -1)))
+		letters.erase(letter)
+		if dk < 0:
+			return {"ok": true, "text": "OpenAI has gone already."}
+		var deal: Dictionary = deals[dk]
+		deal["power_x"] = minf(float(deal.get("power_x", 1.0)) + Settings.AI_POWER_STEP, Settings.AI_POWER_MAX)
+		deal["tax_x"] = float(deal.get("tax_x", 1.0)) + Settings.AI_TAX_STEP
+		deal["power_now"] = deal_power(deal)
+		_change_appetite(Settings.APPETITE_YES)
+		_power_dirty = true
+		recount()
+		return {"ok": true, "text": Companies.deal_news("more_power", deal)}
 	if Settings.PROJECTS.has(kind):
 		var scales: Array = Settings.PROJECTS[kind]["scales"]
 		var k := clampi(choice, 0, scales.size() - 1)
@@ -1178,8 +1196,10 @@ func _deal_share(i: int, what: String) -> int:
 	var deal: Dictionary = deals[int(_deal_at[i])]
 	if deal_building(int(_deal_at[i])):
 		return 0
-	var total: int = deal_scale(deal)[what]
-	return ceili(float(total) / maxi(int(deal.get("count", 1)), 1))
+	var total: float = float(deal_scale(deal)[what])
+	if what == "power":
+		total *= float(deal.get("power_x", 1.0))     # (OpenAI's grows every year)
+	return ceili(total / maxi(int(deal.get("count", 1)), 1))
 
 
 func deal_building(k: int) -> bool:
@@ -1217,7 +1237,7 @@ func deal_problem(k: int) -> String:
 	_update_water()
 	for i in mine:
 		if powered[i] == 0:
-			return "not enough power (it needs %d)" % int(deal_scale(deal)["power"])
+			return "not enough power (it needs %d)" % deal_power(deal)
 	for i in mine:
 		if watered[i] == 0:
 			return "not enough water (it needs %d)" % int(deal_scale(deal)["water"])
@@ -1277,7 +1297,7 @@ func company_tax() -> int:
 	var total := 0
 	for k: int in deals.size():
 		if int(deals[k].get("break_left", 0)) <= 0 and deal_working(k):
-			total += int(deal_scale(deals[k])["tax"])
+			total += roundi(float(deal_scale(deals[k])["tax"]) * float(deals[k].get("tax_x", 1.0)))
 	return total
 
 
@@ -1302,11 +1322,16 @@ func _measure_campus_rise() -> void:
 		clampf(float(jobs_here) / population * Settings.CAMPUS_PRICE_EFFECT, 0.0, Settings.COST_MAX_RISE)
 
 
+func deal_power(deal: Dictionary) -> int:
+	# What a project uses now (OpenAI's grows each year it says yes).
+	return roundi(float(deal_scale(deal)["power"]) * float(deal.get("power_x", 1.0)))
+
+
 func company_power() -> int:
 	var total := 0
 	for k: int in deals.size():
-		if int(deals[k].get("count", 0)) > 0:
-			total += int(deal_scale(deals[k])["power"])
+		if int(deals[k].get("count", 0)) > 0 and not deal_building(k):
+			total += deal_power(deals[k])
 	return total
 
 
@@ -1376,11 +1401,17 @@ func _update_deals() -> void:
 		elif deal_working(k):
 			if not bool(deal.get("opened", false)):
 				deal["opened"] = true
+				deal["opened_month"] = month
 				deal["late"] = month - int(deal.get("placed", deal["month"]))
 				money += int(deal.get("investment", 0))
 				news.append(Companies.deal_news("open", deal))
 			elif int(deal.get("break_left", 0)) > 0:
 				deal["break_left"] = int(deal["break_left"]) - 1
+			var age := month - int(deal.get("opened_month", month))
+			if deal_kind(deal) == "ai_data_centre" and age > 0 and age % 12 == 0 \
+					and float(deal.get("power_x", 1.0)) < Settings.AI_POWER_MAX - 0.001 and not _has_letter("more_power"):
+				# Every year: "we need a bit more power".
+				_send_letter(Companies.more_power_letter(int(deal["id"])))
 			if deal_kind(deal) == "launch_site" and _rng.randf() < float(deal_scale(deal).get("launches", 0.0)):
 				# Lift-off. Now and then the rocket blows up and the site stops for repairs.
 				deal["launches"] = int(deal.get("launches", 0)) + 1
@@ -1392,6 +1423,22 @@ func _update_deals() -> void:
 		kept.append(deal)
 	deals = kept
 	_index_deals()
+
+
+func _refuse_more_power(deal_id: int) -> String:
+	# No (or no answer) to OpenAI's yearly "a bit more power": after AI_REFUSALS it leaves.
+	var dk := deal_by_id(deal_id)
+	if dk < 0:
+		return "OpenAI has gone already."
+	var deal: Dictionary = deals[dk]
+	deal["refusals"] = int(deal.get("refusals", 0)) + 1
+	if int(deal["refusals"]) >= Settings.AI_REFUSALS:
+		deals.remove_at(dk)
+		_change_appetite(-Settings.APPETITE_NO * 3.0)
+		_power_dirty = true
+		_index_deals()
+		return Companies.deal_news("moved", deal)
+	return Companies.deal_news("sulk", deal)
 
 
 func _update_startups() -> void:
@@ -1473,6 +1520,8 @@ func _load_letters(data: Dictionary) -> void:
 			letter["month"] = int(letter.get("month", 0))
 			if letter.has("grant"):
 				letter["grant"] = int(letter["grant"])
+			if letter.has("deal"):
+				letter["deal"] = int(letter["deal"])
 			letters.append(letter)
 	startups.clear()
 	for item in data.get("startups", []):
@@ -1495,7 +1544,9 @@ func _load_letters(data: Dictionary) -> void:
 				"scale": int(d.get("scale", 0)), "month": int(d.get("month", 0)), "tiles": list,
 				"opened": bool(d.get("opened", false)), "break_left": int(d.get("break_left", 0)),
 				"priority": bool(d.get("priority", false)), "investment": int(d.get("investment", 0)),
-				"launches": int(d.get("launches", 0)), "repair_until": int(d.get("repair_until", 0))})
+				"launches": int(d.get("launches", 0)), "repair_until": int(d.get("repair_until", 0)),
+				"power_x": float(d.get("power_x", 1.0)), "tax_x": float(d.get("tax_x", 1.0)),
+				"refusals": int(d.get("refusals", 0)), "opened_month": int(d.get("opened_month", d.get("opens", 0)))})
 	_index_deals()
 	investor_appetite = clampf(float(data.get("investor_appetite", Settings.APPETITE_START)), 0.0, 1.0)
 	letter_count = int(data.get("letter_count", letters.size()))

@@ -1654,6 +1654,13 @@ func open_letter(id: int) -> void:
 	no.custom_minimum_size = Vector2(108, 36)
 	no.pressed.connect(func(): letter_answered.emit(id, false, 0))
 	_letter_buttons.add_child(no)
+	if String(letter.get("kind", "")) == "more_power":
+		var more := _button("Give it more power", false)
+		more.theme_type_variation = "Primary"
+		more.custom_minimum_size = Vector2(170, 36)
+		more.tooltip_text = "It will use a quarter more power (and pay a little more tax). Say no %d times and OpenAI leaves" % Settings.AI_REFUSALS
+		more.pressed.connect(func(): letter_answered.emit(id, true, 0))
+		_letter_buttons.add_child(more)
 	if String(letter.get("kind", "")) == "startup":
 		var yes := _button("Back them (%s)" % money_text(int(letter.get("grant", 0))), false)
 		yes.theme_type_variation = "Primary"
