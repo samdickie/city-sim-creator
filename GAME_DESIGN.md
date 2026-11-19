@@ -474,6 +474,11 @@ Data centre scales, as an example:
 5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Built Nov 2026: company projects, Tesla's Gigafactory, Google's campus, SpaceX's launch site and OpenAI's AI data centre. Still to do: Elon threatening to leave if the Tech zone tax goes up; Apple, Meta and Nvidia.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 
+### To consider next (Sam, Nov 2026; not started)
+- **Make it feel like Silicon Valley.** Buildings, style and geography: Californian homes (low stucco ranch houses, Spanish-revival bungalows) in place of the Scottish sandstone villas and tenements; glass mid-rise offices, strip malls and big car parks; palm trees and dry golden hills; warmer, sunnier light. For the land, a bay with hills behind it (fits step 4, the generated map: a "Bay" kind of land). A big job: the whole building set and the countryside's look.
+- **San Francisco's famous buildings as landmarks**, alongside or instead of today's eight: e.g. the Golden Gate Bridge (needs a way to build over water), Transamerica Pyramid, Salesforce Tower, Coit Tower, the Painted Ladies (a row of Victorian houses), Alcatraz (an island), the Ferry Building, the Palace of Fine Arts.
+- **Proper Blender models for the company buildings**, in place of today's boxes and cylinders: glass pavilions with real window frames for Google, a lattice launch tower and a stainless rocket for SpaceX, Tesla's factory, and more detailed halls for the data centres and OpenAI. The box versions stay as the fallback (the usual rule), and the menu and letter pictures come from the same models.
+
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*

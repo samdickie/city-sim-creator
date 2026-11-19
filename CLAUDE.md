@@ -131,6 +131,7 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - **Education and tech workers (Nov 2026, branch `tech-layer`), not yet played by Sam:** `Tile.COLLEGE`, `UNIVERSITY`, `RESEARCH_PARK` (on the end), `Settings.BUILDINGS` entries with `tech`, `students`, `research`, `near` (`can_build_here` checks `near` with `_within`); a new `Tool.EDUCATION` group and Build menu category "education". University and research park tiles work as one site (`_update_area_groups`, `_group_ok`). `sim.tech_share` (saved; -1 = work out at the next recount), `_tech_target()`, `_update_tech()` in `tick()`, `tech_workers()`, `tech_trend()`, `students()` (home demand), `research_boost()`; `tech_workers` in `Settings.PROJECTS` gates `project_chance`. City panel `tech_label`. Play test `_education` (Education tool is 16), picture p47.
 
 ## Ideas not started
+- Sam's to-consider list (Nov 2026; details in GAME_DESIGN.md, Tech layer, "To consider next"): make it feel like Silicon Valley (Californian buildings, palm trees, golden hills, a bay); San Francisco's famous buildings as landmarks; proper Blender models for the company buildings (box versions kept as fallback)
 - Goals and scenarios
 - Sound
 - Tutorial
