@@ -347,6 +347,99 @@ def bungalow(variant="a"):
     return mb, (w, d, h, rise)
 
 
+# ----------------------------------------------- Californian homes (Palo Alto)
+# Variants of the bungalow and villa: the same declared sizes (so the game fits
+# them to the same plots), with lower Californian roofs built inside that size.
+# Walls are stucco ("render", the wall colour); roofs are clay tile or shingle
+# ("roof", the roof colour).
+
+def ca_window(mb, f, a, z, w, h):
+    window(mb, f, a, z, w, h, surround=False, bars=False, sill=False, lintel=False)
+
+
+def ranch():
+    # A low ranch house: one long storey, a shallow hipped roof with deep eaves, a
+    # big picture window, the front door and a garage door.
+    w, d, h, rise = 8.0, 8.0, 3.2, 3.6
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, 2.9, "render")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.2, 0.15, "stone")
+    f, b = front(w, d), back(w, d)
+    ca_window(mb, f, -2.2, 0.8, 2.6, 1.4)                  # picture window
+    f.slab(mb, -0.3, 0.6, 0.0, 2.1, 0.0, 0.05, "door")
+    f.slab(mb, 1.3, 3.7, 0.0, 2.2, 0.0, 0.06, "frame")     # garage door
+    for a in (-2.0, 2.0):
+        ca_window(mb, b, a, 1.0, 1.4, 1.0)
+    hip_roof(mb, w, d, 2.9, 1.3, over=0.8)
+    return mb, (w, d, h, rise)
+
+
+def mission():
+    # A Spanish-style bungalow: stucco, a low clay-tile gable roof, an arcaded porch
+    # with three openings, and deep-set windows.
+    w, d, h, rise = 8.0, 8.0, 3.2, 3.6
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2 + 0.0, d / 2 - 1.6, 0.0, 3.1, "render")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.2, 0.15, "stone")
+    # The porch: a stucco front wall with three openings, under its own low roof.
+    y0, y1 = d / 2 - 1.6, d / 2
+    for x0, x1 in ((-w / 2, -2.9), (-1.7, -1.1), (1.1, 1.7), (2.9, w / 2)):
+        mb.box(x0, x1, y1 - 0.35, y1, 0.0, 2.7, "render")
+    mb.box(-w / 2, w / 2, y1 - 0.35, y1, 2.2, 2.7, "render")
+    mb.box(-0.4, 0.4, y0, y0 + 0.05, 0.0, 2.1, "door")
+    f2 = Face((0, y0, 0), (1, 0, 0), (0, 1, 0))
+    for a in (-2.4, 2.4):
+        ca_window(mb, f2, a, 0.9, 1.0, 1.3)
+    b = back(w, d)
+    for a in (-2.0, 2.0):
+        ca_window(mb, b, a, 1.0, 1.0, 1.2)
+    gable_roof(mb, w, d, 3.1, 1.2, over=0.3, gable_over=0.2, skews=False)
+    return mb, (w, d, h, rise)
+
+
+def ca_villa():
+    # A two-storey Spanish revival house: stucco, a low clay-tile hipped roof, tall
+    # windows, a balcony over the door with an iron railing.
+    w, d, h, rise = 7.4, 8.0, 5.8, 3.4
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, 5.8, "render")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.2, 0.15, "stone")
+    f, b = front(w, d), back(w, d)
+    f.slab(mb, -0.5, 0.5, 0.0, 2.3, 0.0, 0.05, "door")
+    for a in (-2.3, 2.3):
+        ca_window(mb, f, a, 0.8, 1.2, 1.7)
+        ca_window(mb, f, a, 3.6, 1.1, 1.4)
+    ca_window(mb, f, 0.0, 3.4, 1.4, 1.9)
+    mb.box(-1.2, 1.2, d / 2, d / 2 + 0.8, 3.15, 3.35, "render")            # balcony
+    for x in [-1.15 + k * 0.23 for k in range(11)]:
+        mb.box(x - 0.025, x + 0.025, d / 2 + 0.72, d / 2 + 0.78, 3.35, 4.3, "metal")
+    mb.box(-1.2, 1.2, d / 2 + 0.7, d / 2 + 0.8, 4.25, 4.35, "metal")
+    for a in (-2.0, 2.0):
+        ca_window(mb, b, a, 0.9, 1.1, 1.4)
+        ca_window(mb, b, a, 3.6, 1.1, 1.4)
+    hip_roof(mb, w, d, 5.8, 1.5, over=0.6)
+    return mb, (w, d, h, rise)
+
+
+def ca_modern():
+    # A modern Californian house: two white stucco boxes, the upper one sliding over
+    # the lower, big glass, a flat roof with a thin edge, timber (door colour) by the door.
+    w, d, h, rise = 7.4, 8.0, 5.8, 3.4
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2 - 0.8, 0.0, 2.9, "render")
+    mb.box(-w / 2, w / 2 - 1.2, -d / 2, d / 2, 2.9, 5.8, "render")
+    mb.box(-w / 2 - 0.2, w / 2 - 1.0, -d / 2 - 0.2, d / 2 + 0.2, 5.8, 6.0, "frame")
+    mb.box(-w / 2 - 0.1, w / 2 + 0.1, -d / 2 - 0.1, d / 2 - 0.7, 2.9, 3.05, "frame")
+    f_low = Face((0, d / 2 - 0.8, 0), (1, 0, 0), (0, 1, 0))
+    f_low.slab(mb, -3.2, 1.0, 0.2, 2.6, -0.02, 0.02, "glass")
+    f_low.slab(mb, 1.6, 2.6, 0.0, 2.4, 0.0, 0.06, "door")
+    f = front(w, d)
+    f.slab(mb, -3.4, 0.6, 3.3, 5.4, -0.02, 0.02, "glass")
+    b = back(w, d)
+    b.slab(mb, -3.0, 3.0, 0.3, 2.6, -0.02, 0.02, "glass")
+    return mb, (w, d, h, rise)
+
+
 def terrace(variant="a"):
     # Three joined two-storey houses, each 5 m wide: door, a ground-floor window
     # (a bay on alternate houses), two windows upstairs; party-wall chimneys.
@@ -2017,6 +2110,60 @@ def rocket():
     return mb, (w, d, 122.8, 0.0)
 
 
+def dc_hall():
+    # One bay of a data centre hall (bays are repeated side by side along a hall):
+    # windowless cladding in the wall colour with panel joints, a dark band of
+    # louvres high up, a roller door at the front, and a parapet in the second colour.
+    w, d, h = 30.0, 40.0, 14.0
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, h - 1.0, "cladding")
+    mb.box(-w / 2 - 0.15, w / 2 + 0.15, -d / 2 - 0.15, d / 2 + 0.15, h - 1.0, h, "sheet")      # parapet
+    for y in (d / 2, -d / 2):
+        out = 1 if y > 0 else -1
+        for k in range(11):                                                     # panel joints
+            x = -w / 2 + 1.5 + k * 2.7
+            mb.box(x - 0.07, x + 0.07, min(y, y + 0.08 * out), max(y, y + 0.08 * out), 0.0, h - 1.0, "metal")
+        y0, y1 = (y, y + 0.12) if out > 0 else (y - 0.12, y)
+        mb.box(-w / 2 + 1.0, w / 2 - 1.0, y0, y1, 9.0, 11.5, "metal")              # louvres
+    mb.box(-3.0, 3.0, d / 2, d / 2 + 0.12, 0.0, 5.0, "sheet")                     # roller door
+    return mb, (w, d, h, 0.0)
+
+
+def ai_hall():
+    # One bay of OpenAI's hall: taller and darker, ribbed all over with vertical
+    # fins, two bands of louvres, and stair towers at the front corners.
+    w, d, h = 30.0, 40.0, 18.0
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, h - 1.2, "cladding")
+    mb.box(-w / 2 - 0.2, w / 2 + 0.2, -d / 2 - 0.2, d / 2 + 0.2, h - 1.2, h, "sheet")        # pale band
+    for y, s in ((d / 2, 1), (-d / 2, -1)):
+        for k in range(15):                                                     # fins
+            x = -w / 2 + 1.0 + k * 2.0
+            mb.box(x - 0.12, x + 0.12, min(y, y + 0.45 * s), max(y, y + 0.45 * s), 0.0, h - 1.2, "metal")
+        for z0 in (4.0, 11.5):                                                  # louvre bands
+            mb.box(-w / 2 + 0.5, w / 2 - 0.5, min(y, y + 0.2 * s), max(y, y + 0.2 * s), z0, z0 + 2.2, "metal")
+    for x in (-w / 2 + 2.5, w / 2 - 2.5):                                       # stair towers
+        mb.box(x - 2.0, x + 2.0, d / 2, d / 2 + 3.5, 0.0, h + 1.5, "sheet")
+    return mb, (w, d, h + 1.5, 0.0)
+
+
+def gigafactory_bay():
+    # One bay of Tesla's factory: a tall white wall (the wall colour), a deep black
+    # band along the top (the second colour), tall strips of glazing, and loading
+    # doors at the back.
+    w, d, h = 40.0, 60.0, 22.0
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, h - 5.0, "render")
+    mb.box(-w / 2 - 0.2, w / 2 + 0.2, -d / 2 - 0.2, d / 2 + 0.2, h - 5.0, h, "sheet")        # black band
+    for k in range(5):                                                          # glazing strips, front
+        x = -w / 2 + 4.0 + k * 8.0
+        mb.box(x - 1.0, x + 1.0, d / 2, d / 2 + 0.1, 2.0, h - 6.0, "glass")
+    for k in range(3):                                                          # loading doors, back
+        x = -w / 2 + 8.0 + k * 12.0
+        mb.box(x - 2.2, x + 2.2, -d / 2 - 0.12, -d / 2, 0.0, 5.0, "metal")
+    return mb, (w, d, h, 0.0)
+
+
 def google_pavilion(storeys):
     # A tech campus pavilion: glass all round in a light frame, white floor bands,
     # a recessed glass ground floor on slim columns, a canopy over the door, and a
@@ -2065,7 +2212,9 @@ MODELS = {
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
     "eiffel": eiffel, "big_ben": big_ben, "empire_state": empire_state, "liberty": liberty,
     "opera_house": opera_house, "taj_mahal": taj_mahal, "colosseum": colosseum, "great_pyramid": great_pyramid,
+    "ranch": ranch, "mission": mission, "ca_villa": ca_villa, "ca_modern": ca_modern,
     "launch_tower": launch_tower, "rocket": rocket,
+    "dc_hall": dc_hall, "ai_hall": ai_hall, "gigafactory_bay": gigafactory_bay,
     "google_pavilion3": lambda: google_pavilion(3), "google_pavilion4": lambda: google_pavilion(4),
 }
 for _n in range(2, 8):

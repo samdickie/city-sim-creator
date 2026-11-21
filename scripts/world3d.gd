@@ -27,7 +27,11 @@ const MODEL_DIMS := {
 	"classical4": Vector4(21.0, 13.0, 15.9, 4.0), "classical5": Vector4(21.0, 13.0, 19.3, 4.0),
 	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
 	"fire_station": Vector4(34.0, 18.0, 11.5, 0.0), "fire_tower": Vector4(6.0, 6.0, 23.0, 0.0),
+	"ranch": Vector4(8.0, 8.0, 3.2, 3.6), "mission": Vector4(8.0, 8.0, 3.2, 3.6),
+	"ca_villa": Vector4(7.4, 8.0, 5.8, 3.4), "ca_modern": Vector4(7.4, 8.0, 5.8, 3.4),
 	"launch_tower": Vector4(12.0, 12.0, 152.7, 0.0), "rocket": Vector4(11.0, 11.0, 122.8, 0.0),
+	"dc_hall": Vector4(30.0, 40.0, 14.0, 0.0), "ai_hall": Vector4(30.0, 40.0, 19.5, 0.0),
+	"gigafactory_bay": Vector4(40.0, 60.0, 22.0, 0.0),
 	"google_pavilion3": Vector4(34.0, 22.0, 11.6, 0.0), "google_pavilion4": Vector4(34.0, 22.0, 15.2, 0.0),
 	"school": Vector4(38.0, 13.0, 9.0, 4.5), "hospital": Vector4(34.0, 22.0, 20.8, 0.0),
 	# Whole sites (power stations) and the remaining landmarks, placed at their built size.
@@ -53,7 +57,10 @@ const MODEL_DIMS := {
 }
 # Other designs with the same size as a model above; one is picked for each building.
 const MODEL_VARIANTS := {
-	"villa": ["villa", "villa_b", "villa_c"], "bungalow": ["bungalow", "bungalow_b"],
+	# Palo Alto: Californian homes (ranch, Spanish bungalow, Spanish revival, modern) in
+	# place of the Scottish villas and bungalows (["villa", "villa_b", "villa_c"] and
+	# ["bungalow", "bungalow_b"]: put those back for the Troon look).
+	"villa": ["ca_villa", "ca_modern"], "bungalow": ["ranch", "mission"],
 	"terrace": ["terrace", "terrace_b"], "tenement3": ["tenement3", "tenement3_b"],
 	"tenement4": ["tenement4", "tenement4_b"], "shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
 	"modern_floor": ["modern_floor", "modern_floor_b"],
@@ -286,7 +293,7 @@ var _part_xf: Array[Transform3D] = []
 var _part_mesh := PackedInt32Array()           # which MultiMesh in _wood_mms
 var _part_index := PackedInt32Array()          # instance number in that MultiMesh
 var _parts_in_tile := {}                       # tile index -> Array of part numbers
-enum TreeKind { BROADLEAF, BIRCH, COLUMNAR, PINE, SPRUCE, ORNAMENTAL, COPPER, GARDEN, GORSE }
+enum TreeKind { BROADLEAF, BIRCH, COLUMNAR, PINE, SPRUCE, ORNAMENTAL, COPPER, GARDEN, GORSE, PALM }
 const GORSE_ALPHA := 0.5                       # canopy colour alpha that tells the foliage shader "gorse"
 const BARK := Color(0.30, 0.22, 0.15)
 const BIRCH_BARK := Color(0.80, 0.78, 0.72)
@@ -763,7 +770,8 @@ const FIELD_COL := 225.0                # average field length
 const FIELD_JITTER := 0.55              # how unevenly the fields are cut (share of a length)
 const FIELD_WOBBLE := 9.0               # metres the boundaries meander
 const FIELD_SPLIT := 0.35               # chance a field is cut in two
-const FIELD_HEDGE := 0.72               # chance a boundary is a hedge (otherwise a fence)
+const FIELD_HEDGE := 0.15               # chance a boundary is a hedge (otherwise a fence; Troon had 0.72)
+const GOLDEN := 1.0                     # Palo Alto: open grass and fields dried to gold (0 = Troon's green)
 const PLANT_CHANCE := 0.06              # chance a field on high ground is a conifer plantation
 const PLANT_MIN_HEIGHT := 35.0          # metres
 const FARM_MAX_HEIGHT := 105.0          # rough grazing above this
@@ -783,6 +791,7 @@ func _set_field_uniforms(mat: ShaderMaterial) -> void:
 	mat.set_shader_parameter("field_wobble", FIELD_WOBBLE)
 	mat.set_shader_parameter("field_split", FIELD_SPLIT)
 	mat.set_shader_parameter("field_hedge", FIELD_HEDGE)
+	mat.set_shader_parameter("golden", GOLDEN)
 	mat.set_shader_parameter("plant_chance", PLANT_CHANCE)
 	mat.set_shader_parameter("plant_min_height", PLANT_MIN_HEIGHT)
 	mat.set_shader_parameter("farm_max_height", FARM_MAX_HEIGHT)
@@ -3516,7 +3525,28 @@ const SLATE_DARK := Color(0.18, 0.20, 0.23)
 const BROWN_TILE := Color(0.36, 0.24, 0.18)
 const GREY_TILE := Color(0.32, 0.32, 0.33)
 const HOUSE_AREA := 3
+# Palo Alto's streets: stucco in white, cream, sand, peach, sage and pale yellow,
+# under clay-tile or grey and brown shingle roofs. (Troon's were sandstone, render
+# and brick under slate: SCOTTISH_HOUSE_PALETTES.)
+const STUCCO_WHITE := Color(0.93, 0.91, 0.86)
+const STUCCO_CREAM := Color(0.90, 0.84, 0.70)
+const STUCCO_SAND := Color(0.84, 0.74, 0.58)
+const STUCCO_PEACH := Color(0.90, 0.74, 0.62)
+const STUCCO_SAGE := Color(0.74, 0.78, 0.66)
+const STUCCO_YELLOW := Color(0.92, 0.84, 0.58)
+const STUCCO_GREY := Color(0.80, 0.79, 0.76)
+const CLAY_TILE := Color(0.70, 0.36, 0.24)
+const CLAY_DARK := Color(0.56, 0.28, 0.19)
+const SHINGLE_GREY := Color(0.40, 0.40, 0.40)
+const SHINGLE_BROWN := Color(0.42, 0.33, 0.26)
 const HOUSE_PALETTES := [
+	{"walls": [STUCCO_WHITE, STUCCO_CREAM, STUCCO_SAND, STUCCO_WHITE], "roofs": [CLAY_TILE, CLAY_DARK]},
+	{"walls": [STUCCO_PEACH, STUCCO_CREAM, STUCCO_WHITE, STUCCO_YELLOW], "roofs": [CLAY_TILE, CLAY_DARK, CLAY_TILE]},
+	{"walls": [STUCCO_GREY, STUCCO_WHITE, STUCCO_SAGE, STUCCO_CREAM], "roofs": [SHINGLE_GREY, SHINGLE_BROWN]},
+	{"walls": [STUCCO_SAND, STUCCO_CREAM, STUCCO_PEACH, STUCCO_WHITE], "roofs": [CLAY_DARK, SHINGLE_BROWN]},
+]
+const HOUSE_PALETTE_ODDS := [0, 0, 1, 1, 2, 3]   # how often each palette comes up
+const SCOTTISH_HOUSE_PALETTES := [
 	{"walls": [RED_SANDSTONE, RED_SANDSTONE_DEEP, RED_SANDSTONE, BLONDE_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
 	{"walls": [BLONDE_SANDSTONE, HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
 	{"walls": [WHITE_RENDER, CREAM_RENDER, WHITE_RENDER, OCHRE_RENDER], "roofs": [SLATE, SLATE_DARK, SLATE]},
@@ -3524,7 +3554,6 @@ const HOUSE_PALETTES := [
 	{"walls": [BUFF_BRICK, RED_BRICK, BUFF_BRICK, CREAM_RENDER], "roofs": [BROWN_TILE, GREY_TILE, ROOF_TILE]},
 	{"walls": [RED_SANDSTONE, BLONDE_SANDSTONE, WHITE_RENDER, WHINSTONE], "roofs": [SLATE, SLATE_DARK]},
 ]
-const HOUSE_PALETTE_ODDS := [0, 0, 1, 1, 2, 2, 3, 4, 5]   # how often each palette comes up
 
 
 func _house_palette(i: int) -> Dictionary:
@@ -4612,7 +4641,12 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	var band: Color = look["band"]
 	var trim: Color = look["trim"]
 	var kit: String = look["kit"]
-	var hall_h := 22.0 if kit == "factory" else 14.0
+	var hall_h := 22.0 if kit == "factory" else (18.0 if kit == "ai" else 14.0)
+	# Each hall is a row of bays (the model, repeated: a stretched model would smear
+	# its details), or a box where the model isn't there.
+	var bay_model := "gigafactory_bay" if kit == "factory" else ("ai_hall" if kit == "ai" else "dc_hall")
+	var bay_w := 40.0 if kit == "factory" else 30.0
+	var bay_extra := 1.5 if kit == "ai" else 0.0          # (OpenAI's stair towers rise above the roof)
 	if sim.deal_building(k):
 		_plan_site_works(site, wide, deep, margin, front_strip, hall_w, hall_d, wall_list, roof_list)
 		return true
@@ -4625,11 +4659,19 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	for n: int in halls:
 		var back := margin + front_strip + n * (each_d + gap)
 		var spot := _site_spot(site, 0.0, back, hall_w, each_d)
-		_add_block(spot, hall_w, each_d, hall_h, wall, STYLE_PAINT, 0.0, roof, wall_list, roof_list)
-		# A band along the top of the walls, a little proud of them.
-		var crown := _site_spot(site, 0.0, back - 0.3, hall_w + 0.6, each_d + 0.6)
-		crown["pos"] = (crown["pos"] as Vector3) + Vector3.UP * (hall_h - 1.6)
-		_add_block(crown, hall_w + 0.6, each_d + 0.6, 1.8, band, STYLE_PAINT, 0.0, band, wall_list, roof_list)
+		if _models.has(bay_model):
+			var bays := maxi(roundi(hall_w / bay_w), 1)
+			var each_w := hall_w / bays
+			for b: int in bays:
+				var bay := _site_spot(site, -hall_w * 0.5 + (b + 0.5) * each_w, back, each_w, each_d)
+				bay["pos"] = Vector3((bay["pos"] as Vector3).x, float((spot["pos"] as Vector3).y), (bay["pos"] as Vector3).z)
+				_add_model(bay_model, bay, each_w, each_d, hall_h + bay_extra, wall, band)
+		else:
+			_add_block(spot, hall_w, each_d, hall_h, wall, STYLE_PAINT, 0.0, roof, wall_list, roof_list)
+			# A band along the top of the walls, a little proud of them.
+			var crown := _site_spot(site, 0.0, back - 0.3, hall_w + 0.6, each_d + 0.6)
+			crown["pos"] = (crown["pos"] as Vector3) + Vector3.UP * (hall_h - 1.6)
+			_add_block(crown, hall_w + 0.6, each_d + 0.6, 1.8, band, STYLE_PAINT, 0.0, band, wall_list, roof_list)
 		var top := float((spot["pos"] as Vector3).y) + hall_h + 0.2
 		match kit:
 			"ai":
@@ -5967,6 +6009,23 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 				var tier_h := tall * (0.5 - k * 0.08)
 				tiers.append(_blob(spin, base + Vector3.UP * (tall * (0.12 + k * 0.24) + tier_h * 0.5),
 					Vector3(w, tier_h, w), _leaf_colour(green, rng)))
+		TreeKind.PALM:
+			# A palm: a tall, slim grey-brown trunk with a slight lean, and a crown of
+			# long fronds radiating out and drooping at the tips.
+			trunk_h = tall * 0.9
+			thick = 0.32 + tall * 0.012
+			bark = Color(0.42, 0.37, 0.30)
+			var green := Color(0.26, 0.40, 0.14)
+			var top := base + Vector3.UP * trunk_h
+			var fronds := 5 if lite else 8
+			for k in fronds:
+				var a := k * TAU / fronds + rng.randf_range(-0.2, 0.2)
+				var dir := Vector3(cos(a), 0.0, sin(a))
+				var length := tall * rng.randf_range(0.26, 0.32)
+				var frond := Basis(Vector3.UP, -a) * Basis(Vector3(0, 0, 1), -0.35)
+				blobs.append(_blob(frond, top + dir * length * 0.45 + Vector3.DOWN * length * 0.12,
+					Vector3(length, 0.35, length * 0.22), _leaf_colour(green, rng)))
+			blobs.append(_blob(spin, top, Vector3(1.4, 1.0, 1.4), _leaf_colour(green, rng)))
 		TreeKind.GORSE:
 			# A low, dense gorse bush (whin): dark spiny green, flecked yellow by
 			# the foliage shader. No trunk to speak of.
@@ -6233,8 +6292,9 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 			var line := tile.y if axis.x == 1 else tile.x + 1000
 			var street_rng := RandomNumberGenerator.new()
 			street_rng.seed = line * 7919 + 3
-			var kind: int = [TreeKind.BROADLEAF, TreeKind.BROADLEAF, TreeKind.ORNAMENTAL,
-				TreeKind.BIRCH, TreeKind.COPPER][street_rng.randi_range(0, 4)]
+			# (Palo Alto: half the streets are lined with palms.)
+			var kind: int = [TreeKind.PALM, TreeKind.PALM, TreeKind.PALM, TreeKind.BROADLEAF,
+				TreeKind.ORNAMENTAL, TreeKind.COPPER][street_rng.randi_range(0, 5)]
 			var rng := RandomNumberGenerator.new()
 			rng.seed = i * 17 + 5
 			if road == 1:
@@ -6260,6 +6320,8 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 					var spot := c + Vector2(axis) * (-18.75 + k * 12.5 + rng.randf_range(-0.8, 0.8)) \
 						+ Vector2(normal) * offset
 					var tall := rng.randf_range(6.5, 10.5) if kind != TreeKind.ORNAMENTAL else rng.randf_range(5.0, 7.0)
+					if kind == TreeKind.PALM:
+						tall = rng.randf_range(11.0, 16.0)
 					_add_tree(lists, _tree(spot, tall, kind, rng, 0.72))
 
 

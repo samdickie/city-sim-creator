@@ -37,6 +37,7 @@ uniform float field_jitter = 0.55;
 uniform float field_wobble = 9.0;
 uniform float field_split = 0.35;
 uniform float field_hedge = 0.72;
+uniform float golden = 0.0;          // 1 = California: open grass and fields dried to gold (lawns stay green)
 uniform float plant_chance = 0.1;
 uniform float plant_min_height = 35.0;
 uniform float farm_max_height = 105.0;
@@ -65,6 +66,16 @@ const vec3 ROCK = vec3(0.47, 0.45, 0.42);
 const vec3 WOOD_FLOOR = vec3(0.20, 0.27, 0.12);       // undergrowth: bracken, bramble, moss
 const vec3 NEEDLES = vec3(0.22, 0.24, 0.14);
 const vec3 HEDGE = vec3(0.13, 0.22, 0.09);
+const vec3 GOLD_GRASS = vec3(0.62, 0.50, 0.28);   // Californian summer hills: dry wild oats
+const vec3 GOLD_PALE = vec3(0.72, 0.60, 0.36);
+
+vec3 sunburnt(vec3 c, float tone) {
+	// The same light and shade, in dry golden grass (c and the result are linear).
+	float l = dot(c, vec3(0.3, 0.55, 0.15));
+	vec3 gold = mix(GOLD_GRASS, GOLD_PALE, tone);
+	gold = vec3(pow(gold.r, 2.2), pow(gold.g, 2.2), pow(gold.b, 2.2));
+	return gold * clamp(l / 0.13, 0.6, 1.1);
+}
 
 varying vec3 world_pos;
 varying vec3 world_normal;
@@ -206,6 +217,7 @@ void fragment() {
 	col = mix(col, mix(lin(MOOR), lin(HEATHER), smoothstep(0.45, 0.8, nC.b * 0.7 + nD.a * 0.3) * 0.55), moor * 0.75);
 	col *= 0.88 + 0.24 * nC.r;
 	col *= vec3(0.94 + 0.12 * nA.r, 1.0, 0.94 + 0.12 * nA.b);
+	col = mix(col, sunburnt(col, nB.r), golden * (1.0 - clamp(land.r * 1.4, 0.0, 0.6)));   // (damp hollows stay a little green)
 
 	// --- Fields with hedges in open country; conifer plantations on the hills.
 	float farm = wild * (1.0 - smoothstep(0.12, 0.4, wood_land)) * (1.0 - smoothstep(0.08, 0.35, land.b))
@@ -243,6 +255,7 @@ void fragment() {
 				fc = lin(mix(vec3(0.38, 0.31, 0.22), vec3(0.45, 0.37, 0.27), tone));        // ploughed
 				fc *= 1.0 + 0.1 * sin(along / 0.9) * near;
 			}
+			fc = mix(fc, sunburnt(fc, tone), golden * 0.85);
 			// Keep some of the land's own light and shade (dry slopes, damp hollows).
 			fc = mix(fc, col, 0.3);
 			fc *= 0.92 + 0.16 * nD.r;
