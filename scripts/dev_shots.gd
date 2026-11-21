@@ -336,7 +336,48 @@ func _coast_spot(id: String, near: Vector2i) -> Vector2i:
 				best = p
 				best_d = d
 	if best.x < 0:
+		best = _coast_with_road(id, near)
+	if best.x < 0:
 		print("[shots]   no seaside spot for %s near %s" % [id, near])
+	return best
+
+
+func _coast_with_road(id: String, near: Vector2i) -> Vector2i:
+	# No seaside spot by the town's roads (the layouts were drawn for Troon, with
+	# the sea to the west): take the seaside spot nearest `near` anywhere, and lay
+	# a road to it from the nearest road, as a player would.
+	var best := Vector2i(-1, -1)
+	var best_d := 1 << 30
+	game.call("_choose_item", id)
+	for y: int in sim.h:
+		for x: int in sim.w:
+			var p := Vector2i(x, y)
+			var here: int = sim.tiles[y * sim.w + x]
+			if here != Simulation.Tile.EMPTY or not sim.call("_beside_sea", y * sim.w + x):
+				continue
+			if String(game.call("_why_cant_build", p, false)) != "":
+				continue
+			var d := (p - near).length_squared()
+			if d < best_d:
+				best = p
+				best_d = d
+	if best.x < 0:
+		return best
+	var road := Vector2i(-1, -1)
+	var road_d := 1 << 30
+	for i: int in sim.w * sim.h:
+		if sim.tiles[i] == Simulation.Tile.ROAD:
+			var r := Vector2i(i % sim.w, i / sim.w)
+			var d := (r - best).length_squared()
+			if d < road_d:
+				road = r
+				road_d = d
+	if road.x >= 0:
+		var step := Vector2i(signi(road.x - best.x), signi(road.y - best.y))
+		var beside := best + (Vector2i(step.x, 0) if step.x != 0 else Vector2i(0, step.y))
+		_build("road", road, beside)
+		print("[shots]   laid a road from %s to the shore at %s for the %s" % [road, beside, id])
+	game.call("_choose_item", id)
 	return best
 
 

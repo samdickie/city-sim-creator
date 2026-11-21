@@ -17,7 +17,7 @@ const DevExamples = preload("res://scripts/dev_examples.gd")   # dev tool: tools
 const DevPromo = preload("res://scripts/dev_promo.gd")   # dev tool: tools/make_promo.sh
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
-const MAP_FILE := "res://map/troon_map.json"
+const MAP_FILE := "res://map/palo_alto_map.json"     # (Troon's is still in map/: make it MAP_FILE to play there)
 const SAVE_FILE := "user://troon_save.json"           # the player's own city
 const DEV_SAVE_FILE := "user://dev_tools_save.json"   # what Save and Load use when a dev tool runs the game
 const EXAMPLES_DIR := "res://examples"   # ready-made cities (the game menu's Example cities)
@@ -203,6 +203,7 @@ func _ready() -> void:
 		Tile.OFFICES: [TOOL_COLOURS[Tool.OFFICES], "Offices"],
 		Tile.INDUSTRY: [TOOL_COLOURS[Tool.INDUSTRY], "Industry"],
 	}, sim)
+	hud.set_city_name(map_name)
 	hud.tool_chosen.connect(_select_tool)
 	hud.build_item_chosen.connect(_choose_item)
 	hud.set_items(_menu_items())
@@ -1553,6 +1554,10 @@ func _load_game(path: String = "", done_text: String = "City loaded.") -> void:
 			or int(data.get("width", 0)) != map_w \
 			or int(data.get("height", 0)) != map_h:
 		hud.flash("That save doesn't match this map.")
+		return
+	var saved_map := str(data.get("map", map_name))
+	if saved_map != map_name:
+		hud.flash("That city was built on %s's map, not %s's, so it can't be loaded here." % [saved_map, map_name])
 		return
 	_cancel_drag()
 	hud.close_letter()

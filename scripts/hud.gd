@@ -100,6 +100,7 @@ var example_buttons: Dictionary = {}       # example id -> its row in the game m
 var _day_button: Button
 var speed_buttons := {}
 var undo_button: Button
+var city_label: Label                     # the map's name, top left
 # Letters from companies: the envelope (top left), its drop-down and the letter card.
 var inbox_button: Button
 var inbox_panel: PanelContainer
@@ -387,7 +388,8 @@ func _build_top_left() -> void:
 	row.add_child(_menu_button)
 
 	var words := _stack(row)
-	words.add_child(_label("Troon", 16, TEXT, true))
+	city_label = _label("", 16, TEXT, true)
+	words.add_child(city_label)
 	var when := _hbox(words, 6)
 	date_label = _label("", 12, TEXT_DIM)
 	when.add_child(date_label)
@@ -1730,6 +1732,10 @@ func set_speed(speed: int) -> void:
 	for k: int in speed_buttons:
 		(speed_buttons[k] as Button).set_pressed_no_signal(k == speed)
 	clock_label.add_theme_color_override("font_color", WARN if speed == 0 else TEXT_FAINT)
+
+
+func set_city_name(text: String) -> void:
+	city_label.text = text
 
 
 func set_undo(tip: String) -> void:

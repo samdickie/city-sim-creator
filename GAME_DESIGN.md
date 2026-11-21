@@ -7,7 +7,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Decisions
 - **Engine:** Godot 4.7, GDScript. Free tools only.
-- **Map:** OS Terrain 50 heights, 50 m per tile, 140 × 130 tiles (7 × 6.5 km). Starts entirely blank: no roads or buildings. (Planned: a generated map instead of Troon; see Tech layer.)
+- **Map:** **Palo Alto**, on the San Francisco Peninsula (the real Silicon Valley), from Nov 2026: downtown Palo Alto and the edge of Stanford to the west, East Palo Alto and the Baylands' marshes, and the open Bay to the north-east; very flat (highest 46 m), 12% water. Real heights from USGS 3DEP / NOAA via the AWS Terrain Tiles open data (`tools/make_bay_map.py`, which can make any place: `--centre LAT LON --size W H`). 50 m per tile, 140 × 130 tiles (7 × 6.5 km), the same as before. Starts entirely blank: no roads or buildings. The town's name top left is the map's name. (Before: Troon, from OS Terrain 50 heights; `map/troon_map.json` is kept, and saves from it can't be loaded on Palo Alto.)
 - **View:** Realistic 3D (Forward+ renderer): real terrain, sea, sky and sun; buildings modelled on Troon (sandstone villas and tenements, slate roofs). Free photo textures from Poly Haven drop into `assets/textures/` and are used automatically. The old 2D version is kept in `archive/2d/` for reference (Godot ignores it).
 - **Rules live apart from drawing.** Simulation code must not depend on graphics, so 2D can become 3D later.
 - **Simulate tiles and totals, not individual people.** A zone counts as connected if a road is near it. Traffic is a light model of trips a day per road tile (see Traffic), not individual cars; for now it is only shown, it doesn't hold the town back.
@@ -261,10 +261,11 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 ## Tech layer (planned Nov 2026; step 1, the Tech zone, built)
 The next direction: blend town planning with today's big-tech issues. You're the mayor; tech companies write asking to build, at a scale you pick, and you live with what follows: data centres eating power and water, campuses pushing up house prices, gigafactories filling the roads. Tongue-in-cheek throughout. Every number below is a first guess, to be tuned in play.
 
-### No more Troon
-- The map stops being Troon. A **generated map** replaces `map/troon_map.json`: same format (heights and sea per tile), made from a seed, so the same seed always gives the same land. The New city dialog adds a kind of land: **Coast, River valley, Inland hills, Desert flats** (cheap flat land is what data centres and gigafactories look for). The player names their city.
-- The example cities, screenshot town and play test are laid out on Troon's land, so they move to fixed seeds and get rebuilt.
-- The buildings stay the sandstone set for now; a modern glass-and-lawn style is a later job.
+### No more Troon: Palo Alto — built (Nov 2026), not yet played by Sam
+- Sam chose a real place over a generated map: **Palo Alto** (see Decisions, Map). The same file format, so the game works as before; `MAP_FILE` in game3d.gd says which map.
+- Saves keep the map's name; a save from another map is refused ("That city was built on Troon's map, not Palo Alto's").
+- The example cities were rebuilt on Palo Alto (Village 2,720 people, Town 14,780, City 43,580, all paying their way). Their layouts, drawn for Troon with the sea to the west, all sit on land here; seaside buildings (harbour, marina, Statue of Liberty, Opera House) go to the nearest shore on the Bay, with a road laid to them (dev_shots.gd `_coast_with_road`). The screenshot town does the same.
+- Still Scottish: the countryside (fields, hedges, woods), the sandstone buildings and the light. Making it look Californian is on the to-consider list.
 
 ### Real companies, real founders, as satire
 - Real company and founder names, so people recognise them. Names in text only: **no logos**.
@@ -470,7 +471,7 @@ Data centre scales, as an example:
 1. **Tech zone** with its own tax rate. *Built Nov 2026, not yet played.*
 2. **Letters and inbox**: start-ups and the data centre, with interest setting how often letters come. *Built Nov 2026 (letters, inbox, start-ups and the data centre), not yet played.*
 3. **College, university, research park** and tech workers. *Built Nov 2026, not yet played.*
-4. **Generated map** (no Troon); rebuild the examples.
+4. **The map: Palo Alto** (Sam chose a real place over a generated map); rebuild the examples. *Built Nov 2026, not yet played.*
 5. **Big Tech and mega projects** (Google, Tesla, SpaceX, OpenAI...) with their wishlists and quirks. *Built Nov 2026: company projects, Tesla's Gigafactory, Google's campus, SpaceX's launch site and OpenAI's AI data centre. Still to do: Elon threatening to leave if the Tech zone tax goes up; Apple, Meta and Nvidia.*
 6. **Deals** (Palantir, Waymo), companies leaving, headlines, goals; then whichever undecided ideas earn a place.
 

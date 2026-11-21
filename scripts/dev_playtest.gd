@@ -2632,6 +2632,22 @@ func _old_save() -> void:
 	check(is_equal_approx(sim.upkeep_scale(), 1.0), "an old save's running costs are as before (x1)")
 	var budget: Label = hud.get("_budget_caption")
 	check(budget.text.ends_with("NORMAL"), "the City panel's budget says \"%s\"" % budget.text)
+	# A city built on another map (Troon's, before the map was Palo Alto) is refused.
+	var other := sim.to_save()
+	other["map"] = "Troon"
+	other["width"] = sim.w
+	other["height"] = sim.h
+	other["money"] = 999
+	var other_path := "user://troon_playtest_other_map.json"
+	var fo := FileAccess.open(other_path, FileAccess.WRITE)
+	fo.store_string(JSON.stringify(other))
+	fo.close()
+	var money_now: int = sim.money
+	game.call("_load_game", other_path)
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(other_path))
+	var toast: Label = hud.get("message_label")
+	check(sim.money == money_now and toast.text.contains("built on Troon's map"),
+		"a city from another map isn't loaded (%s)" % toast.text)
 
 
 # ------------------------------------------------------------------ traffic

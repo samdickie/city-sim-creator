@@ -1,6 +1,6 @@
 # Troon City: context for Claude
 
-A SimCity-style city builder on Troon's real terrain (Ayrshire, Scotland), built in **Godot 4.7** (GDScript) by Sam.
+A SimCity-style city builder on Palo Alto's real terrain (the San Francisco Peninsula: Silicon Valley; until Nov 2026 it was Troon, Ayrshire), built in **Godot 4.7** (GDScript) by Sam, with a tech layer (companies, Tech zone, tech workers).
 Read this first, then `GAME_DESIGN.md` (the full design) before changing gameplay.
 
 ## Working with Sam
@@ -24,7 +24,8 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 | `assets/models/*.glb` | Building models made by `tools/make_buildings.py` |
 | `assets/icons/*.png` | Build menu pictures rendered from the same models by `tools/make_menu_pictures.py` |
 | `assets/textures/`, `assets/hdri/` | Photo textures (Poly Haven) and sky |
-| `map/troon_map.json` | Real terrain (OS Terrain 50), made by `tools/make_troon_map.py` |
+| `map/palo_alto_map.json` | The map: real terrain (USGS/NOAA via AWS Terrain Tiles), made by `tools/make_bay_map.py` (downloads into the git-ignored `map/.terrain_cache`); `MAP_FILE` in game3d.gd picks it |
+| `map/troon_map.json` | The old map (OS Terrain 50), made by `tools/make_troon_map.py`; saves from it don't load on Palo Alto |
 | `examples/*.json` | Ready-made cities in the game menu (Village, Town, City; `Settings.EXAMPLES`), made by `tools/make_examples.sh` |
 | `archive/2d/` | The old 2D version (Godot ignores it) |
 
@@ -129,6 +130,7 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - **SpaceX's launch site (Nov 2026, branch `tech-layer`), not yet played by Sam:** project kind `launch_site`, `Tile.LAUNCH_SITE` (on the end), `LAUNCH_SCALES` (with `tourism`, `launches`, `zone`), `near_sea` in `Settings.PROJECTS` (`_tech_coast_open`, the drag's coast check in game3d `_deal_too_small`). `_launch_zone` (built in `_index_deals`, `in_launch_zone(i)`) blocks homes in `_zone_check`, `_grow` and `_decline_reason`; `project_tourism()` adds shop demand; launches and explosions in `_update_deals` (`repair_until`, `deal_repairing`); `Companies.is_musk(deal)` for the "six months" jokes. Project land value now capped (`PROJECT_VALUE_MAX`, via `_sum_woodland`). world3d `_plan_launch_site`. Play test `_launch_site` (`_find_coast`), pictures p42-p44.
 - **OpenAI's AI data centre (Nov 2026, branch `tech-layer`), not yet played by Sam:** project kind `ai_data_centre`, `Tile.AI_DATA_CENTRE` (on the end), `AI_SCALES`, `AI_POWER_*`/`AI_REFUSALS`. Deals carry `power_x`/`tax_x` (`deal_power()` is what it uses now), `refusals`, `opened_month`; each year `_update_deals` sends a `more_power` letter (`Companies.more_power_letter`, card button "Give it more power"); no or a lapsed one goes through `_refuse_more_power` (3 and the deal is removed, its tiles stay as empty halls). Play test `_ai_data_centre`, pictures p45-p46.
 - **Education and tech workers (Nov 2026, branch `tech-layer`), not yet played by Sam:** `Tile.COLLEGE`, `UNIVERSITY`, `RESEARCH_PARK` (on the end), `Settings.BUILDINGS` entries with `tech`, `students`, `research`, `near` (`can_build_here` checks `near` with `_within`); a new `Tool.EDUCATION` group and Build menu category "education". University and research park tiles work as one site (`_update_area_groups`, `_group_ok`). `sim.tech_share` (saved; -1 = work out at the next recount), `_tech_target()`, `_update_tech()` in `tick()`, `tech_workers()`, `tech_trend()`, `students()` (home demand), `research_boost()`; `tech_workers` in `Settings.PROJECTS` gates `project_chance`. City panel `tech_label`. Play test `_education` (Education tool is 16), picture p47.
+- **The map is Palo Alto (Nov 2026, branch `tech-layer`), not yet played by Sam:** `tools/make_bay_map.py` (Pillow; any place with `--centre`/`--size`; smooths marsh speckles, `smooth_sea`), `map/palo_alto_map.json`. The HUD's name is the map's (`hud.set_city_name`); `_load_game` refuses a save whose `map` differs. Examples rebuilt; dev layouts unchanged (all on land), seaside buildings reach the Bay via `_coast_with_road`. The Godot project name stays "Troon City" (it decides the save folder).
 
 ## Ideas not started
 - Sam's to-consider list (Nov 2026; details in GAME_DESIGN.md, Tech layer, "To consider next"): make it feel like Silicon Valley (Californian buildings, palm trees, golden hills, a bay); San Francisco's famous buildings as landmarks; proper Blender models for the company buildings (box versions kept as fallback)

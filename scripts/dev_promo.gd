@@ -218,7 +218,7 @@ func _move(seconds: float, a: Array, b: Array, ease_amount: float = 0.0, each: C
 func _rename_city(node: Node) -> void:
 	# The interface's own name for the town (top left).
 	var l := node as Label
-	if l and l.text == "Troon":
+	if l and l.text == String(game.get("map_name")):
 		l.text = HUD_CITY_NAME
 	for child: Node in node.get_children():
 		_rename_city(child)
