@@ -1052,7 +1052,7 @@ func _find_coast(wide: int, high: int) -> Vector2i:
 					if water[i] == 1 or slope[i] > Settings.MAX_SLOPE_M * 0.5 or sim.tiles[i] != Simulation.Tile.EMPTY:
 						ok = false
 						break
-					if dy > 0 and sim.call("_beside_sea", i):
+					if dy > 0 and dx < wide - 1 and sim.call("_beside_sea", i):   # (inside the Tech zone the test paints)
 						coast = true
 				if not ok:
 					break

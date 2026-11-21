@@ -27,6 +27,8 @@ const MODEL_DIMS := {
 	"classical4": Vector4(21.0, 13.0, 15.9, 4.0), "classical5": Vector4(21.0, 13.0, 19.3, 4.0),
 	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
 	"fire_station": Vector4(34.0, 18.0, 11.5, 0.0), "fire_tower": Vector4(6.0, 6.0, 23.0, 0.0),
+	"launch_tower": Vector4(12.0, 12.0, 152.7, 0.0), "rocket": Vector4(11.0, 11.0, 122.8, 0.0),
+	"google_pavilion3": Vector4(34.0, 22.0, 11.6, 0.0), "google_pavilion4": Vector4(34.0, 22.0, 15.2, 0.0),
 	"school": Vector4(38.0, 13.0, 9.0, 4.5), "hospital": Vector4(34.0, 22.0, 20.8, 0.0),
 	# Whole sites (power stations) and the remaining landmarks, placed at their built size.
 	"coal_plant": Vector4(44.0, 44.0, 66.0, 0.0), "gas_plant": Vector4(44.0, 44.0, 46.0, 0.0),
@@ -4756,9 +4758,13 @@ func _plan_campus(site: Dictionary, wide: float, deep: float, seed_id: int, wall
 			var h := storeys * 3.6
 			var spot := _site_spot(site, along, back - pd * 0.5, pw, pd)
 			var glass := Color(0.55, 0.66, 0.74) if rng.randf() < 0.5 else Color(0.70, 0.76, 0.80)
-			_add_block(spot, pw, pd, h, glass, STYLE_GLASS, 0.0, glass, wall_list, roof_list)
-			var top := float((spot["pos"] as Vector3).y) + h + 0.1
-			_site_box(site, along, back - pd * 0.5 + 1.0, pw - 2.0, pd - 2.0, 0.4, Color(0.34, 0.52, 0.24), top)   # green roof
+			var pavilion := "google_pavilion%d" % storeys
+			if _models.has(pavilion):
+				_add_model(pavilion, spot, pw, pd, h + 0.8, glass, MODERN_WHITE)
+			else:
+				_add_block(spot, pw, pd, h, glass, STYLE_GLASS, 0.0, glass, wall_list, roof_list)
+				var top := float((spot["pos"] as Vector3).y) + h + 0.1
+				_site_box(site, along, back - pd * 0.5 + 1.0, pw - 2.0, pd - 2.0, 0.4, Color(0.34, 0.52, 0.24), top)   # green roof
 			# Trees in front and a rack of bikes by the door.
 			for n: int in 2:
 				var tree_at := _site_spot(site, along + (-0.5 + n) * (pw + 6.0), back + pd * 0.5 + 4.0, 1.0, 1.0)
@@ -4794,10 +4800,18 @@ func _plan_launch_site(site: Dictionary, wide: float, deep: float, deal: Diction
 		pz * (50.0 * big + 20.0)), pad["pos"]), Color(pad_colour, _surface_of(pad_colour))])
 	var tower_h := 50.0 + 90.0 * big
 	var mid_back := pad_back + (50.0 * big + 20.0) * 0.5
-	_site_box(site, -8.0, mid_back - 5.0, 9.0, 9.0, tower_h, Color(0.18, 0.19, 0.21))       # launch tower
-	_site_box(site, -2.5, mid_back - 2.0, 6.0, 1.5, 1.5, Color(0.18, 0.19, 0.21),
-		float((pad["pos"] as Vector3).y) + tower_h * 0.8)                                        # its arm
-	if not repairing:
+	if _models.has("launch_tower"):
+		# The lattice tower, its arms reaching out to the rocket.
+		var tower := _site_spot(site, -8.0, mid_back - 6.0, 12.0, 12.0)
+		_add_model("launch_tower", tower, 12.0, 12.0, tower_h, Color(0.18, 0.19, 0.21), Color(0.45, 0.46, 0.47))
+	else:
+		_site_box(site, -8.0, mid_back - 5.0, 9.0, 9.0, tower_h, Color(0.18, 0.19, 0.21))       # launch tower
+		_site_box(site, -2.5, mid_back - 2.0, 6.0, 1.5, 1.5, Color(0.18, 0.19, 0.21),
+			float((pad["pos"] as Vector3).y) + tower_h * 0.8)                                    # its arm
+	if not repairing and _models.has("rocket"):
+		var stack := _site_spot(site, 4.0, mid_back - 5.5, 11.0, 11.0)
+		_add_model("rocket", stack, 11.0, 11.0, tower_h * 0.9, steel, steel)
+	elif not repairing:
 		var rocket := _site_spot(site, 4.0, mid_back - 4.5, 9.0, 9.0)
 		var base: Vector3 = rocket["pos"]
 		var booster := tower_h * 0.5

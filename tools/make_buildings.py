@@ -1963,6 +1963,88 @@ def great_pyramid():
     return mb, (w, d, 29.8, 0.0)
 
 
+# ------------------------------------------------- company projects (tech layer)
+
+def launch_tower():
+    # SpaceX's launch tower: a square steel lattice (four columns, a ring every
+    # 10 m, cross-braced faces), two "chopstick" arms reaching out (+x) to the
+    # rocket, and a crane and mast on top. Dark steel throughout.
+    w = d = 12.0
+    mb = Builder()
+    half = 4.5
+    mb.box(-6.0, 6.0, -6.0, 6.0, -0.3, 1.0, "sheet")                      # the concrete base
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            mb.box(sx * half - 0.6, sx * half + 0.6, sy * half - 0.6, sy * half + 0.6, 1.0, 140.0, "metal")
+    for z in range(10, 141, 10):
+        for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half),
+                                 (half, half, -half, half), (-half, half, -half, -half)):
+            beam(mb, (x0, y0, z), (x1, y1, z), 0.5, "metal")
+    for z in range(1, 131, 10):
+        z1 = z + 9
+        for (x0, y0, x1, y1) in ((-half, -half, half, -half), (half, -half, half, half),
+                                 (half, half, -half, half), (-half, half, -half, -half)):
+            beam(mb, (x0, y0, z), (x1, y1, z1), 0.3, "metal")
+            beam(mb, (x1, y1, z), (x0, y0, z1), 0.3, "metal")
+    # The chopsticks: a carriage on the tower and two long arms towards the rocket.
+    mb.box(half, half + 1.6, -half - 0.6, half + 0.6, 92.0, 100.0, "metal")
+    for y in (-3.4, 3.4):
+        beam(mb, (half + 1.0, y, 96.0), (half + 13.0, y, 96.0), 1.2, "metal", 2.4)
+    mb.box(-6.5, 6.5, -6.5, 6.5, 140.0, 141.2, "metal")                    # the top deck
+    beam(mb, (0.0, 0.0, 141.2), (-14.0, 0.0, 147.0), 0.8, "metal")           # its crane jib
+    mb.box(-0.3, 0.3, -0.3, 0.3, 141.2, 152.0, "metal")                    # lightning mast
+    beacon(mb, 0.0, 0.0, 152.0)
+    return mb, (w, d, 152.7, 0.0)
+
+
+def rocket():
+    # A two-stage stainless rocket on its launch mount: the booster with grid fins
+    # near its top, a dark ring between the stages, the ship with its flaps and
+    # nose. The stainless takes the wall colour (render).
+    w = d = 11.0
+    mb = Builder()
+    revolve(mb, 0.0, 0.0, [(4.2, 0.0, "metal"), (4.5, 2.0, "metal"), (4.5, 69.0, "render"), (4.5, 71.5, "metal"),
+                           (4.5, 112.0, "render"), (4.2, 115.5, "render"), (3.4, 118.5, "render"),
+                           (2.1, 121.0, "render"), (0.5, 122.8, "render")], 20)
+    for k in range(4):
+        a = math.pi / 4 + k * math.pi / 2
+        c, s = math.cos(a), math.sin(a)
+        beam(mb, (c * 4.3, s * 4.3, 66.0), (c * 6.2, s * 6.2, 66.0), 0.4, "metal", 3.0)     # grid fins
+    for z0, z1, out in ((74.0, 82.0, 6.4), (106.0, 111.0, 5.8)):
+        for side in (-1, 1):
+            beam(mb, (side * 4.3, 0.0, z0), (side * out, 0.0, z0 + 1.0), 0.3, "metal", 0.0 + (z1 - z0))   # flaps
+    mb.box(-5.5, 5.5, -5.5, 5.5, -0.3, 0.0, "sheet")                       # the launch mount
+    return mb, (w, d, 122.8, 0.0)
+
+
+def google_pavilion(storeys):
+    # A tech campus pavilion: glass all round in a light frame, white floor bands,
+    # a recessed glass ground floor on slim columns, a canopy over the door, and a
+    # planted roof under an overhanging white edge. The glass takes the wall colour.
+    w, d, storey = 34.0, 22.0, 3.6
+    top = storeys * storey
+    mb = Builder()
+    mb.box(-w / 2 + 1.6, w / 2 - 1.6, -d / 2 + 1.6, d / 2 - 1.6, 0.0, storey, "curtain")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, storey, top, "curtain")
+    for k in range(9):                                                      # ground floor columns
+        x = -w / 2 + 0.4 + k * (w - 0.8) / 8
+        for y in (-d / 2 + 0.4, d / 2 - 0.4):
+            mb.box(x - 0.25, x + 0.25, y - 0.25, y + 0.25, 0.0, storey, "frame")
+    for n in range(1, storeys + 1):                                         # floor bands
+        z = n * storey
+        mb.box(-w / 2 - 0.3, w / 2 + 0.3, -d / 2 - 0.3, d / 2 + 0.3, z - 0.3, z + 0.2, "frame")
+    for x in [-w / 2 + 1.5 + k * 1.55 for k in range(21)]:                  # mullions, front and back
+        for y in (d / 2, -d / 2):
+            mb.box(x - 0.06, x + 0.06, y - 0.08, y + 0.08, storey, top, "frame")
+    for y in [-d / 2 + 1.5 + k * 1.58 for k in range(13)]:                  # and the ends
+        for x in (w / 2, -w / 2):
+            mb.box(x - 0.08, x + 0.08, y - 0.06, y + 0.06, storey, top, "frame")
+    mb.box(-4.5, 4.5, d / 2 - 1.6, d / 2 + 3.0, 3.1, 3.45, "frame")         # the door canopy
+    mb.box(-w / 2 - 1.2, w / 2 + 1.2, -d / 2 - 1.2, d / 2 + 1.2, top + 0.2, top + 0.6, "frame")   # roof edge
+    mb.box(-w / 2 + 0.6, w / 2 - 0.6, -d / 2 + 0.6, d / 2 - 0.6, top + 0.6, top + 0.8, "green")   # planted roof
+    return mb, (w, d, top + 0.8, 0.0)
+
+
 MODELS = {
     "villa": villa, "villa_b": lambda: villa("b"), "villa_c": lambda: villa("c"),
     "bungalow": bungalow, "bungalow_b": lambda: bungalow("b"),
@@ -1983,6 +2065,8 @@ MODELS = {
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
     "eiffel": eiffel, "big_ben": big_ben, "empire_state": empire_state, "liberty": liberty,
     "opera_house": opera_house, "taj_mahal": taj_mahal, "colosseum": colosseum, "great_pyramid": great_pyramid,
+    "launch_tower": launch_tower, "rocket": rocket,
+    "google_pavilion3": lambda: google_pavilion(3), "google_pavilion4": lambda: google_pavilion(4),
 }
 for _n in range(2, 8):
     MODELS["classical%d" % _n] = (lambda n: lambda: classical(n, "plain"))(_n)
