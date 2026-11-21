@@ -440,6 +440,60 @@ def ca_modern():
     return mb, (w, d, h, rise)
 
 
+def strip_mall(variant="a"):
+    # A Californian strip mall: a long single-storey stucco row of six shopfronts
+    # behind a continuous canopy on posts, a sign band and parapet. a: a little
+    # Spanish-style tower over the middle; b: a taller anchor store at one end.
+    # (The building is set back behind its car park; the front is +y.)
+    w, d, h = 46.0, 17.0, 8.0
+    mb = Builder()
+    yf = d / 2 - 3.0                                   # the shopfront line (the canopy is in front)
+    mb.box(-w / 2, w / 2, -d / 2, yf, 0.0, 5.0, "render")
+    mb.box(-w / 2 - 0.1, w / 2 + 0.1, -d / 2 - 0.1, yf + 0.1, 5.0, 5.6, "render")       # parapet
+    f = Face((0, yf, 0), (1, 0, 0), (0, 1, 0))
+    unit = w / 6
+    for k in range(6):
+        a0 = -w / 2 + k * unit
+        f.slab(mb, a0 + 0.35, a0 + unit - 0.35, 0.3, 3.1, -0.02, 0.03, "display")
+        f.slab(mb, a0 + unit * 0.5 - 0.6, a0 + unit * 0.5 + 0.6, 0.0, 2.4, 0.0, 0.05, "door")
+        f.slab(mb, a0 + 0.3, a0 + unit - 0.3, 3.6, 4.7, 0.0, 0.12, "fascia")              # sign
+    mb.box(-w / 2, w / 2, yf, d / 2, 3.25, 3.55, "frame")                                 # canopy
+    for k in range(7):
+        x = -w / 2 + 0.3 + k * (w - 0.6) / 6
+        mb.box(x - 0.15, x + 0.15, d / 2 - 0.45, d / 2 - 0.15, 0.0, 3.25, "frame")
+    if variant == "b":
+        mb.box(-w / 2, -w / 2 + 14.0, -d / 2, yf + 0.3, 0.0, 7.4, "render")             # anchor store
+        mb.box(-w / 2 - 0.1, -w / 2 + 14.1, -d / 2 - 0.1, yf + 0.4, 7.4, 8.0, "render")
+        fa = Face((0, yf + 0.3, 0), (1, 0, 0), (0, 1, 0))
+        fa.slab(mb, -w / 2 + 3.0, -w / 2 + 11.0, 0.0, 3.0, -0.02, 0.03, "display")
+        fa.slab(mb, -w / 2 + 1.5, -w / 2 + 12.5, 4.6, 6.6, 0.0, 0.15, "fascia")
+    else:
+        mb.box(-3.0, 3.0, yf - 2.0, d / 2 + 0.2, 0.0, 7.2, "render")                      # tower
+        pyramid(mb, 0.0, (yf - 2.0 + d / 2 + 0.2) / 2, 3.6, 7.2, 8.0, "roof")
+    return mb, (w, d, h, 0.0)
+
+
+def glass_office(storeys):
+    # A business-park office: bands of dark glass between white floor strips, slim
+    # vertical fins, a canopy over the door, plant on the roof behind a parapet.
+    w, d, storey = 40.0, 18.0, 3.8
+    top = storeys * storey
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, top, "office")
+    for k in range(1, storeys):
+        z = k * storey
+        mb.box(-w / 2 - 0.15, w / 2 + 0.15, -d / 2 - 0.15, d / 2 + 0.15, z - 0.5, z + 0.4, "frame")
+    for x in [-w / 2 + 0.6 + k * 2.6 for k in range(15)]:
+        for y in (d / 2, -d / 2):
+            mb.box(x - 0.08, x + 0.08, y - 0.25, y + 0.25, 0.0, top, "frame")
+    mb.box(-w / 2 - 0.2, w / 2 + 0.2, -d / 2 - 0.2, d / 2 + 0.2, top, top + 0.7, "frame")    # parapet
+    mb.box(-6.0, 6.0, -4.0, 4.0, top + 0.7, top + 2.4, "metal")                               # roof plant
+    mb.box(-5.0, 5.0, d / 2, d / 2 + 3.5, 3.2, 3.5, "frame")                                   # canopy
+    for x in (-4.7, 4.7):
+        mb.box(x - 0.12, x + 0.12, d / 2 + 3.2, d / 2 + 3.45, 0.0, 3.2, "frame")
+    return mb, (w, d, top + 2.4, 0.0)
+
+
 def terrace(variant="a"):
     # Three joined two-storey houses, each 5 m wide: door, a ground-floor window
     # (a bay on alternate houses), two windows upstairs; party-wall chimneys.
@@ -2212,6 +2266,8 @@ MODELS = {
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
     "eiffel": eiffel, "big_ben": big_ben, "empire_state": empire_state, "liberty": liberty,
     "opera_house": opera_house, "taj_mahal": taj_mahal, "colosseum": colosseum, "great_pyramid": great_pyramid,
+    "strip_mall": strip_mall, "strip_mall_b": lambda: strip_mall("b"),
+    "glass_office2": lambda: glass_office(2), "glass_office3": lambda: glass_office(3),
     "ranch": ranch, "mission": mission, "ca_villa": ca_villa, "ca_modern": ca_modern,
     "launch_tower": launch_tower, "rocket": rocket,
     "dc_hall": dc_hall, "ai_hall": ai_hall, "gigafactory_bay": gigafactory_bay,

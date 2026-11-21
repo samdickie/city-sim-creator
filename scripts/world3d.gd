@@ -28,6 +28,8 @@ const MODEL_DIMS := {
 	"classical6": Vector4(21.0, 13.0, 22.7, 4.0), "classical7": Vector4(21.0, 13.0, 26.1, 4.0),
 	"fire_station": Vector4(34.0, 18.0, 11.5, 0.0), "fire_tower": Vector4(6.0, 6.0, 23.0, 0.0),
 	"ranch": Vector4(8.0, 8.0, 3.2, 3.6), "mission": Vector4(8.0, 8.0, 3.2, 3.6),
+	"strip_mall": Vector4(46.0, 17.0, 8.0, 0.0), "glass_office2": Vector4(40.0, 18.0, 10.0, 0.0),
+	"glass_office3": Vector4(40.0, 18.0, 13.8, 0.0),
 	"ca_villa": Vector4(7.4, 8.0, 5.8, 3.4), "ca_modern": Vector4(7.4, 8.0, 5.8, 3.4),
 	"launch_tower": Vector4(12.0, 12.0, 152.7, 0.0), "rocket": Vector4(11.0, 11.0, 122.8, 0.0),
 	"dc_hall": Vector4(30.0, 40.0, 14.0, 0.0), "ai_hall": Vector4(30.0, 40.0, 19.5, 0.0),
@@ -61,6 +63,7 @@ const MODEL_VARIANTS := {
 	# place of the Scottish villas and bungalows (["villa", "villa_b", "villa_c"] and
 	# ["bungalow", "bungalow_b"]: put those back for the Troon look).
 	"villa": ["ca_villa", "ca_modern"], "bungalow": ["ranch", "mission"],
+	"strip_mall": ["strip_mall", "strip_mall_b"],
 	"terrace": ["terrace", "terrace_b"], "tenement3": ["tenement3", "tenement3_b"],
 	"tenement4": ["tenement4", "tenement4_b"], "shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
 	"modern_floor": ["modern_floor", "modern_floor_b"],
@@ -4216,6 +4219,9 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		var deck := _place(i, front, 0.0, 28.0, 40.0, depth - 31.0)
 		_add_block(deck, 40.0, depth - 31.0, 9.0, CONCRETE, STYLE_PLANT, 0.0, SLATE, wall_list, roof_list)
 		return
+	if lv <= 2 and _models.has("strip_mall"):
+		_plan_strip_mall(i, front, depth, rng, colours)
+		return
 	var park_from := 16.0           # the back of the shops
 	if lv >= 3:
 		for along: float in [-12.5, 12.5]:
@@ -4272,6 +4278,9 @@ func _plan_offices(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 	var modern: bool = rng.randf() < 0.45
 	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
 	_street_furniture(i, front, false)
+	if lv <= 2 and _models.has("glass_office%d" % (lv + 1)):
+		_plan_office_park(i, front, depth, lv, rng)
+		return
 	if lv >= 6:
 		var podium := _place(i, front, 0.0, 3.0, 46.0, 22.0)
 		_add_block(podium, 46.0, 22.0, 9.0, GLASS_FRAME, STYLE_GLASS, 0.0, SLATE, wall_list, roof_list)
@@ -4319,6 +4328,43 @@ func _plan_offices(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		for k in 2:
 			_plant(i, front, along, park_at + 3.0 + k * (park_depth - 6.0), rng.randf_range(6.0, 9.0),
 				TreeKind.BROADLEAF, rng)
+
+
+func _front_car_park(i: int, front: Vector2i, from: float, to: float, rng: RandomNumberGenerator) -> void:
+	# A car park in front of a set-back building, palms at its corners.
+	_slab(i, front, 0.0, from, 46.0, to - from, CAR_PARK)
+	_parking_bays(i, front, from + 1.0, to - 0.5, 0.65, rng)
+	for along: float in [-22.5, 22.5]:
+		_plant(i, front, along, from + 1.5, rng.randf_range(11.0, 14.0), TreeKind.PALM, rng)
+
+
+func _plan_strip_mall(i: int, front: Vector2i, depth: float, rng: RandomNumberGenerator, colours: Array) -> void:
+	# Palo Alto's small shops: a strip mall set back behind its car park, a
+	# service yard behind with bins and the odd delivery lorry.
+	_slab(i, front, 0.0, 0.0, 49.0, 3.0, PAVEMENT)
+	_front_car_park(i, front, 3.5, 20.5, rng)
+	var mall := _place(i, front, 0.0, 21.0, 46.0, 17.0)
+	_add_model("strip_mall", mall, 46.0, 17.0, 8.0, colours[rng.randi_range(0, colours.size() - 1)],
+		CLAY_TILE if rng.randf() < 0.6 else SHINGLE_GREY)
+	var yard := 38.6
+	for k in 5:
+		_prop(i, front, -21.0 + k * 1.0, yard + 0.6, 0.7, 0.8, 1.1, BINS[(k + i) % BINS.size()])
+	_prop(i, front, -14.0, yard + 1.0, 1.2, 1.0, rng.randf_range(0.5, 1.4), PALLETS)
+	if rng.randf() < 0.5 and depth - yard > 9.0:
+		_lorry(i, front, rng.randf_range(0.0, 10.0), yard + 3.5, true, rng)
+
+
+func _plan_office_park(i: int, front: Vector2i, depth: float, lv: int, rng: RandomNumberGenerator) -> void:
+	# Palo Alto's small offices: a low glass office set back behind a car park,
+	# with more parking behind (a business park).
+	var model_name := "glass_office%d" % (lv + 1)
+	_front_car_park(i, front, 3.5, 18.5, rng)
+	var office := _place(i, front, 0.0, 19.5, 40.0, 18.0)
+	_add_model(model_name, office, 40.0, 18.0, _model_total(model_name), Color(0.30, 0.38, 0.46), MODERN_WHITE)
+	var back_from := 39.5
+	if depth - back_from > 7.0:
+		_slab(i, front, 0.0, back_from, 44.0, depth - back_from - 1.6, CAR_PARK)
+		_parking_bays(i, front, back_from + 1.0, depth - 2.1, 0.6, rng)
 
 
 const PALLETS := Color(0.60, 0.47, 0.31)
