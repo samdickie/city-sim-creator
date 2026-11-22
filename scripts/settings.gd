@@ -43,6 +43,14 @@ const ROAD_NAMES := ["Road", "Avenue", "Motorway"]
 const ROAD_IDS := ["road", "avenue", "motorway"]
 const ROAD_COSTS := [10, 40, 120]             # £ a tile
 const ROAD_UPKEEPS := [0.5, 1.5, 4.0]         # £ a tile a month
+# Bridges: a road dragged across water, straight from shore to shore, becomes a
+# bridge (a deck on piers). Each tile over water costs this many times as much,
+# to build and to keep up, and a bridge can be at most BRIDGE_MAX_TILES long.
+const BRIDGE_COST_X := 25
+const BRIDGE_UPKEEP_X := 6
+const BRIDGE_MAX_TILES := 40
+const ALCATRAZ_OFFSHORE := 2         # Alcatraz goes at least this many tiles out from the shore
+const GOLDEN_GATE_MIN_TILES := 8      # a bridge at least this long (400 m) can become the Golden Gate
 const ROAD_CAPACITIES := [5000.0, 14000.0, 40000.0]   # trips a day before it's full
 const ROAD_STEPS := [12, 8, 5]                # time to drive across a tile (drivers take the quickest way)
 const MOTORWAY := 2
@@ -470,6 +478,18 @@ const BUILDINGS := {
 	"salesforce_tower": {"name": "Salesforce Tower", "cost": 48000, "upkeep": 130, "uses_power": 8, "unlock": 25000, "only_one": true,
 		"landmark": true, "value": 0.10, "radius": 8, "appeal": 0.04, "visitors": 0.007,
 		"about": "The tallest tower in town, its crown lit up at night. Tourists come to see it: shop demand, land value and appeal"},
+	# The Golden Gate Bridge: not a tile of its own. Picked from the menu, it turns
+	# a bridge the player has built (at least GOLDEN_GATE_MIN_TILES long) into the
+	# Golden Gate: red, with two towers and cables (sim.golden_gate).
+	"golden_gate": {"name": "Golden Gate Bridge", "cost": 60000, "upkeep": 150, "unlock": 15000, "only_one": true,
+		"landmark": true, "no_road": true, "appeal": 0.05, "visitors": 0.010,
+		"about": "Turn one of your bridges into the Golden Gate: red towers and cables over the Bay. Tourists come from all over: shop demand and appeal"},
+	# Alcatraz: out on the water on its own rock (on_water: at least ALCATRAZ_OFFSHORE
+	# tiles from land), reached by ferry: no road, power or water. Half as many
+	# visitors again with a Ferry Building in town.
+	"alcatraz": {"name": "Alcatraz", "cost": 30000, "upkeep": 80, "unlock": 10000, "only_one": true,
+		"landmark": true, "no_road": true, "on_water": true, "appeal": 0.04, "visitors": 0.008,
+		"about": "The old prison on its rock in the Bay, reached by ferry (more visitors with a Ferry Building). Build it out on the water"},
 	# A company's data centre (the tech layer): never in the Build menu, only
 	# placed for a deal (see DC_SCALES); its power, water, jobs and tax come from the deal.
 	"data_centre": {"name": "Data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.05, "radius": 3,

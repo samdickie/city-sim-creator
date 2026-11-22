@@ -982,6 +982,63 @@ def transamerica(): _landmark("transamerica", (0.92, 0.91, 0.88), (0.60, 0.60, 0
 def salesforce_tower(): _landmark("salesforce_tower", (0.74, 0.80, 0.86), (0.92, 0.92, 0.90), 5.0, 40.0, 40.0)
 
 
+GOLDEN_GATE_RED = (0.75, 0.22, 0.13)
+
+
+def golden_gate():
+    """A stretch of the Golden Gate over the Bay: the red deck, a tower each side and the
+    main cables sagging between them, with hangers (as the game draws it)."""
+    w = mb.Builder()
+    w.box(-25, 25, -25, 25, -4.0, -0.6, "stone")
+    _mesh_object("sea", w, [material("plain", (0.04, 0.12, 0.18), 0.05, 0.2)] * len(mb.MATERIALS))
+    back, d = 20.0, 7.0
+    box(0.0, back, 56.0, d, 1.6, GOLDEN_GATE_RED, z0=7.0)
+    box(0.0, back + 1.0, 56.0, d - 2.0, 0.12, (0.16, 0.16, 0.17), z0=8.6)
+    top = 46.0
+    for a in (-16.0, 16.0):
+        for leg_back in (back - 1.6, back + d + 0.1):
+            box(a, leg_back, 2.6, 1.5, top + 4.0, GOLDEN_GATE_RED, z0=-1.0)
+        for k in range(4):
+            box(a, back - 1.6, 1.8, d + 3.2, 1.6, GOLDEN_GATE_RED, z0=20.0 + k * 8.0)
+    # The main cables (as beads), down to the ends and sagging between the towers.
+    for cable_back in (back - 0.9, back + d + 0.8):
+        x = -28.0
+        while x <= 28.0:
+            if x < -16.0:
+                z = 9.0 + (top - 9.0) * (x + 28.0) / 12.0
+            elif x > 16.0:
+                z = 9.0 + (top - 9.0) * (28.0 - x) / 12.0
+            else:
+                f = x / 16.0
+                z = 11.0 + (top - 11.0) * f * f
+            box(x, cable_back, 0.7, 0.7, 0.7, GOLDEN_GATE_RED, z0=z)
+            if abs(round(x / 3.0) * 3.0 - x) < 0.2 and z > 11.0:
+                box(x, cable_back + 0.25, 0.18, 0.18, z - 8.6, GOLDEN_GATE_RED, z0=8.6)
+            x += 0.5
+
+
+def alcatraz():
+    """Alcatraz as the game draws it: a stepped rock in the Bay with scrubby green on
+    its ledges, the pale cell house, the lighthouse and a water tower."""
+    w = mb.Builder()
+    w.box(-25, 25, -25, 25, -4.0, -0.6, "stone")
+    _mesh_object("sea", w, [material("plain", (0.04, 0.12, 0.18), 0.05, 0.2)] * len(mb.MATERIALS))
+    for k, (rw, rd, z0, rh, col) in enumerate([(44.0, 26.0, -1.0, 4.0, (0.42, 0.38, 0.33)),
+                                               (36.0, 20.0, 3.0, 2.6, (0.50, 0.46, 0.40)),
+                                               (29.0, 15.0, 5.6, 2.0, (0.46, 0.43, 0.36))]):
+        box((k - 1) * 1.5, 25.0 - rd / 2 - 1.0 + (1 - k) * 1.2, rw, rd, rh, col, z0=z0)
+        box((k - 1) * 1.5, 25.0 - rd / 2 - 1.0 + (1 - k) * 1.2, rw - 3.0, rd - 3.0, 0.3, (0.30, 0.40, 0.22), z0=z0 + rh)
+    top = 7.9
+    gabled(1.0, 19.0, 24.0, 8.0, 6.0, 0.0, (0.86, 0.84, 0.78))
+    for o in bpy.context.scene.collection.objects[-2:]:
+        o.location.z += top
+    cylinder(-13.0, 22.0, 1.1, 14.0, (0.92, 0.92, 0.90), z0=top)
+    cylinder(-13.0, 22.0, 1.5, 1.6, (0.20, 0.22, 0.24), z0=top + 14.0)
+    cylinder(15.0, 26.0, 2.6, 4.0, (0.70, 0.68, 0.62), z0=top + 7.0)
+    for dx, dy in ((-1.5, -1.5), (1.5, -1.5), (-1.5, 1.5), (1.5, 1.5)):
+        box(15.0 + dx, 26.0 + dy, 0.4, 0.4, 7.5, (0.62, 0.60, 0.56), z0=top - 0.5)
+
+
 def _district(colour, tall):
     ground()
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
@@ -1060,13 +1117,13 @@ ITEMS = {
     "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
     "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "painted_ladies": painted_ladies, "coit_tower": coit_tower,
     "ferry_building": ferry_building, "fine_arts": fine_arts, "transamerica": transamerica,
-    "salesforce_tower": salesforce_tower, "cbd": cbd, "tech_zone": tech_zone, "college": college, "university": university, "research_park": research_park, "conservation": conservation, "normal": normal,
+    "salesforce_tower": salesforce_tower, "golden_gate": golden_gate, "alcatraz": alcatraz, "cbd": cbd, "tech_zone": tech_zone, "college": college, "university": university, "research_park": research_park, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "incinerator": 1.7, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,
         "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6,
         "big_ben": 2.3, "liberty": 2.1, "eiffel": 2.9, "empire_state": 4.0, "taj_mahal": 1.2,
-        "coit_tower": 2.0, "ferry_building": 2.0, "fine_arts": 1.3, "transamerica": 4.6, "salesforce_tower": 5.4}
+        "coit_tower": 2.0, "ferry_building": 2.0, "fine_arts": 1.3, "transamerica": 4.6, "salesforce_tower": 5.4, "golden_gate": 1.7, "alcatraz": 1.2}
 
 
 # ------------------------------------------------------------------ render

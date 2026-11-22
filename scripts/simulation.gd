@@ -16,7 +16,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
 	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
-	CHIP_FACTORY }
+	CHIP_FACTORY, GOLDEN_GATE, ALCATRAZ }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -32,9 +32,9 @@ const BUILDING_KEYS := {
 	Tile.COLLEGE: "college", Tile.UNIVERSITY: "university", Tile.RESEARCH_PARK: "research_park",
 	Tile.PAINTED_LADIES: "painted_ladies", Tile.COIT_TOWER: "coit_tower", Tile.FERRY_BUILDING: "ferry_building",
 	Tile.FINE_ARTS: "fine_arts", Tile.TRANSAMERICA: "transamerica", Tile.SALESFORCE_TOWER: "salesforce_tower",
-	Tile.CHIP_FACTORY: "chip_factory",
+	Tile.CHIP_FACTORY: "chip_factory", Tile.GOLDEN_GATE: "golden_gate", Tile.ALCATRAZ: "alcatraz",
 }
-const LAST_TILE := Tile.CHIP_FACTORY   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.ALCATRAZ   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
 const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
 	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE,
@@ -142,6 +142,7 @@ var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fu
 var letters: Array[Dictionary] = []   # unanswered: {id, kind, company, from, subject, body, month, ...}
 var startups: Array[Dictionary] = []  # every start-up the town backed: {tile, name, grant, founded, status, ended, tax, payout, best}
                                       # (status "going", "bought", "bust" or "closed"; only going ones hold their plot)
+var golden_gate: Array[int] = []     # the bridge tiles that are the Golden Gate (none: not built)
 var empty_sites: Array[Dictionary] = []  # halls a company left behind: {tiles, company, kind, month, why}
 var letter_log: Array[Dictionary] = []  # every letter: {id, kind, company, subject, month, answer, answered, detail}
                                         # (answer "" while waiting, "yes", "no" or "lapsed")
@@ -245,6 +246,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	startups.clear()
 	letter_log.clear()
 	empty_sites.clear()
+	golden_gate.clear()
 	deals.clear()
 	_deal_at.clear()
 	company_jobs = 0
@@ -300,6 +302,49 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	layout_version += 1
 
 
+func is_bridge(i: int) -> bool:
+	# A road over water.
+	return tiles[i] == Tile.ROAD and water[i] == 1
+
+
+func bridge_run(i: int) -> Array[int]:
+	# The straight run of bridge tiles through i (along the bridge), in order.
+	var out: Array[int] = []
+	if not is_bridge(i):
+		return out
+	var x := i % w
+	var y := i / w
+	var step := Vector2i(1, 0)
+	if (y > 0 and is_bridge(i - w)) or (y < h - 1 and is_bridge(i + w)):
+		step = Vector2i(0, 1)
+	var p := Vector2i(x, y)
+	while p.x - step.x >= 0 and p.y - step.y >= 0 and is_bridge((p.y - step.y) * w + p.x - step.x):
+		p -= step
+	while p.x < w and p.y < h and is_bridge(p.y * w + p.x):
+		out.append(p.y * w + p.x)
+		p += step
+	return out
+
+
+func golden_gate_problem(i: int) -> String:
+	# "" if the bridge through this tile can become the Golden Gate.
+	var why := can_build_here(Tile.GOLDEN_GATE, i)
+	if why != "":
+		return why
+	if not is_bridge(i):
+		return "Point at one of your bridges (build one across the water first) to make it the Golden Gate."
+	if bridge_run(i).size() < Settings.GOLDEN_GATE_MIN_TILES:
+		return "The Golden Gate needs a longer bridge (at least %d m over the water)." % roundi(Settings.GOLDEN_GATE_MIN_TILES * 50.0)
+	return ""
+
+
+func make_golden_gate(i: int) -> void:
+	golden_gate = bridge_run(i)
+	layout_version += 1
+	_value_dirty = true
+	recount()
+
+
 func set_road(i: int, kind: int) -> void:
 	# Lay a road of this kind (Settings.ROAD_NAMES), or change the kind of the one here.
 	if tiles[i] == Tile.ROAD and road_kind[i] == kind:
@@ -348,6 +393,10 @@ func is_street(i: int) -> bool:
 
 func road_name(i: int) -> String:
 	var n: String = Settings.ROAD_NAMES[road_kind[i]]
+	if golden_gate.has(i):
+		return "Golden Gate Bridge"
+	if is_bridge(i):
+		return "Bridge" if road_kind[i] == 0 else "%s bridge" % n
 	return n
 
 
@@ -1986,6 +2035,11 @@ func _load_letters(data: Dictionary) -> void:
 				"kind": String(e.get("kind", "ai_data_centre")), "month": int(e.get("month", 0)), "why": String(e.get("why", ""))})
 	if tiles.size() == w * h:
 		_tidy_empty_sites()
+	# (Older saves: no Golden Gate.)
+	golden_gate.clear()
+	for g in data.get("golden_gate", []):
+		if int(g) >= 0 and int(g) < w * h:
+			golden_gate.append(int(g))
 	investor_appetite = clampf(float(data.get("investor_appetite", Settings.APPETITE_START)), 0.0, 1.0)
 	letter_count = int(data.get("letter_count", letters.size()))
 	new_letters.clear()
@@ -2135,6 +2189,14 @@ func recount() -> void:
 	services = [0, 0, 0, 0]
 	small_services = [0, 0, 0, 0]
 	counts = {}
+	# The Golden Gate isn't a tile of its own: it's the bridge it was made from.
+	var gg: Array[int] = []
+	for g: int in golden_gate:
+		if is_bridge(g):
+			gg.append(g)
+	golden_gate = gg
+	if not golden_gate.is_empty():
+		counts[Tile.GOLDEN_GATE] = 1
 	abandoned_count = 0
 	run_down_count = 0
 	for i in w * h:
@@ -2159,7 +2221,7 @@ func recount() -> void:
 		match t:
 			Tile.ROAD:
 				road_tiles += 1
-				road_upkeep += Settings.ROAD_UPKEEPS[road_kind[i]]
+				road_upkeep += Settings.ROAD_UPKEEPS[road_kind[i]] * (Settings.BRIDGE_UPKEEP_X if water[i] == 1 else 1)
 			Tile.PARK:
 				park_tiles += 1
 			Tile.HOMES:
@@ -2282,6 +2344,11 @@ func can_build_here(t: int, i: int) -> String:
 		return "You can only build one %s." % d["name"]
 	if bool(d.get("only_one", false)) and count_of(t) > 0:
 		return "The town already has a %s." % String(d["name"]).to_lower()
+	if bool(d.get("on_water", false)):
+		if water[i] == 0:
+			return "%s goes out on the water, on its own rock." % d["name"]
+		if _within_land(i, Settings.ALCATRAZ_OFFSHORE):
+			return "%s needs to be further out in the Bay (at least %d m from the shore)." % [d["name"], Settings.ALCATRAZ_OFFSHORE * 50]
 	if bool(d.get("near_sea", false)) and not _beside_sea(i):
 		return "A %s has to be built right by the sea." % String(d["name"]).to_lower()
 	if d.has("near"):
@@ -2294,6 +2361,17 @@ func can_build_here(t: int, i: int) -> String:
 			return "A %s has to be next to a %s (within %d tiles)." % [String(d["name"]).to_lower(),
 				String(Settings.BUILDINGS[key]["name"]).to_lower(), Settings.NEAR_TILES]
 	return ""
+
+
+func _within_land(i: int, r: int) -> bool:
+	# Any land within r tiles.
+	var cx := i % w
+	var cy := i / w
+	for y in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+		for x in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+			if water[y * w + x] == 0:
+				return true
+	return false
 
 
 func _within(i: int, t: int, r: int) -> bool:
@@ -2343,7 +2421,7 @@ func building_status(i: int) -> String:
 	if makes_power(t):
 		return "making %d units of power" % int(info(t)["power"])
 	if needs_nothing(t):
-		return "growing"
+		return "open to visitors, who come by ferry" if t == Tile.ALCATRAZ else "growing"
 	if t == Tile.AIRPORT:
 		var why := airport_problem(i)
 		return "open, flights coming and going" if why == "" else "not open, " + why
@@ -2453,7 +2531,13 @@ func _measure_leisure() -> void:
 				total += a
 				if is_landmark(t):
 					var v: float = info(t).get("visitors", 0.0)
+					if t == Tile.ALCATRAZ and count_of(Tile.FERRY_BUILDING) > 0:
+						v *= 1.5                        # (the ferry goes from the Ferry Building)
 					tourists += v
+	if not golden_gate.is_empty():
+		var gg: Dictionary = info(Tile.GOLDEN_GATE)
+		total += float(gg["appeal"])
+		tourists += float(gg["visitors"])
 	leisure_appeal = minf(total, Settings.LEISURE_APPEAL_MAX)
 	tourism = minf(tourists, Settings.TOURISM_MAX)
 
@@ -4347,6 +4431,7 @@ func to_save() -> Dictionary:
 		"letters": letters.duplicate(true),
 		"startups": startups.duplicate(true),
 		"letter_log": letter_log.duplicate(true),
+		"golden_gate": golden_gate.duplicate(),
 		"empty_sites": empty_sites.duplicate(true),
 		"deals": deals.duplicate(true),
 		"investor_appetite": investor_appetite,
@@ -4374,7 +4459,8 @@ func from_save(data: Dictionary) -> void:
 	levels.fill(0)
 	for i in mini(saved_tiles.size(), tiles.size()):
 		var t: int = int(saved_tiles[i])
-		tiles[i] = t if t >= Tile.EMPTY and t <= LAST_TILE and water[i] == 0 else Tile.EMPTY
+		tiles[i] = t if t >= Tile.EMPTY and t <= LAST_TILE and (water[i] == 0 or t == Tile.ROAD or t == Tile.ALCATRAZ) \
+			else Tile.EMPTY   # (roads on water are bridges; Alcatraz is out on the water)
 	for i in mini(saved_levels.size(), levels.size()):
 		levels[i] = clampi(int(saved_levels[i]), 0, 8) if is_zone(tiles[i]) else 0
 	var saved_district: Array = data.get("district", [])

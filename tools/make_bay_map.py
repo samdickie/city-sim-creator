@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Make the game's map from real US heights: Palo Alto, on the San Francisco
-Peninsula (the real Silicon Valley), by default.
+Make the game's map from real US heights: Menlo Park and the Bay, on the San
+Francisco Peninsula (the real Silicon Valley), by default.
 
 Where the heights come from
     AWS's free "Terrain Tiles" (https://registry.opendata.aws/terrain-tiles/),
@@ -12,7 +12,7 @@ How to run (from the project folder)
     python3 tools/make_bay_map.py
 
 What it makes
-    map/palo_alto_map.json   the map the game loads (height + sea for every tile)
+    map/menlo_park_map.json  the map the game loads (height + sea for every tile)
     map/preview.png          a picture of the map, to check it
 
 Needs Pillow (pip install pillow) to read the tiles. Run with --help to make a
@@ -35,8 +35,14 @@ try:
 except ImportError:
     sys.exit("This needs Pillow to read the height tiles: pip install pillow")
 
-# Palo Alto: downtown and the edge of Stanford (west), East Palo Alto and the
-# Baylands' marshes, and the open Bay (north-east). 7 km x 6.5 km.
+# The game's map since Nov 2026: Menlo Park, East Palo Alto and the Bay, with
+# the Dumbarton crossing (about 1.1 km of water) to the far shore at the top
+# right, for bridges. 9 km x 8 km. Framed so the dev tools' town (tiles 34-95,
+# 31-108) is all on land.
+MENLO_PARK_CENTRE = (37.4785, -122.1409)
+MENLO_PARK_SIZE = (9000.0, 8000.0)
+# The map before that (map/palo_alto_map.json): downtown Palo Alto and the edge
+# of Stanford, the Baylands and the open Bay. 7 km x 6.5 km.
 PALO_ALTO_CENTRE = (37.44924, -122.1305)
 PALO_ALTO_SIZE = (7000.0, 6500.0)
 ZOOM = 13                                    # about 15 m a pixel here
@@ -138,14 +144,14 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.join(here, "..")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--centre", nargs=2, type=float, metavar=("LAT", "LON"), default=PALO_ALTO_CENTRE)
-    p.add_argument("--size", nargs=2, type=float, metavar=("WIDTH", "HEIGHT"), default=PALO_ALTO_SIZE,
+    p.add_argument("--centre", nargs=2, type=float, metavar=("LAT", "LON"), default=MENLO_PARK_CENTRE)
+    p.add_argument("--size", nargs=2, type=float, metavar=("WIDTH", "HEIGHT"), default=MENLO_PARK_SIZE,
                    help="metres east-west and north-south (default 7000 6500)")
     p.add_argument("--cell", type=float, default=50.0, help="metres per game tile (default 50)")
     p.add_argument("--sea-level", type=float, default=0.5,
                    help="ground at or below this height, joined to the map edge, is sea (default 0.5 m)")
-    p.add_argument("--name", default="Palo Alto")
-    p.add_argument("--out", default=os.path.join(root, "map", "palo_alto_map.json"))
+    p.add_argument("--name", default="Menlo Park")
+    p.add_argument("--out", default=os.path.join(root, "map", "menlo_park_map.json"))
     args = p.parse_args()
 
     source = Heights(os.path.join(root, "map", ".terrain_cache"))

@@ -909,8 +909,8 @@ func _draw_vehicle(k: int) -> void:
 	var size := BUS_SIZE if bus else CAR_SIZE
 	# Tilt with the slope: ground under the front and back wheels.
 	var reach := size.z * 0.4
-	var hf := maxf(world.height_at(pos.x + dir.x * reach, pos.y + dir.y * reach), 0.0)
-	var hb := maxf(world.height_at(pos.x - dir.x * reach, pos.y - dir.y * reach), 0.0)
+	var hf := world.road_ground(pos.x + dir.x * reach, pos.y + dir.y * reach)
+	var hb := world.road_ground(pos.x - dir.x * reach, pos.y - dir.y * reach)
 	var fwd := Vector3(dir.x * reach * 2.0, hf - hb, dir.y * reach * 2.0).normalized()
 	var facing := Basis.looking_at(fwd, Vector3.UP)   # -z forward
 	var up := facing.y
@@ -1032,7 +1032,7 @@ func _draw_person(k: int) -> void:
 	_locate(_p_tile[k], _p_entry[k], _p_exit[k], _p_dist[k], _p_offset[k])
 	var pos := _out_pos
 	var s := _p_scale[k]
-	var ground := maxf(world.height_at(pos.x, pos.y), 0.0) + ROAD_LIFT + 0.02
+	var ground := world.road_ground(pos.x, pos.y) + ROAD_LIFT + 0.02
 	var bob := absf(sin(_p_dist[k] * 4.2)) * 0.05     # a little bounce in each step
 	var body := Basis.from_scale(Vector3(1.0, s, 1.0))
 	_put(Part.WALKER, k, body, Vector3(pos.x, ground + 0.725 * s + bob, pos.y), _p_clothes[k])

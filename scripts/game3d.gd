@@ -17,7 +17,7 @@ const DevExamples = preload("res://scripts/dev_examples.gd")   # dev tool: tools
 const DevPromo = preload("res://scripts/dev_promo.gd")   # dev tool: tools/make_promo.sh
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
-const MAP_FILE := "res://map/palo_alto_map.json"     # (Troon's is still in map/: make it MAP_FILE to play there)
+const MAP_FILE := "res://map/menlo_park_map.json"    # (Palo Alto's and Troon's are still in map/: make one MAP_FILE to play there)
 const SAVE_FILE := "user://troon_save.json"           # the player's own city
 const DEV_SAVE_FILE := "user://dev_tools_save.json"   # what Save and Load use when a dev tool runs the game
 const EXAMPLES_DIR := "res://examples"   # ready-made cities (the game menu's Example cities)
@@ -32,7 +32,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
 	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
-	CHIP_FACTORY }   # same order as simulation.gd
+	CHIP_FACTORY, GOLDEN_GATE, ALCATRAZ }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -79,7 +79,7 @@ const GROUPS := {
 	# San Francisco's landmarks (the eight world ones, Big Ben to the Empire State, still
 	# load and work in old cities, but are no longer in the menu).
 	Tool.LANDMARK: [Tile.PAINTED_LADIES, Tile.COIT_TOWER, Tile.FERRY_BUILDING, Tile.FINE_ARTS, Tile.TRANSAMERICA,
-		Tile.SALESFORCE_TOWER],
+		Tile.SALESFORCE_TOWER, Tile.GOLDEN_GATE, Tile.ALCATRAZ],
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -580,6 +580,8 @@ func _update_drag() -> void:
 	var items: Array = []
 	var total := 0
 	var count := 0
+	var bridged := 0
+	var bridge_why := ""                  # (a road into the water: why it can't be a bridge)
 	for p in drag_plan:
 		var why := _why_cant_build(p, false)
 		if why == "-":
@@ -589,6 +591,10 @@ func _update_drag() -> void:
 		if ok:
 			total += _tool_cost(p)
 			count += 1
+			if current_tool == Tool.ROAD and _is_water(p):
+				bridged += 1
+		elif current_tool == Tool.ROAD and _is_water(p) and bridge_why == "":
+			bridge_why = why
 	# An airport (or a data centre) has a minimum size: the whole drag is red
 	# until it's big enough, then green.
 	var airport_short := _too_small()
@@ -622,6 +628,11 @@ func _update_drag() -> void:
 		var dn: String = Settings.DENSITY_NAMES[current_density]
 		tool_name += " (%s density)" % dn
 	var what := "%s: %d %s" % [tool_name, count, "tile" if count == 1 else "tiles"]
+	if bridged > 0:
+		what += " (%d of bridge)" % bridged
+	if bridge_why != "":
+		hud.show_info("%s, %s. %s" % [what, Hud.money_text(total), bridge_why])
+		return
 	if current_tool == Tool.BULLDOZE:
 		hud.show_info("%s to clear, %s. Release to clear, Esc to cancel." % [what, Hud.money_text(total)])
 	elif total > sim.money:
@@ -957,6 +968,8 @@ func _apply_tool(p: Vector2i) -> bool:
 		sim.set_tile(i, Tile.EMPTY)
 	elif current_tool == Tool.DISTRICT:
 		sim.set_district(i, _district_choice())
+	elif current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
+		sim.make_golden_gate(i)
 	elif current_tool == Tool.ROAD:
 		sim.set_road(i, _road_choice())
 	elif current_tool == Tool.GRID:
@@ -973,6 +986,14 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	if current_tool == Tool.DEAL and here != _target_tile() and water[i] == 0 \
 			and sim.district[i] != Settings.TECH_ZONE:
 		return "It has to go in your Tech zone."
+	if current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
+		# Not built on a tile: it turns the bridge under the mouse into the Golden Gate.
+		var gg := sim.golden_gate_problem(i)
+		if gg != "":
+			return gg
+		if check_money and _tool_cost(p) > sim.money:
+			return "Not enough money: that costs %s." % Hud.money_text(_tool_cost(p))
+		return ""
 	if current_tool == Tool.DISTRICT:
 		# Districts are free and go over anything on land.
 		return "-" if water[i] == 1 or sim.district[i] == _district_choice() else ""
@@ -996,8 +1017,12 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 			return "-"
 		if current_tool == Tool.GRID and here != Tile.EMPTY:
 			return "-"
-		if water[i] == 1:
-			return "You can't build on water."
+		if water[i] == 1 and not bool(sim.info(_target_tile()).get("on_water", false)):
+			if current_tool != Tool.ROAD:
+				return "You can't build on water."
+			var bridge := _bridge_problem(p)
+			if bridge != "":
+				return bridge
 		if slope[i] > Settings.MAX_SLOPE_M:
 			return "Too steep to build here."
 		if sim.is_building(_target_tile()):
@@ -1008,6 +1033,33 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	if check_money and cost > sim.money:
 		return "Not enough money: that costs %s." % Hud.money_text(cost)
 	return ""
+
+
+func _bridge_problem(p: Vector2i) -> String:
+	# A road over water is a bridge: it has to be part of a straight run across,
+	# from land to land, no longer than BRIDGE_MAX_TILES. "" if this one is.
+	var k := drag_plan.find(p)
+	if k < 0:
+		return "Drag a road straight across the water, from shore to shore, to build a bridge."
+	var a := k
+	while a > 0 and _is_water(drag_plan[a - 1]):
+		a -= 1
+	var b := k
+	while b < drag_plan.size() - 1 and _is_water(drag_plan[b + 1]):
+		b += 1
+	if a == 0 or b == drag_plan.size() - 1:
+		return "A bridge has to reach land on both sides: drag on to the far shore."
+	var from := drag_plan[a - 1]
+	var to := drag_plan[b + 1]
+	if from.x != to.x and from.y != to.y:
+		return "A bridge has to go straight across the water."
+	if b - a + 1 > Settings.BRIDGE_MAX_TILES:
+		return "Too far for a bridge (at most %d m of water)." % roundi(Settings.BRIDGE_MAX_TILES * cell_size_m)
+	return ""
+
+
+func _is_water(p: Vector2i) -> bool:
+	return water[p.y * map_w + p.x] == 1
 
 
 func _base_cost(tool_id: int) -> int:
@@ -1054,6 +1106,8 @@ func _tool_cost(p: Vector2i) -> int:
 	if current_tool == Tool.BULLDOZE:
 		return base
 	var hill := 1.0 + slope[p.y * map_w + p.x] * Settings.SLOPE_COST_PER_METRE
+	if current_tool == Tool.ROAD and water[p.y * map_w + p.x] == 1:
+		return base * Settings.BRIDGE_COST_X        # (a bridge)
 	return roundi(base * hill)
 
 
@@ -1169,7 +1223,7 @@ const SHORT := {
 	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper",
 	"painted_ladies": "Postcard Row's Victorian houses", "coit_tower": "The column on Telegraph Hill",
 	"ferry_building": "The clock tower on the waterfront", "fine_arts": "The rotunda by the lagoon",
-	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
+	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "golden_gate": "Turns a bridge red, with towers", "alcatraz": "The old prison on its rock", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
 	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Offices and industry, any density", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }

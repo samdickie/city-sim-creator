@@ -130,6 +130,7 @@ func _run() -> void:
 	await _old_save()
 	await _traffic()
 	await _road_types()
+	await _bridges()
 	await _services()
 	await _feedback_fixes()
 	await _tech_zone()
@@ -3155,6 +3156,170 @@ func _town_state() -> int:
 		sim.land_value_map(), sim.happiness, sim.demand, sim.pollution_map()])
 
 
+func _find_crossing(min_run: int = 3) -> Array[Vector2i]:
+	# A straight way across the water: [land tile, far land tile], each with
+	# another land tile behind it, water all the way between (3 to
+	# BRIDGE_MAX_TILES tiles); the one nearest the camera. [] if none.
+	var water: PackedByteArray = game.get("water")
+	var start := Vector2i(roundi(rig.target.x / world.cell), roundi(rig.target.z / world.cell))
+	var best: Array[Vector2i] = []
+	var best_d := 1 << 30
+	for step: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
+		for y: int in range(2, sim.h - 2):
+			for x: int in range(2, sim.w - 2):
+				var a := Vector2i(x, y)
+				if water[y * sim.w + x] == 1 or water[(y + step.y) * sim.w + x + step.x] == 0:
+					continue
+				var back := a - step
+				if water[back.y * sim.w + back.x] == 1:
+					continue
+				var p := a + step
+				var run := 0
+				while p.x < sim.w - 2 and p.y < sim.h - 2 and water[p.y * sim.w + p.x] == 1:
+					p += step
+					run += 1
+				var beyond := p + step
+				if run < min_run or run > Settings.BRIDGE_MAX_TILES or p.x >= sim.w - 2 or p.y >= sim.h - 2 \
+						or water[beyond.y * sim.w + beyond.x] == 1:
+					continue
+				var d := (a - start).length_squared() + run * run * 40
+				if d < best_d:
+					best_d = d
+					best = [a, p]
+	return best
+
+
+func _bridges() -> void:
+	# Bridges (Nov 2026): drag a road straight across the water, from shore to
+	# shore, and the water part becomes a bridge (25 times the cost a tile); a
+	# drag that stops in the water builds no bridge.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var ends := _find_crossing(Settings.GOLDEN_GATE_MIN_TILES)    # (long enough to become the Golden Gate)
+	check(ends.size() == 2, "bridges: the map has water to bridge (%s)" % str(ends))
+	if ends.size() < 2:
+		return
+	var a: Vector2i = ends[0]
+	var b: Vector2i = ends[1]
+	var step := Vector2i(signi(b.x - a.x), signi(b.y - a.y))
+	var run := (b - a).length() - 1.0
+	sim.money = 500000
+	await _pick_item("roads", "road")
+	var mid := a + step * roundi(run * 0.5)
+	await _look_at(mid, PLAY_DISTANCE * (0.6 + run / 30.0), -35.0, 45.0, [a, b])
+	# Stop in the water: it says why, and no bridge.
+	await _drag(_screen_of(a), _screen_of(mid), MOUSE_BUTTON_LEFT, false)
+	var info: Label = hud.get("info_label")
+	check(info.text.contains("reach land on both sides"), "bridges: a drag ending in the water says so (%s)" % info.text)
+	await _press(_screen_of(mid), MOUSE_BUTTON_LEFT, false)
+	await _frames(2)
+	var built := 0
+	for k: int in range(1, int(run) + 1):
+		var p := a + step * k
+		if sim.tiles[p.y * sim.w + p.x] == T.ROAD:
+			built += 1
+	check(built == 0, "bridges: ...and builds no bridge")
+	# Shore to shore: a bridge.
+	var money0: int = sim.money
+	await _drag(_screen_of(a), _screen_of(b))
+	await _frames(2)
+	built = 0
+	for k: int in range(1, int(run) + 1):
+		var p := a + step * k
+		if sim.is_bridge(p.y * sim.w + p.x):
+			built += 1
+	var spent: int = money0 - sim.money
+	check(built == int(run) and spent >= int(run) * Settings.ROAD_COSTS[0] * Settings.BRIDGE_COST_X,
+		"bridges: shore to shore, %d tiles of bridge for %s" % [built, Hud.money_text(spent)])
+	var on := a + step * roundi(run * 0.5)
+	var on_i := on.y * sim.w + on.x
+	var text := String(game.call("_tile_text", on_i))
+	check(text.begins_with("Bridge") and sim.road_upkeep > 0.0, "bridges: its hover says Bridge (%s)" % text.get_slice("\n", 0))
+	var deck: float = world.road_ground(world.tile_centre(on).x, world.tile_centre(on).y)
+	check(deck >= 7.9, "bridges: the deck is %.1f m above the water" % deck)
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(mid, PLAY_DISTANCE * (0.35 + run / 60.0), -60.0, 28.0, [])
+	await _shot("p57_bridge")
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(sim.is_bridge(on_i), "bridges: saved and loaded")
+
+	# The Golden Gate: picked from Landmarks, it turns a bridge red, with towers.
+	sim.population = 20000                       # (it's unlocked at 15,000)
+	await _pick_item("landmarks", "golden_gate")
+	await _move(_screen_of(a - step * 2))
+	var info2: Label = hud.get("_info_action")
+	check(info2.text.contains("Point at one of your bridges"), "golden gate: on land it says to point at a bridge (%s)" % info2.text)
+	var money1: int = sim.money
+	await _click_at(_screen_of(on))
+	await _frames(2)
+	check(sim.golden_gate.size() == int(run) and sim.money <= money1 - 60000 and sim.road_name(on_i) == "Golden Gate Bridge"
+		and sim.tourism > 0.0, "golden gate: the whole %d-tile bridge becomes the Golden Gate, and tourists come (%.3f)" % [
+		sim.golden_gate.size(), sim.tourism])
+	sim.population = 20000
+	check(sim.golden_gate_problem(on_i).contains("only build one"), "golden gate: only one")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(mid, PLAY_DISTANCE * (0.45 + run / 50.0), -55.0, 22.0, [])
+	await _shot("p58_golden_gate")
+	data = sim.to_save()
+	sim.from_save(data)
+	check(sim.golden_gate.size() == int(run), "golden gate: saved and loaded")
+
+	# Alcatraz: out on the water, on its own rock.
+	var water: PackedByteArray = game.get("water")
+	var near_shore := -1
+	var offshore := -1
+	var best_d := 1 << 30
+	for i: int in sim.w * sim.h:
+		if water[i] == 0 or sim.tiles[i] != T.EMPTY:
+			continue
+		var p := Vector2i(i % sim.w, i / sim.w)
+		var d := (p - mid).length_squared()
+		if near_shore < 0 and sim.call("_within_land", i, 1):
+			near_shore = i
+		if not sim.call("_within_land", i, Settings.ALCATRAZ_OFFSHORE + 1) and d < best_d:
+			best_d = d
+			offshore = i
+	check(offshore >= 0, "alcatraz: there's open water out in the Bay")
+	if offshore < 0:
+		return
+	var rock := Vector2i(offshore % sim.w, offshore / sim.w)
+	await _pick_item("landmarks", "alcatraz")
+	hud.call("set_build_open", false)
+	await _look_at(rock, PLAY_DISTANCE * 0.5, -40.0, 35.0, [])
+	sim.population = 20000                       # (it's unlocked at 10,000)
+	if near_shore >= 0:
+		check(sim.can_build_here(T.ALCATRAZ, near_shore).contains("further out"),
+			"alcatraz: too near the shore it says so (%s)" % sim.can_build_here(T.ALCATRAZ, near_shore))
+	var tourism0: float = sim.tourism
+	sim.population = 20000                       # (it's unlocked at 10,000)
+	await _click_at(_screen_of(rock))
+	await _frames(2)
+	check(sim.tiles[offshore] == T.ALCATRAZ and sim.building_working(offshore) and sim.tourism > tourism0
+		and String(game.call("_tile_text", offshore)).contains("by ferry"),
+		"alcatraz: built out on the water; tourists come by ferry (%.3f)" % sim.tourism)
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_select_tool", ROAD)
+	game.call("_refresh_hud")
+	await _look_at(rock, PLAY_DISTANCE * 0.3, -40.0, 30.0, [])
+	await _shot("p59_alcatraz")
+	data = sim.to_save()
+	sim.from_save(data)
+	check(sim.tiles[offshore] == T.ALCATRAZ, "alcatraz: saved and loaded, still on the water")
+
+
 func _road_types() -> void:
 	# Roads, avenues and motorways: the same two districts as the traffic test,
 	# joined by one road that jams. Widened into an avenue (with the mouse) it no
@@ -3495,6 +3660,7 @@ func _services() -> void:
 	await _wait(0.2)
 	game.call("_set_speed", 0)
 	game.call("_set_overlay", WorldView.Overlay.NONE)
+	rig.target = Vector3(sim.w * world.cell * 0.45, 0.0, sim.h * world.cell * 0.5)   # (from the middle, as a new game starts)
 	var o := _find_land(36, 13)
 	check(o.x >= 0 and _built_count() == 0, "services: a new city with flat land for two estates at %s" % o)
 	if o.x < 0:
@@ -3547,6 +3713,8 @@ func _services() -> void:
 	await _pick_item("services", "school")
 	check(world.overlay == WorldView.Overlay.SERVICES and world.service_filter == 2 and bool(game.get("_auto_overlay")),
 		"services: picking the School shows the Services view on Schools")
+	hud.set_build_open(false)                     # (so the menu isn't over the west estate)
+	await _frames(2)
 	var spot := o + Vector2i(2, 5)
 	await _move(_screen_of(spot))
 	await _move(_screen_of(spot) + Vector2(1, 1))

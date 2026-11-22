@@ -86,7 +86,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
 	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
-	CHIP_FACTORY }   # same order as simulation.gd
+	CHIP_FACTORY, GOLDEN_GATE, ALCATRAZ }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1445,6 +1445,8 @@ func refresh_buildings() -> void:
 		_current_owner = i
 		if t == Tile.POWER_PLANT:
 			_plan_plant(i, wall_list, chimney_list)
+		elif t == Tile.ROAD and water[i] == 1:
+			_plan_bridge(i, wall_list, roof_list)
 		elif t == Tile.WOODLAND:
 			pass    # (its trees are drawn with the woods: _update_planted_woods)
 		elif sim.is_building(t):
@@ -1499,9 +1501,9 @@ func _plan_street_furniture(tiles: PackedByteArray) -> void:
 	# Along every straight street: lamp posts where the road shader puts its pools
 	# of light (every 25 m, staggered), and by flats, shops and offices a bus
 	# shelter, litter bins and the odd post box. On the pavement (the road's
-	# outer 1.7 m), facing the road.
+	# outer 1.7 m), facing the road. (None on bridges.)
 	for i in tiles.size():
-		if tiles[i] != Tile.ROAD:
+		if tiles[i] != Tile.ROAD or water[i] == 1:
 			continue
 		var tile := Vector2i(i % map_w, i / map_w)
 		var road: int = sim.road_kind[i]
@@ -2441,6 +2443,174 @@ func height_at(wx: float, wz: float) -> float:
 	return h11 + (h01 - h11) * (1.0 - fx) + (h10 - h11) * (1.0 - fz)
 
 
+# --- Bridges: a road over water is a deck BRIDGE_DECK above the water on piers;
+# the road tile at each end ramps up to it. Everything that drives or stands on
+# a road (cars, people, lamps) asks road_ground() rather than height_at().
+const BRIDGE_DECK := 8.0
+const BRIDGE_CONCRETE := Color(0.70, 0.70, 0.68)
+
+
+func road_ground(wx: float, wz: float) -> float:
+	# The road surface's height here: the ground, or a bridge's deck and ramps.
+	var g := maxf(height_at(wx, wz), 0.0)
+	var tx := floori(wx / cell)
+	var ty := floori(wz / cell)
+	if tx < 0 or ty < 0 or tx >= map_w or ty >= map_h:
+		return g
+	var i := ty * map_w + tx
+	if sim.tiles[i] != Tile.ROAD:
+		return g
+	var deck := maxf(g, BRIDGE_DECK)
+	if water[i] == 1:
+		return deck
+	var c := tile_centre(Vector2i(tx, ty))
+	var up := 0.0
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n := Vector2i(tx, ty) + d
+		if n.x < 0 or n.y < 0 or n.x >= map_w or n.y >= map_h:
+			continue
+		var ni := n.y * map_w + n.x
+		if water[ni] == 1 and sim.tiles[ni] == Tile.ROAD:
+			var f := clampf((Vector2(wx, wz) - c).dot(Vector2(d)) / cell + 0.5, 0.0, 1.0)
+			up = maxf(up, smoothstep(0.0, 1.0, f))
+	return lerpf(g, deck, up)
+
+
+func _plan_bridge(i: int, wall_list: Array, roof_list: Array) -> void:
+	# A bridge tile: a concrete deck edge (beams) along both sides and a pair of
+	# piers down into the water. (The road itself is drawn with the roads.)
+	var tile := Vector2i(i % map_w, i / map_w)
+	var c := tile_centre(tile)
+	var along := Vector2(1, 0)
+	for d: Vector2i in [Vector2i(0, 1), Vector2i(0, -1)]:
+		var n := tile + d
+		if n.x >= 0 and n.y >= 0 and n.x < map_w and n.y < map_h and sim.tiles[n.y * map_w + n.x] == Tile.ROAD:
+			along = Vector2(0, 1)
+	var across := Vector2(along.y, -along.x)
+	var hw: float = ROAD_HALF_WIDTHS[sim.road_kind[i]] + 1.5
+	var x_axis := Vector3(along.x, 0.0, along.y)
+	var z_axis := Vector3(across.x, 0.0, across.y)
+	var golden: bool = sim.golden_gate.has(i)
+	var paint := GOLDEN_GATE_RED if golden else BRIDGE_CONCRETE
+	# The deck's underside: one slab, the road sits on it.
+	var slab := {"pos": Vector3(c.x, BRIDGE_DECK - 1.6, c.y), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+	_add_block(slab, cell + 0.2, hw * 2.0, 1.9, paint, STYLE_PAINT, 0.0, paint, wall_list, roof_list)
+	# Parapets along both edges.
+	for side: float in [-1.0, 1.0]:
+		var at := c + across * side * (hw - 0.3)
+		var wall := {"pos": Vector3(at.x, BRIDGE_DECK + 0.3, at.y), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+		_add_block(wall, cell + 0.2, 0.5, 1.1, paint, STYLE_PAINT, 0.0, paint, wall_list, roof_list)
+	if golden:
+		if i == sim.golden_gate[0]:
+			_plan_golden_gate(wall_list, roof_list)
+		return                               # (the Golden Gate hangs from its cables: piers only under its towers)
+	# A pier under the middle of the tile, down below the water.
+	var pier := {"pos": Vector3(c.x, -6.0, c.y), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+	_add_block(pier, 3.0, hw * 1.4, BRIDGE_DECK + 4.4, BRIDGE_CONCRETE.darkened(0.1), STYLE_PAINT, 0.0,
+		BRIDGE_CONCRETE, wall_list, roof_list)
+
+
+const GOLDEN_GATE_RED := Color(0.75, 0.22, 0.13)    # "International Orange" (sRGB)
+const ALCATRAZ_ROCK := [Color(0.42, 0.38, 0.33), Color(0.50, 0.46, 0.40), Color(0.46, 0.43, 0.36)]
+
+
+func _plan_alcatraz(i: int, wall_list: Array, roof_list: Array, chimney_list: Array) -> void:
+	# Alcatraz: a rock out in the Bay (bigger than its tile), stepped up in ledges
+	# with scrubby green on them, the long pale cell house on top, the lighthouse
+	# at one end, a water tower on legs, and the old dock building at the water.
+	var c := tile_centre(Vector2i(i % map_w, i / map_w))
+	var x_axis := Vector3(1, 0, 0)
+	var z_axis := Vector3(0, 0, 1)
+	var ledges := [[74.0, 40.0, -4.0, 6.5], [62.0, 32.0, 2.5, 4.0], [50.0, 24.0, 6.5, 3.0]]   # w, d, base, height
+	for k: int in ledges.size():
+		var l: Array = ledges[k]
+		var spot := {"pos": Vector3(c.x + (k - 1) * 3.0, float(l[2]), c.y + (1 - k) * 2.0), "x": x_axis, "z": z_axis,
+			"rise": 0.0, "ground": 0.0}
+		var rock: Color = ALCATRAZ_ROCK[k]
+		_add_block(spot, l[0], l[1], l[3], rock, STYLE_PAINT, 0.6, rock.lerp(Color(0.30, 0.40, 0.22), 0.45),
+			wall_list, roof_list)
+	var top := 9.5 + 0.6
+	var cell := {"pos": Vector3(c.x + 2.0, top, c.y - 1.0), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+	_add_block(cell, 40.0, 13.0, 10.0, Color(0.86, 0.84, 0.78), STYLE_FLATS, 0.0, Color(0.55, 0.55, 0.54),
+		wall_list, roof_list)
+	# The lighthouse at the west end, and a water tower on legs at the east end.
+	var light := Vector3(c.x - 22.0, top, c.y + 4.0)
+	_cylinder(chimney_list, light, 1.8, 24.0, Color(0.92, 0.92, 0.90))
+	_cylinder(chimney_list, light + Vector3.UP * 24.0, 2.4, 2.5, Color(0.20, 0.22, 0.24))
+	var tower := Vector3(c.x + 26.0, top - 3.0, c.y + 8.0)
+	for leg: Vector2 in [Vector2(-2.5, -2.5), Vector2(2.5, -2.5), Vector2(-2.5, 2.5), Vector2(2.5, 2.5)]:
+		_beam(tower + Vector3(leg.x, 0.0, leg.y), tower + Vector3(leg.x * 0.6, 16.0, leg.y * 0.6), 0.5,
+			Color(0.62, 0.60, 0.56), wall_list)
+	_cylinder(chimney_list, tower + Vector3.UP * 16.0, 4.2, 7.0, Color(0.70, 0.68, 0.62))
+	# The dock building by the water, on the east side.
+	var dock := {"pos": Vector3(c.x + 30.0, 0.5, c.y - 14.0), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+	_add_block(dock, 14.0, 9.0, 9.0, Color(0.80, 0.76, 0.66), STYLE_FLATS, 0.0, Color(0.5, 0.5, 0.5), wall_list, roof_list)
+
+
+func _plan_golden_gate(wall_list: Array, roof_list: Array) -> void:
+	# The Golden Gate, drawn once for its whole run: two tall towers (two legs and
+	# cross beams each) a quarter of the way in from each end, a main cable on each
+	# side sagging between the towers and down to the ends, and hangers to the deck.
+	var run: Array[int] = sim.golden_gate
+	var first := tile_centre(Vector2i(run[0] % map_w, run[0] / map_w))
+	var last := tile_centre(Vector2i(run[run.size() - 1] % map_w, run[run.size() - 1] / map_w))
+	var along := (last - first).normalized()
+	var across := Vector2(along.y, -along.x)
+	var start := first - along * cell * 0.5      # where the bridge leaves the shore
+	var length := first.distance_to(last) + cell
+	var hw: float = ROAD_HALF_WIDTHS[sim.road_kind[run[0]]] + 1.5
+	var tower_h := clampf(length * 0.14, 45.0, 120.0)
+	var top := BRIDGE_DECK + tower_h
+	var towers: Array[float] = [length * 0.22, length * 0.78]
+	var x_axis := Vector3(along.x, 0.0, along.y)
+	var z_axis := Vector3(across.x, 0.0, across.y)
+	for t: float in towers:
+		var at := start + along * t
+		for side: float in [-1.0, 1.0]:
+			var leg_at := at + across * side * (hw + 1.5)
+			var leg := {"pos": Vector3(leg_at.x, -6.0, leg_at.y), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+			_add_block(leg, 4.5, 3.5, top + 6.0, GOLDEN_GATE_RED, STYLE_PAINT, 0.0, GOLDEN_GATE_RED, wall_list, roof_list)
+		# Cross beams between the legs, above the road.
+		for k: int in 4:
+			var bh := BRIDGE_DECK + 12.0 + (tower_h - 12.0) * (k / 3.0)
+			var beam := {"pos": Vector3(at.x, bh - 2.5, at.y), "x": x_axis, "z": z_axis, "rise": 0.0, "ground": 0.0}
+			_add_block(beam, 3.0, hw * 2.0 + 6.5, 2.5, GOLDEN_GATE_RED, STYLE_PAINT, 0.0, GOLDEN_GATE_RED, wall_list, roof_list)
+	# Main cables: tower to tower (a sag down to just above the deck) and down to each end.
+	for side: float in [-1.0, 1.0]:
+		var line: Array[Vector3] = []
+		var steps := 28
+		for k: int in steps + 1:
+			var d := length * k / steps
+			var y: float
+			if d < towers[0]:
+				y = lerpf(BRIDGE_DECK + 1.0, top, d / towers[0])
+			elif d > towers[1]:
+				y = lerpf(top, BRIDGE_DECK + 1.0, (d - towers[1]) / (length - towers[1]))
+			else:
+				var f := (d - towers[0]) / (towers[1] - towers[0]) * 2.0 - 1.0
+				y = BRIDGE_DECK + 3.0 + (tower_h - 3.0) * f * f
+			var q := start + along * d + across * side * (hw + 1.5)
+			line.append(Vector3(q.x, y, q.y))
+		for k: int in steps:
+			_beam(line[k], line[k + 1], 0.9, GOLDEN_GATE_RED, wall_list)
+			# A hanger from the cable down to the deck.
+			if line[k].y > BRIDGE_DECK + 3.0:
+				_beam(Vector3(line[k].x, BRIDGE_DECK + 0.5, line[k].z), line[k], 0.3, GOLDEN_GATE_RED, wall_list)
+
+
+func _beam(from: Vector3, to: Vector3, thick: float, colour: Color, wall_list: Array) -> void:
+	# A thin box from one point to another (cables, hangers), as a wall block.
+	var axis := to - from
+	if axis.length() < 0.01:
+		return
+	var side := axis.cross(Vector3.UP)
+	if side.length() < 0.01:
+		side = Vector3.RIGHT
+	side = side.normalized() * thick
+	var depth := side.cross(axis).normalized() * thick
+	wall_list.append([Transform3D(Basis(side, axis, depth), from), colour, Color(thick, axis.length(), thick, STYLE_PAINT)])
+
+
 func tile_centre(tile: Vector2i) -> Vector2:
 	return Vector2((tile.x + 0.5) * cell, (tile.y + 0.5) * cell)
 
@@ -2611,7 +2781,7 @@ func _road_path(points: PackedVector2Array, half_width: float, across: Vector2,
 		for n in strips + 1:
 			var s := float(n) / strips
 			var q: Vector2 = points[k] + side * (s * 2.0 - 1.0)
-			_rv.append(Vector3(q.x, maxf(height_at(q.x, q.y), 0.0) + 0.35 + lift, q.y))
+			_rv.append(Vector3(q.x, road_ground(q.x, q.y) + 0.35 + lift, q.y))
 			_rn.append(Vector3.UP)
 			_ruv.append(Vector2(lerpf(across.x, across.y, s), dist))
 			_ruv2.append(Vector2(centre_line + 2.0 * _road_kind_now, crossing))
@@ -5111,6 +5281,8 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 	var c2 := tile_centre(tile)
 	var centre := Vector3(c2.x, maxf(height_at(c2.x, c2.y), 0.0), c2.y)
 	match t:
+		Tile.ALCATRAZ:
+			_plan_alcatraz(i, wall_list, roof_list, chimney_list)
 		Tile.GAS:
 			if _models.has("gas_plant"):
 				# Clad turbine hall, two boilers with slim stacks, a gasholder, tanks and pipes.
@@ -6457,9 +6629,9 @@ func _add_tree(lists: Array, tree: Array) -> void:
 func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 	# Street trees along both sides of every straight road (not at junctions or
 	# bends, or beside industry and power plants). Each street has one kind of
-	# tree, as an avenue would.
+	# tree, as an avenue would. (None on bridges.)
 	for i in tiles.size():
-		if tiles[i] != Tile.ROAD:
+		if tiles[i] != Tile.ROAD or water[i] == 1:
 			continue
 		var tile := Vector2i(i % map_w, i / map_w)
 		for axis: Vector2i in [Vector2i(1, 0), Vector2i(0, 1)]:
