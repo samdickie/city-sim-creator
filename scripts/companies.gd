@@ -92,6 +92,10 @@ static func startup_news(kind: String, s: Dictionary, amount: int = 0) -> String
 			return "%s has \"pivoted to AI\" and quietly closed. Its office is empty again." % name
 		"acquired":
 			return "%s has been bought by a big tech firm! The town's stake pays out %s." % [name, _pounds(amount)]
+		"cleared":
+			return "%s has lost its office (the plot was cleared) and closed." % name
+		"ran_down":
+			return "%s has moved out: its office had run down." % name
 	return ""
 
 

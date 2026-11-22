@@ -37,7 +37,8 @@ signal service_filter_chosen(service: int)  # the Services view's chips: -1 all,
 signal funding_changed(step: float)
 signal letter_answered(id: int, yes: bool, choice: int)   # a letter's buttons (choice: which offer, for later letters)
 signal letter_shown(open: bool)
-signal place_deal_pressed(id: int)          # Place it, for a data centre agreed but not yet given a site             # the letter card opened or closed (the game pauses behind it)
+signal place_deal_pressed(id: int)          # Place it, for a data centre agreed but not yet given a site
+signal show_tile(i: int)                    # fly the camera to a plot (a start-up in the Records window)
 
 const Settings = preload("res://scripts/settings.gd")
 const Icons = preload("res://scripts/icons.gd")
@@ -108,6 +109,7 @@ var letter_panel: PanelContainer
 var _inbox_badge: Label
 var _inbox_box: VBoxContainer
 var _inbox_said := ""                      # what the inbox last showed (it's rebuilt when that changes)
+var _inbox_net: Label                     # what the start-ups made the town (updated in place each month)
 var _letter_dim: ColorRect
 var _letter_id := -1
 var _letter_from: Label
@@ -116,6 +118,15 @@ var _letter_body: Label
 var _letter_note: Label
 var _letter_options: VBoxContainer        # a data centre letter's sizes, one button each
 var _letter_buttons: HBoxContainer
+# The Records window: every start-up the town backed and every letter, with filters.
+var records_panel: PanelContainer
+var _records_tabs := {}                   # "startups"/"letters" -> Button
+var _records_tab := "startups"
+var _records_filter := "all"              # the Letters tab's filter: all, "" (waiting), yes, no, lapsed
+var _records_filters: HBoxContainer
+var _records_summary: VBoxContainer
+var _records_scroll: ScrollContainer
+var _records_box: VBoxContainer
 var date_label: Label
 var clock_label: Label
 
@@ -273,11 +284,12 @@ func _process(delta: float) -> void:
 
 func _input(event: InputEvent) -> void:
 	# The letter card takes every key while it's open: Esc puts it back in the inbox.
-	if letter_open() and event is InputEventKey:
+	if (letter_open() or records_open()) and event is InputEventKey:
 		get_viewport().set_input_as_handled()
 		var lk := event as InputEventKey
 		if lk.pressed and not lk.echo and lk.keycode == KEY_ESCAPE:
 			close_letter()
+			close_records()
 		return
 	# While the New city dialog is open it takes every key: 1-3 or the arrows pick,
 	# Enter starts, Esc cancels. Nothing reaches the game behind it.
@@ -335,6 +347,13 @@ func _layout() -> void:
 	if letter_panel.visible:
 		letter_panel.size = Vector2.ZERO
 		letter_panel.position = ((view - letter_panel.size) * 0.5).floor()
+	if records_panel.visible:
+		# (Its list scrolls if the window is too short for all of it.)
+		var list_h := minf(_records_box.get_combined_minimum_size().y, maxf(view.y - 330.0, 160.0))
+		if absf(_records_scroll.custom_minimum_size.y - list_h) > 0.5:
+			_records_scroll.custom_minimum_size = Vector2(0.0, list_h)
+		records_panel.size = Vector2.ZERO
+		records_panel.position = ((view - records_panel.size) * 0.5).floor()
 	if city_panel.visible:
 		# (It scrolls if the window is too short for it to clear the map views.)
 		var overhead := city_panel.get_combined_minimum_size().y - _city_scroll.custom_minimum_size.y
@@ -1441,7 +1460,7 @@ func open_new_city(first: bool) -> void:
 
 
 func is_modal() -> bool:
-	return (new_city_panel != null and new_city_panel.visible) or letter_open()
+	return (new_city_panel != null and new_city_panel.visible) or _card_open()
 
 
 func new_city_level() -> int:
@@ -1517,7 +1536,8 @@ func _build_letters() -> void:
 	_letter_dim.gui_input.connect(func(e: InputEvent):
 		var click := e as InputEventMouseButton
 		if click and click.pressed:
-			close_letter())
+			close_letter()
+			close_records())
 	_root.add_child(_letter_dim)
 	letter_panel = _panel(_root, 18.0)
 	letter_panel.visible = false
@@ -1542,6 +1562,7 @@ func _build_letters() -> void:
 	_letter_options = _vbox(box, 6)
 	_letter_buttons = _hbox(box, 8)
 	_letter_buttons.alignment = BoxContainer.ALIGNMENT_END
+	_build_records()
 
 
 func _show_letters(sim) -> void:
@@ -1557,12 +1578,15 @@ func _show_letters(sim) -> void:
 	var said := [sim.appetite_word(), sim.interest_lines()]
 	for letter: Dictionary in sim.letters:
 		said.append([letter["id"], sim.letter_months_left(letter)])
-	for st: Dictionary in sim.startups:
-		said.append([st["name"], sim.levels[int(st["tile"])], (sim.month - int(st["founded"])) / 12])
+	# (Start-ups' counts, not their money: that changes every month, and is
+	# updated in place below.)
+	var tot: Dictionary = sim.startup_totals()
+	said.append([tot["backed"], tot["going"], tot["bought"], tot["bust"], tot["closed"], sim.letter_log.size()])
 	for deal: Dictionary in sim.deals:
 		said.append([deal["id"], deal.get("count", 0), deal.get("opened", false), sim.month - int(deal["month"])])
 	var key := str(said)
 	if key == _inbox_said:
+		_show_startup_net(tot)
 		return
 	_inbox_said = key
 	for child: Node in _inbox_box.get_children():
@@ -1613,10 +1637,27 @@ func _show_letters(sim) -> void:
 	if not sim.startups.is_empty():
 		_inbox_box.add_child(_divider())
 		_inbox_box.add_child(_caption("Start-ups you backed"))
-		for st: Dictionary in sim.startups:
-			var age: int = (sim.month - int(st["founded"])) / 12
-			_inbox_box.add_child(_label("%s · level %d · %s" % [String(st["name"]), int(sim.levels[int(st["tile"])]),
-				"new this year" if age == 0 else "%d %s old" % [age, "year" if age == 1 else "years"]], 13, TEXT_DIM))
+		var line := _label(startup_count_text(tot), 13, TEXT)
+		line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_inbox_box.add_child(line)
+		_inbox_net = _label("", 13, GOOD)
+		_inbox_box.add_child(_inbox_net)
+		_show_startup_net(tot)
+	if not sim.letter_log.is_empty():
+		_inbox_box.add_child(_divider())
+		var more := _menu_row("list", "Records: every start-up and letter")
+		more.tooltip_text = "How each start-up you backed is doing, and every letter and your answer"
+		more.pressed.connect(func(): open_records("startups" if not sim.startups.is_empty() else "letters"))
+		_inbox_box.add_child(more)
+
+
+func _show_startup_net(tot: Dictionary) -> void:
+	if _inbox_net == null or not is_instance_valid(_inbox_net) or int(tot["backed"]) == 0:
+		return
+	var net: int = tot["net"]
+	_inbox_net.text = ("Made the town %s so far (tax and buy-outs, less grants)" if net >= 0
+		else "Cost the town %s so far (grants, less tax and buy-outs)") % money_text(absi(net))
+	_inbox_net.add_theme_color_override("font_color", GOOD if net >= 0 else BAD)
 
 
 func open_letter(id: int) -> void:
@@ -1624,6 +1665,8 @@ func open_letter(id: int) -> void:
 	if letter.is_empty():
 		return
 	close_inbox()
+	var was_open := _card_open()
+	_hide_now(records_panel)
 	_letter_id = id
 	_letter_from.text = "From %s" % String(letter.get("from", ""))
 	_letter_subject.text = String(letter.get("subject", ""))
@@ -1631,6 +1674,11 @@ func open_letter(id: int) -> void:
 	var left: int = _sim.letter_months_left(letter)
 	_letter_note.text = "%d %s left to answer. Saying yes keeps investors keen; saying no cools them a little." % [
 		left, "month" if left == 1 else "months"]
+	if String(letter.get("kind", "")) == "startup":
+		_letter_note.text = ("Backing them gets you its jobs and office tax. Each year it may grow (%d%%), go bust (%d%%) "
+			+ "or be bought by a big firm (%d%%), paying you back %dx your grant. Records (in the inbox) shows how each one does.\n") % [
+			roundi(Settings.STARTUP_GROW * 100.0), roundi(Settings.STARTUP_FOLD * 100.0),
+			roundi(Settings.STARTUP_ACQUIRED * 100.0), Settings.STARTUP_PAYOUT] + _letter_note.text
 	_letter_note.add_theme_color_override("font_color", TEXT_DIM)
 	for child: Node in _letter_buttons.get_children():
 		child.queue_free()
@@ -1672,7 +1720,6 @@ func open_letter(id: int) -> void:
 		yes.custom_minimum_size = Vector2(150, 36)
 		yes.pressed.connect(func(): letter_answered.emit(id, true, 0))
 		_letter_buttons.add_child(yes)
-	var was_open := letter_open()
 	_open(_letter_dim, true)
 	_open(letter_panel, true)
 	if not was_open:
@@ -1692,13 +1739,301 @@ func close_letter() -> void:
 	if not letter_open():
 		return
 	_letter_id = -1
-	for c: Control in [_letter_dim, letter_panel]:
-		if _tweens.has(c):
-			(_tweens[c] as Tween).kill()
-			_tweens.erase(c)
-		c.visible = false
-		c.modulate.a = 1.0
+	_hide_now(_letter_dim)
+	_hide_now(letter_panel)
 	letter_shown.emit(false)
+
+
+func _hide_now(c: Control) -> void:
+	if _tweens.has(c):
+		(_tweens[c] as Tween).kill()
+		_tweens.erase(c)
+	c.visible = false
+	c.modulate.a = 1.0
+
+
+func _card_open() -> bool:
+	# The letter card or the Records window (either pauses the game).
+	return letter_open() or records_open()
+
+
+# ---------------------------------------------------------------- records
+# Every start-up the town backed (going or not, with what each made) and every
+# letter (with the answer), in a window in the middle. A summary and filters
+# at the top, so the list rarely needs scrolling; the inbox stays short.
+
+func _build_records() -> void:
+	records_panel = _panel(_root, 18.0)
+	records_panel.visible = false
+	var box := _vbox(records_panel, 10)
+	box.custom_minimum_size.x = 600.0
+	var head := _hbox(box, 10)
+	head.add_child(_icon_rect("list", 22, ACCENT))
+	var title := _label("Records", 17, TEXT, true)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(title)
+	var tabs := _hbox(head, 2)
+	for tab: Array in [["startups", "Start-ups"], ["letters", "Letters"]]:
+		var id: String = tab[0]
+		var b := _button(tab[1], true)
+		b.theme_type_variation = "Segment"
+		b.custom_minimum_size = Vector2(96, 32)
+		b.pressed.connect(func(): _show_records_tab(id))
+		tabs.add_child(b)
+		_records_tabs[id] = b
+	var close := _icon_button("close", "Close (Esc)", false)
+	close.theme_type_variation = "Flat"
+	close.custom_minimum_size = Vector2(28, 28)
+	close.pressed.connect(close_records)
+	head.add_child(close)
+	_records_summary = _vbox(box, 4)
+	_records_filters = _hbox(box, 2)
+	box.add_child(_divider())
+	_records_scroll = ScrollContainer.new()
+	_records_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(_records_scroll)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.add_theme_constant_override("margin_right", 10)
+	_records_scroll.add_child(pad)
+	_records_box = _vbox(pad, 4)
+	_records_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+
+func open_records(tab: String = "startups") -> void:
+	close_inbox()
+	var was_open := _card_open()
+	if letter_open():
+		_letter_id = -1
+		_hide_now(letter_panel)
+	_records_filter = "all"
+	_show_records_tab(tab)
+	_open(_letter_dim, true)
+	_open(records_panel, true)
+	if not was_open:
+		letter_shown.emit(true)
+
+
+func close_records() -> void:
+	if not records_open():
+		return
+	_hide_now(_letter_dim)
+	_hide_now(records_panel)
+	letter_shown.emit(false)
+
+
+func records_open() -> bool:
+	return records_panel != null and records_panel.visible
+
+
+func _show_records_tab(tab: String) -> void:
+	_records_tab = tab
+	for id: String in _records_tabs:
+		(_records_tabs[id] as Button).set_pressed_no_signal(id == tab)
+	for box: Control in [_records_summary, _records_filters, _records_box]:
+		for child: Node in box.get_children():
+			box.remove_child(child)
+			child.queue_free()
+	if tab == "startups":
+		_fill_startups()
+	else:
+		_fill_letter_log()
+	_records_filters.visible = _records_filters.get_child_count() > 0
+	_records_scroll.scroll_vertical = 0
+	_records_scroll.custom_minimum_size = Vector2.ZERO   # (sized again in _layout)
+
+
+func _fill_startups() -> void:
+	var sim = _sim
+	var tot: Dictionary = sim.startup_totals()
+	if sim.startups.is_empty():
+		var none := _label("You haven't backed a start-up yet. They write once the town has %d people and an empty office plot in a Tech zone." % Settings.STARTUP_POP, 13, TEXT_DIM)
+		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_records_summary.add_child(none)
+		return
+	_records_summary.add_child(_label(startup_count_text(tot), 15, TEXT, true))
+	var net: int = tot["net"]
+	var sums := _label("You put in %s · they've paid %s in tax%s · %s" % [money_text(int(tot["grants"])),
+		money_text(int(tot["tax"])), "" if int(tot["payouts"]) == 0 else " and %s in buy-outs" % money_text(int(tot["payouts"])),
+		"%s %s" % ["made" if net >= 0 else "lost", money_text(absi(net))]], 13, TEXT_DIM)
+	sums.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_records_summary.add_child(sums)
+	var odds := _label("Each year a start-up may grow (%d%%), go bust (%d%%) or be bought out (%d%%), paying back %dx your grant. Until then you get its jobs and tax." % [
+		roundi(Settings.STARTUP_GROW * 100.0), roundi(Settings.STARTUP_FOLD * 100.0),
+		roundi(Settings.STARTUP_ACQUIRED * 100.0), Settings.STARTUP_PAYOUT], 12, TEXT_FAINT)
+	odds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_records_summary.add_child(odds)
+	# Going first (newest first), then the ones that ended (latest first).
+	var going: Array = []
+	var ended: Array = []
+	for st: Dictionary in sim.startups:
+		(going if sim.startup_going(st) else ended).append(st)
+	going.sort_custom(func(a: Dictionary, b: Dictionary): return int(a["founded"]) > int(b["founded"]))
+	ended.sort_custom(func(a: Dictionary, b: Dictionary): return int(a.get("ended", 0)) > int(b.get("ended", 0)))
+	if not going.is_empty():
+		_records_box.add_child(_caption("Going · %d" % going.size()))
+		for st: Dictionary in going:
+			_records_box.add_child(_startup_row(st))
+	if not ended.is_empty():
+		_records_box.add_child(_caption("Ended · %d" % ended.size()))
+		for st: Dictionary in ended:
+			_records_box.add_child(_startup_row(st))
+
+
+const STARTUP_STATUS := {
+	"going": ["Going", GOOD], "bought": ["Bought out", ACCENT], "bust": ["Went bust", BAD], "closed": ["Closed", TEXT_FAINT]}
+
+
+func _startup_row(st: Dictionary) -> Control:
+	# One start-up: its name and how it's doing, then the money. One still
+	# going is a button that flies the camera to its office.
+	var sim = _sim
+	var status := String(st.get("status", "going"))
+	var look: Array = STARTUP_STATUS.get(status, STARTUP_STATUS["closed"])
+	var net: int = sim.startup_net(st)
+	var when := "backed %s for %s" % [sim.month_text(int(st["founded"])), money_text(int(st["grant"]))]
+	var line2 := ""
+	match status:
+		"going":
+			line2 = "%s · level %d · %d jobs · %s tax so far" % [when, int(sim.levels[int(st["tile"])]),
+				sim.startup_jobs(st), money_text(roundi(float(st.get("tax", 0.0))))]
+		"bought":
+			line2 = "%s · bought %s, paying %s · %s tax" % [when, sim.month_text(int(st.get("ended", 0))),
+				money_text(int(st.get("payout", 0))), money_text(roundi(float(st.get("tax", 0.0))))]
+		_:
+			line2 = "%s · %s %s · reached level %d · %s tax" % [when, "went bust" if status == "bust" else "closed",
+				sim.month_text(int(st.get("ended", 0))), int(st.get("best", 1)), money_text(roundi(float(st.get("tax", 0.0))))]
+	var row := Button.new()
+	row.theme_type_variation = "MenuRow"
+	row.focus_mode = Control.FOCUS_NONE
+	row.custom_minimum_size = Vector2(0, 50)
+	row.disabled = status != "going"
+	row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if status == "going" else Control.CURSOR_ARROW
+	var tile: int = st["tile"]
+	if status == "going":
+		row.tooltip_text = "Show its office on the map"
+		row.pressed.connect(func():
+			close_records()
+			show_tile.emit(tile))
+	var inner := _hbox(row, 10)
+	inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_KEEP_SIZE, 8)
+	inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var text := _vbox(inner, 0)
+	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var top := _hbox(text, 8)
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_child(_label(String(st["name"]), 14, TEXT, true))
+	top.add_child(_label(String(look[0]), 12, look[1], true))
+	var sub := _label(line2, 12, TEXT_DIM)
+	text.add_child(sub)
+	var money := _label(signed_money(net), 14, GOOD if net >= 0 else BAD, true)
+	money.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	money.tooltip_text = "What it has made the town: tax and any buy-out, less the grant"
+	inner.add_child(money)
+	for c: Node in [top, text, money, sub]:
+		(c as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for l: Node in top.get_children():
+		(l as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return row
+
+
+const LETTER_FILTERS := [["all", "All"], ["", "Waiting"], ["yes", "Said yes"], ["no", "Said no"], ["lapsed", "No answer"]]
+
+
+func _fill_letter_log() -> void:
+	var sim = _sim
+	var counts: Dictionary = sim.letter_log_counts()
+	if sim.letter_log.is_empty():
+		var none := _label("No letters yet. Companies write when your town has something they want.", 13, TEXT_DIM)
+		none.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_records_summary.add_child(none)
+		return
+	_records_summary.add_child(_label("%d %s: you said yes to %d, no to %d, and left %d unanswered" % [
+		sim.letter_log.size(), "letter" if sim.letter_log.size() == 1 else "letters",
+		int(counts["yes"]), int(counts["no"]), int(counts["lapsed"])], 13, TEXT))
+	for f: Array in LETTER_FILTERS:
+		var key: String = f[0]
+		var n: int = sim.letter_log.size() if key == "all" else int(counts.get(key, 0))
+		var b := _button("%s %d" % [String(f[1]), n], true)
+		b.theme_type_variation = "Chip"
+		b.set_pressed_no_signal(key == _records_filter)
+		b.disabled = n == 0 and key != "all"
+		b.pressed.connect(func():
+			_records_filter = key
+			_show_records_tab("letters"))
+		_records_filters.add_child(b)
+	var shown := 0
+	for k: int in range(sim.letter_log.size() - 1, -1, -1):
+		var e: Dictionary = sim.letter_log[k]
+		var answer: String = e["answer"]
+		if _records_filter != "all" and answer != _records_filter:
+			continue
+		shown += 1
+		_records_box.add_child(_letter_log_row(e))
+	if shown == 0:
+		_records_box.add_child(_label("None.", 13, TEXT_DIM))
+
+
+func _letter_log_row(e: Dictionary) -> Control:
+	var sim = _sim
+	var answer: String = e["answer"]
+	var said := ""
+	var colour := TEXT_DIM
+	match answer:
+		"":
+			var letter: Dictionary = sim.letter_by_id(int(e["id"]))
+			var left: int = sim.letter_months_left(letter) if not letter.is_empty() else 0
+			said = "Waiting · %d %s left to answer" % [left, "month" if left == 1 else "months"]
+			colour = WARN
+		"yes":
+			said = "%s · %s" % [String(e["detail"]) if String(e["detail"]) != "" else "Said yes", sim.month_text(int(e["answered"]))]
+			colour = GOOD
+		"no":
+			said = "Turned down · %s" % sim.month_text(int(e["answered"]))
+			colour = BAD
+		"lapsed":
+			said = "No answer: they went elsewhere · %s" % sim.month_text(int(e["answered"]))
+			colour = TEXT_FAINT
+	var row := Button.new()
+	row.theme_type_variation = "MenuRow"
+	row.focus_mode = Control.FOCUS_NONE
+	row.custom_minimum_size = Vector2(0, 46)
+	row.disabled = answer != ""
+	var id: int = e["id"]
+	if answer == "":
+		row.tooltip_text = "Read the letter"
+		row.pressed.connect(func(): open_letter(id))
+	var text := _vbox(row, 0)
+	text.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_KEEP_SIZE, 8)
+	text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var top := _label("%s · %s" % [sim.month_text(int(e["month"])), String(e["subject"])], 13, TEXT)
+	top.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	top.clip_text = true
+	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.add_child(top)
+	var bottom := _label(said, 12, colour)
+	bottom.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text.add_child(bottom)
+	return row
+
+
+static func startup_count_text(tot: Dictionary) -> String:
+	# "5 backed: 3 going, 1 bought out, 1 went bust"
+	var parts: Array[String] = []
+	if int(tot["going"]) > 0:
+		parts.append("%d going" % int(tot["going"]))
+	if int(tot["bought"]) > 0:
+		parts.append("%d bought out" % int(tot["bought"]))
+	if int(tot["bust"]) > 0:
+		parts.append("%d went bust" % int(tot["bust"]))
+	if int(tot["closed"]) > 0:
+		parts.append("%d closed" % int(tot["closed"]))
+	return "%d backed: %s" % [int(tot["backed"]), ", ".join(parts)]
+
+
+static func signed_money(amount: int) -> String:
+	return ("+" if amount > 0 else "") + money_text(amount)
 
 
 func letter_open() -> bool:

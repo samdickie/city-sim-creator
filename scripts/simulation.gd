@@ -135,7 +135,10 @@ var small_services := [0, 0, 0, 0]    # ...of which small ones
 var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fully covered)
 # Letters from companies (see Letters below). Saved.
 var letters: Array[Dictionary] = []   # unanswered: {id, kind, company, from, subject, body, month, ...}
-var startups: Array[Dictionary] = []  # start-ups the town backed: {tile, name, grant, founded}
+var startups: Array[Dictionary] = []  # every start-up the town backed: {tile, name, grant, founded, status, ended, tax, payout, best}
+                                      # (status "going", "bought", "bust" or "closed"; only going ones hold their plot)
+var letter_log: Array[Dictionary] = []  # every letter: {id, kind, company, subject, month, answer, answered, detail}
+                                        # (answer "" while waiting, "yes", "no" or "lapsed")
 var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are on the town
 var letter_count := 0                 # letters ever sent (gives each its id)
 var deals: Array[Dictionary] = []     # data centres agreed: {id, company, scale, month, tiles, opened, break_left, priority}
@@ -234,6 +237,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	tech_share = -1.0
 	letters.clear()
 	startups.clear()
+	letter_log.clear()
 	deals.clear()
 	_deal_at.clear()
 	company_jobs = 0
@@ -898,6 +902,13 @@ func _collect_taxes() -> void:
 			else:
 				taxable += base
 	last_income = roundi((taxable * tax_rate + taxable_tech * tech_tax_rate) * Settings.TAX_BASE) + company_tax()
+	# What each start-up still going paid (the Records window adds it up).
+	for s: Dictionary in startups:
+		var si: int = s["tile"]
+		if startup_going(s) and tiles[si] == Tile.OFFICES and levels[si] > 0:
+			var paid := units(si) * (0.6 + 0.8 * land_value[si]) * Settings.OFFICE_TAX \
+				* (tech_tax_rate if tech_taxed(si) else tax_rate) * Settings.TAX_BASE
+			s["tax"] = float(s.get("tax", 0.0)) + paid
 	last_tech_relief = roundi(taxable_tech * (tax_rate - tech_tax_rate) * Settings.TAX_BASE)
 	# Every running cost is scaled by the difficulty (x1 on Normal).
 	last_upkeep = roundi((road_upkeep + park_tiles * Settings.PARK_UPKEEP
@@ -1016,6 +1027,7 @@ func _update_letters() -> void:
 	var kept: Array[Dictionary] = []
 	for letter: Dictionary in letters:
 		if month - int(letter.get("month", month)) >= Settings.LETTER_MONTHS:
+			_log_answer(int(letter.get("id", -1)), "lapsed")
 			if String(letter.get("kind", "")) == "more_power":
 				news.append(_refuse_more_power(int(letter.get("deal", -1))))
 			else:
@@ -1048,7 +1060,39 @@ func _send_letter(letter: Dictionary) -> int:
 	letter["month"] = month
 	letters.append(letter)
 	new_letters.append(letter_count)
+	_log_letter(letter)
 	return letter_count
+
+
+func _log_letter(letter: Dictionary) -> void:
+	# Every letter goes in the Records window's log; when it's full the oldest
+	# answered one makes room.
+	letter_log.append({"id": int(letter.get("id", 0)), "kind": String(letter.get("kind", "")),
+		"company": String(letter.get("company", "")), "subject": String(letter.get("subject", "")),
+		"month": int(letter.get("month", month)), "answer": "", "answered": -1, "detail": ""})
+	if letter_log.size() > Settings.LETTER_LOG_MAX:
+		for k: int in letter_log.size():
+			if String(letter_log[k]["answer"]) != "":
+				letter_log.remove_at(k)
+				break
+
+
+func _log_answer(id: int, answer: String, detail: String = "") -> void:
+	for entry: Dictionary in letter_log:
+		if int(entry["id"]) == id:
+			entry["answer"] = answer
+			entry["answered"] = month
+			entry["detail"] = detail
+			return
+
+
+func letter_log_counts() -> Dictionary:
+	# How many letters are waiting, said yes to, turned down and left to lapse.
+	var out := {"": 0, "yes": 0, "no": 0, "lapsed": 0}
+	for entry: Dictionary in letter_log:
+		var a: String = entry["answer"]
+		out[a] = int(out.get(a, 0)) + 1
+	return out
 
 
 func _has_letter(kind: String) -> bool:
@@ -1119,18 +1163,53 @@ func _free_startup_plot() -> int:
 
 
 func _startup_tiles() -> Dictionary:
+	# Plots held by start-ups still going.
 	var out := {}
 	for s: Dictionary in startups:
-		out[int(s["tile"])] = true
+		if startup_going(s):
+			out[int(s["tile"])] = true
 	return out
 
 
 func is_startup(i: int) -> String:
-	# The name of the start-up on this plot ("" if none).
+	# The name of the start-up going on this plot ("" if none).
+	var s := startup_at(i)
+	return String(s.get("name", "")) if not s.is_empty() else ""
+
+
+func startup_at(i: int) -> Dictionary:
 	for s: Dictionary in startups:
-		if int(s["tile"]) == i:
-			return String(s.get("name", ""))
-	return ""
+		if int(s["tile"]) == i and startup_going(s):
+			return s
+	return {}
+
+
+static func startup_going(s: Dictionary) -> bool:
+	return String(s.get("status", "going")) == "going"
+
+
+static func startup_net(s: Dictionary) -> int:
+	# What a start-up has made the town so far: its tax and any buy-out, less the grant.
+	return roundi(float(s.get("tax", 0.0))) + int(s.get("payout", 0)) - int(s.get("grant", 0))
+
+
+func startup_jobs(s: Dictionary) -> int:
+	return units(int(s["tile"])) if startup_going(s) else 0
+
+
+func startup_totals() -> Dictionary:
+	# Every start-up the town backed, added up (the inbox and the Records window).
+	var out := {"backed": startups.size(), "going": 0, "bought": 0, "bust": 0, "closed": 0,
+		"grants": 0, "tax": 0, "payouts": 0, "net": 0, "jobs": 0}
+	for s: Dictionary in startups:
+		var status := String(s.get("status", "going"))
+		out[status] = int(out.get(status, 0)) + 1
+		out["grants"] = int(out["grants"]) + int(s.get("grant", 0))
+		out["tax"] = int(out["tax"]) + roundi(float(s.get("tax", 0.0)))
+		out["payouts"] = int(out["payouts"]) + int(s.get("payout", 0))
+		out["jobs"] = int(out["jobs"]) + startup_jobs(s)
+	out["net"] = int(out["tax"]) + int(out["payouts"]) - int(out["grants"])
+	return out
 
 
 func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
@@ -1142,6 +1221,7 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 	var company: String = letter.get("company", "")
 	if not yes:
 		letters.erase(letter)
+		_log_answer(id, "no")
 		_change_appetite(-Settings.APPETITE_NO)
 		if String(letter.get("kind", "")) == "more_power":
 			return {"ok": true, "text": _refuse_more_power(int(letter.get("deal", -1)))}
@@ -1155,7 +1235,9 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			if plot < 0:
 				return {"ok": false, "text": "%s needs an empty office plot with a road and power in your Tech zone." % company}
 			money -= grant
-			startups.append({"tile": plot, "name": company, "grant": grant, "founded": month})
+			startups.append({"tile": plot, "name": company, "grant": grant, "founded": month, "status": "going",
+				"ended": -1, "tax": 0.0, "payout": 0, "best": 1})
+			_log_answer(id, "yes", "Backed with %s" % Companies._pounds(grant))
 			levels[plot] = 1
 			abandoned[plot] = 0
 			decline[plot] = 0
@@ -1170,6 +1252,7 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 	if kind == "more_power":
 		var dk := deal_by_id(int(letter.get("deal", -1)))
 		letters.erase(letter)
+		_log_answer(id, "yes", "Gave it more power")
 		if dk < 0:
 			return {"ok": true, "text": "OpenAI has gone already."}
 		var deal: Dictionary = deals[dk]
@@ -1197,6 +1280,7 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			"priority": bool(scale.get("priority", false)), "investment": int(scale["investment"])}
 		deals.append(deal)
 		letters.erase(letter)
+		_log_answer(id, "yes", "Agreed: %s %s" % [String(scale["name"]).to_lower(), project_word(kind)])
 		_change_appetite(Settings.APPETITE_YES)
 		return {"ok": true, "deal": int(letter["id"]),
 			"text": "Deal agreed with %s. Now drag out %d tiles in your Tech zone for its %s (within %d months)." % [
@@ -1554,11 +1638,20 @@ func _refuse_more_power(deal_id: int) -> String:
 
 func _update_startups() -> void:
 	# Start-ups the town backed: each year one may grow, fold or be bought out.
-	# One whose plot was bulldozed or rezoned has simply gone.
-	var kept: Array[Dictionary] = []
+	# Every one stays on the list (the Records window) with how it ended:
+	# bought out (it stays in town as an ordinary office, the town's stake paid
+	# out), bust, or closed (its plot was cleared or ran down).
 	for s: Dictionary in startups:
+		if not startup_going(s):
+			continue
 		var i: int = s["tile"]
-		if tiles[i] != Tile.OFFICES or levels[i] == 0:
+		if tiles[i] != Tile.OFFICES:
+			_end_startup(s, "closed")
+			news.append(Companies.startup_news("cleared", s))
+			continue
+		if levels[i] == 0:
+			_end_startup(s, "closed")
+			news.append(Companies.startup_news("ran_down", s))
 			continue
 		var age := month - int(s.get("founded", month))
 		if age > 0 and age % 12 == 0:
@@ -1567,22 +1660,31 @@ func _update_startups() -> void:
 				levels[i] = 0
 				layout_version += 1
 				_change_appetite(-Settings.APPETITE_FOLD)
+				_end_startup(s, "bust")
 				news.append(Companies.startup_news("fold", s))
 				shrank.append(i)
 				continue
 			elif roll < Settings.STARTUP_FOLD + Settings.STARTUP_ACQUIRED:
 				var payout: int = int(s.get("grant", 0)) * Settings.STARTUP_PAYOUT
 				money += payout
+				s["payout"] = payout
 				_change_appetite(Settings.APPETITE_YES)
+				_end_startup(s, "bought")
 				news.append(Companies.startup_news("acquired", s, payout))
+				continue
 			elif roll < Settings.STARTUP_FOLD + Settings.STARTUP_ACQUIRED + Settings.STARTUP_GROW \
 					and levels[i] < max_level(i):
 				levels[i] += 1
 				layout_version += 1
 				news.append(Companies.startup_news("grow", s))
 				grew.append(i)
-		kept.append(s)
-	startups = kept
+		s["best"] = maxi(int(s.get("best", 1)), levels[i])
+
+
+func _end_startup(s: Dictionary, status: String) -> void:
+	s["status"] = status
+	s["ended"] = month
+	s["best"] = maxi(int(s.get("best", 1)), levels[int(s["tile"])])
 
 
 func interest_lines() -> Array[String]:
@@ -1644,7 +1746,21 @@ func _load_letters(data: Dictionary) -> void:
 			var i := int(s.get("tile", -1))
 			if i >= 0 and i < w * h:
 				startups.append({"tile": i, "name": String(s.get("name", "")), "grant": int(s.get("grant", 0)),
-					"founded": int(s.get("founded", 0))})
+					"founded": int(s.get("founded", 0)), "status": String(s.get("status", "going")),
+					"ended": int(s.get("ended", -1)), "tax": float(s.get("tax", 0.0)),
+					"payout": int(s.get("payout", 0)), "best": int(s.get("best", 1))})
+	# (Older saves: no log; the letters still waiting start it.)
+	letter_log.clear()
+	for item in data.get("letter_log", []):
+		if typeof(item) == TYPE_DICTIONARY:
+			var e: Dictionary = item
+			letter_log.append({"id": int(e.get("id", 0)), "kind": String(e.get("kind", "")),
+				"company": String(e.get("company", "")), "subject": String(e.get("subject", "")),
+				"month": int(e.get("month", 0)), "answer": String(e.get("answer", "")),
+				"answered": int(e.get("answered", -1)), "detail": String(e.get("detail", ""))})
+	if letter_log.is_empty():
+		for letter: Dictionary in letters:
+			_log_letter(letter)
 	deals.clear()
 	for item in data.get("deals", []):
 		if typeof(item) == TYPE_DICTIONARY:
@@ -3403,9 +3519,14 @@ func _capacity_per_level(t: int) -> int:
 
 
 func date_text() -> String:
+	return month_text(month)
+
+
+func month_text(m: int) -> String:
+	# "Mar 2028" for a month number (date_text is this month's).
 	const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
 		"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-	return "%s %d" % [MONTHS[month % 12], Settings.START_YEAR + floori(month / 12.0)]
+	return "%s %d" % [MONTHS[posmod(m, 12)], Settings.START_YEAR + floori(m / 12.0)]
 
 
 # ------------------------------------------------------------- traffic
@@ -3940,6 +4061,7 @@ func to_save() -> Dictionary:
 		"tech_share": tech_share,
 		"letters": letters.duplicate(true),
 		"startups": startups.duplicate(true),
+		"letter_log": letter_log.duplicate(true),
 		"deals": deals.duplicate(true),
 		"investor_appetite": investor_appetite,
 		"letter_count": letter_count,

@@ -216,6 +216,7 @@ func _ready() -> void:
 	hud.letter_answered.connect(_answer_letter)
 	hud.letter_shown.connect(_letter_shown)
 	hud.place_deal_pressed.connect(_start_placing)
+	hud.show_tile.connect(_show_tile)
 	hud.new_city_pressed.connect(_ask_new_city.bind(false))
 	hud.new_city_chosen.connect(_new_city_chosen)
 	hud.new_city_cancelled.connect(_new_city_cancelled)
@@ -1514,6 +1515,13 @@ func _answer_letter(id: int, yes: bool, choice: int) -> void:
 			_start_placing(int(result["deal"]))
 
 
+func _show_tile(i: int) -> void:
+	# Fly the camera to a plot (a start-up picked in the Records window).
+	var c: Vector2 = world.tile_centre(Vector2i(i % sim.w, i / sim.w))
+	rig.target = Vector3(c.x, rig.target.y, c.y)
+	rig.distance = minf(rig.distance, 700.0)
+
+
 func _letter_shown(open: bool) -> void:
 	# The clock stops while a letter is open on its card.
 	if open:
@@ -1767,7 +1775,10 @@ func _tile_text(i: int) -> String:
 		text += "   ·   %s" % sim.district_name(i)
 	var startup := sim.is_startup(i)
 	if startup != "":
-		text += "\nStart-up: %s, backed by the town" % startup
+		var st: Dictionary = sim.startup_at(i)
+		text += "\nStart-up: %s, backed by the town with %s in %s (%s tax so far)" % [startup,
+			Hud.money_text(int(st.get("grant", 0))), sim.month_text(int(st.get("founded", 0))),
+			Hud.money_text(roundi(float(st.get("tax", 0.0))))]
 	if t != Tile.INDUSTRY and sim.pollution_band(i) >= 2:
 		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:

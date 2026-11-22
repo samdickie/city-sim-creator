@@ -542,7 +542,7 @@ func _letters() -> void:
 	var inbox: PanelContainer = hud.get("inbox_panel")
 	var row: Button = null
 	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
-		if child is Button:
+		if child is Button and (child as Button).text.contains(String(letter["company"])):
 			row = child
 	check(inbox.visible and row != null and row.text.contains(String(letter["company"])),
 		"letters: the envelope opens the inbox with the letter in it")
@@ -550,7 +550,7 @@ func _letters() -> void:
 	# (The clock runs: a new month rebuilds the inbox, so find the row just before clicking.)
 	await _wait(0.2)
 	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
-		if child is Button and not child.is_queued_for_deletion():
+		if child is Button and not child.is_queued_for_deletion() and (child as Button).text.contains(String(letter["company"])):
 			row = child
 	await _click_at(row.get_global_rect().get_center())
 	await _wait(0.15)
@@ -640,6 +640,178 @@ func _letters() -> void:
 		sim.news.clear()
 	check(outcomes.size() >= 3, "letters: start-ups' years go different ways (%s)" % ", ".join(outcomes.keys()))
 	sim.startups.clear()
+	await _records(plot)
+
+
+func _records(plot: int) -> void:
+	# Sam's feedback (Nov 2026): every start-up stays on the list with how it
+	# ended and what it made the town; every letter is kept with the answer.
+	# The inbox shows a summary and opens the Records window.
+	var T := Simulation.Tile
+	sim.startups.clear()
+	sim.levels[plot] = 1
+	sim.startups.append({"tile": plot, "name": "Goingly", "grant": 2000, "founded": 0, "status": "going",
+		"ended": -1, "tax": 0.0, "payout": 0, "best": 1})
+	var tax0: int = sim.money
+	sim.call("_collect_taxes")
+	var paid: float = sim.startups[0]["tax"]
+	check(paid > 0.0, "records: a start-up's tax is added up each month (%.1f)" % paid)
+	sim.money = tax0
+	# Bought out: paid once, then it ends (no second payout) and stays on the list.
+	var other := -1
+	for k: int in sim.w * sim.h:
+		if sim.tiles[k] == T.OFFICES and sim.district[k] == Settings.TECH_ZONE and k != plot:
+			other = k
+			break
+	sim.startups.append({"tile": other, "name": "Boughtly", "grant": 1500, "founded": 0, "status": "going",
+		"ended": -1, "tax": 40.0, "payout": 0, "best": 1})
+	sim.levels[other] = 1
+	sim.month = 12
+	sim.startups[0]["founded"] = 1          # (only the second one has its yearly roll this month)
+	var bought: Dictionary = sim.startups[1]
+	for rolls: int in 400:
+		bought["status"] = "going"
+		sim.levels[other] = 1
+		sim.call("_update_startups")
+		if String(bought["status"]) == "bought":
+			break
+	var money1: int = sim.money
+	sim.month = 24
+	sim.call("_update_startups")
+	check(String(bought["status"]) == "bought" and int(bought["payout"]) == 1500 * Settings.STARTUP_PAYOUT
+		and sim.money == money1 and sim.is_startup(other) == "" and sim.startups.size() == 2,
+		"records: a bought-out start-up is paid once, ends, and stays on the list")
+	# One whose plot is bulldozed closes, with news (it used to vanish silently).
+	sim.startups.append({"tile": other, "name": "Clearly", "grant": 1000, "founded": 13, "status": "going",
+		"ended": -1, "tax": 12.0, "payout": 0, "best": 2})
+	var zone_was: int = sim.tiles[other]
+	sim.tiles[other] = T.EMPTY
+	sim.news.clear()
+	sim.call("_update_startups")
+	check(String(sim.startups[2]["status"]) == "closed" and not sim.news.is_empty() and String(sim.news[0]).contains("Clearly"),
+		"records: a start-up whose plot is cleared closes with a news line (%s)" % (sim.news[0] if not sim.news.is_empty() else ""))
+	sim.tiles[other] = zone_was
+	sim.startups.append({"tile": other, "name": "Bustly", "grant": 3000, "founded": 12, "status": "bust",
+		"ended": 30, "tax": 90.0, "payout": 0, "best": 2})
+	sim.month = 40
+	sim.startups[0]["founded"] = 0
+	sim.recount()
+	var tot: Dictionary = sim.startup_totals()
+	check(int(tot["backed"]) == 4 and int(tot["going"]) == 1 and int(tot["bought"]) == 1 and int(tot["bust"]) == 1
+		and int(tot["closed"]) == 1 and int(tot["net"]) == int(tot["tax"]) + int(tot["payouts"]) - 7500,
+		"records: the totals add up (%s)" % str(tot))
+	# Some answered letters for the Letters tab.
+	sim.letters.clear()
+	sim.letter_log.clear()
+	for n: int in 7:
+		var lid: int = sim.call("_send_letter", Companies.startup_letter(RandomNumberGenerator.new(), []))
+		if n == 6:
+			continue                             # (one left waiting)
+		if n % 3 == 0:
+			sim.answer_letter(lid, false)
+		elif n % 3 == 1:
+			sim.letters.erase(sim.letter_by_id(lid))
+			sim.call("_log_answer", lid, "lapsed")
+		else:
+			sim.letters.erase(sim.letter_by_id(lid))
+			sim.call("_log_answer", lid, "yes", "Backed with £1,000")
+	var counts: Dictionary = sim.letter_log_counts()
+	check(int(counts["no"]) == 2 and int(counts["lapsed"]) == 2 and int(counts["yes"]) == 2 and int(counts[""]) == 1
+		and sim.letter_log.size() == 7, "records: every letter is logged with its answer (%s)" % str(counts))
+
+	# The inbox: a summary and a Records row, not the whole list.
+	game.call("_refresh_hud")
+	game.call("_set_speed", 1)
+	await _click(hud.get("inbox_button"))
+	await _frames(3)
+	var records_row: Button = null
+	var said := ""
+	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
+		if child is Label:
+			said += (child as Label).text + " | "
+		if child is Button and (child as Button).text.begins_with("Records"):
+			records_row = child
+	check(records_row != null and said.contains("4 backed: 1 going, 1 bought out, 1 went bust, 1 closed")
+		and (said.contains("Made the town") or said.contains("Cost the town")) and not said.contains("Goingly"),
+		"records: the inbox sums up the start-ups in two lines and offers Records")
+	if records_row == null:
+		return
+	await _wait(0.2)
+	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
+		if child is Button and not child.is_queued_for_deletion() and (child as Button).text.begins_with("Records"):
+			records_row = child
+	await _click_at(records_row.get_global_rect().get_center())
+	await _wait(0.15)
+	await _frames(3)
+	var panel: PanelContainer = hud.get("records_panel")
+	var box: VBoxContainer = hud.get("_records_box")
+	var names := ""
+	for child: Node in box.get_children():
+		if child is Button:
+			names += _texts(child) + " | "
+	check(panel.visible and int(game.get("speed")) == 0 and names.find("Goingly") >= 0
+		and names.find("Goingly") < names.find("Boughtly") and names.contains("Went bust") and names.contains("Closed")
+		and names.contains(Hud.money_text(1500 * Settings.STARTUP_PAYOUT)),
+		"records: the Records window opens on the start-ups, going first, with how each ended (the clock stops)")
+	await _shot("p48_records_startups")
+	# Clicking one still going flies the camera to its office.
+	var going_row: Button = null
+	for child: Node in box.get_children():
+		if child is Button and _texts(child).contains("Goingly"):
+			going_row = child
+	rig.target = Vector3.ZERO
+	await _click(going_row)
+	await _wait(0.3)
+	var want: Vector2 = world.tile_centre(Vector2i(plot % sim.w, plot / sim.w))
+	check(not panel.visible and Vector2(rig.target.x, rig.target.z).distance_to(want) < 1.0 and int(game.get("speed")) == 1,
+		"records: clicking a start-up still going shows its office on the map")
+	# The Letters tab and its filters.
+	hud.call("open_records", "letters")
+	await _frames(3)
+	var no_chip: Button = null
+	for child: Node in (hud.get("_records_filters") as HBoxContainer).get_children():
+		if (child as Button).text.begins_with("Said no"):
+			no_chip = child
+	var all_rows := box.get_child_count()
+	await _click(no_chip)
+	await _frames(3)
+	var no_rows := 0
+	var only_no := true
+	for child: Node in box.get_children():
+		if child is Button:
+			no_rows += 1
+			only_no = only_no and _texts(child).contains("Turned down")
+	check(all_rows == sim.letter_log.size() and no_rows == int(counts["no"]) and only_no,
+		"records: the Letters tab lists every letter (%d), and Said no shows just those (%d)" % [all_rows, no_rows])
+	await _shot("p49_records_letters")
+	await _key(KEY_ESCAPE)
+	check(not panel.visible and int(game.get("speed")) == 1, "records: Esc closes it and the clock runs again")
+	game.call("_set_speed", 0)
+	# Saved and loaded; an older save has no log but starts one from the letters waiting.
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(sim.startups.size() == 4 and String(sim.startups[1]["status"]) == "bought" and sim.letter_log.size() == int(counts["no"]) + int(counts["lapsed"]) + int(counts["yes"]) + int(counts[""]),
+		"records: saved and loaded with every start-up and letter")
+	data.erase("letter_log")
+	for st: Dictionary in data["startups"]:
+		for key: String in ["status", "ended", "tax", "payout", "best"]:
+			st.erase(key)
+	sim.from_save(data)
+	check(sim.letter_log.size() == sim.letters.size() and sim.startup_going(sim.startups[3]),
+		"records: an older save loads (its start-ups going, its log from the letters waiting)")
+	sim.startups.clear()
+	sim.letters.clear()
+	sim.letter_log.clear()
+
+
+func _texts(n: Node) -> String:
+	# Every label's words inside a control, joined.
+	var out := ""
+	if n is Label:
+		out += (n as Label).text + " "
+	for child: Node in n.get_children():
+		out += _texts(child)
+	return out
 
 
 func _data_centre() -> void:
