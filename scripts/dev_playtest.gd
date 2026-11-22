@@ -1513,14 +1513,83 @@ func _ai_data_centre() -> void:
 	k = sim.deal_by_id(id)
 	check(k >= 0 and int(sim.deals[k]["refusals"]) == 1 and sim.letter_by_id(first).is_empty(),
 		"AI data centre: a request left unanswered counts as a no (1 of %d)" % Settings.AI_REFUSALS)
-	var last := ""
-	for n: int in 2:
-		var again: int = sim.call("_send_letter", Companies.more_power_letter(id))
-		last = String(sim.answer_letter(again, false)["text"])
-	check(sim.deal_by_id(id) < 0 and last.contains("moved its data centre") and sim.tiles[(o.y + 9) * sim.w + o.x] == T.AI_DATA_CENTRE
-		and String(game.call("_tile_text", (o.y + 9) * sim.w + o.x)).contains("no company runs it"),
-		"AI data centre: three no's and OpenAI leaves; its empty halls stay (%s)" % last)
+	var second: int = sim.call("_send_letter", Companies.more_power_letter(id))
+	var sulk := String(sim.answer_letter(second, false)["text"])
+	check(sulk.contains("One more and OpenAI leaves"), "AI data centre: the second no warns it's the last (%s)" % sulk)
+	# The last ask is marked, and opens by itself when it arrives (so it can't lapse unseen on Fast).
+	k = sim.deal_by_id(id)
 	sim.letters.clear()
+	sim.deals[k]["opened_month"] = sim.month + 1 - 12     # (a year old next month)
+	game.set("clock", Settings.MONTH_SECONDS - 0.02)
+	game.call("_set_speed", 1)
+	var final_id := -1
+	for n: int in 120:
+		await get_tree().process_frame
+		if hud.call("letter_open"):
+			break
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "more_power":
+			final_id = letter["id"]
+	check(final_id >= 0 and bool(sim.letter_by_id(final_id).get("last", false)),
+		"AI data centre: after two no's, its next ask is its last")
+	if final_id < 0:
+		return
+	await _frames(3)
+	var note := String((hud.get("_letter_note") as Label).text)
+	check(hud.call("letter_open") and int(game.get("speed")) == 0 and note.contains("last ask"),
+		"AI data centre: the last ask opens on its card, the clock stops, and it says so (%s)" % note)
+	await _shot("p50_last_ask")
+	hud.call("close_letter")
+	game.call("_set_speed", 0)
+	var last := String(sim.answer_letter(final_id, false)["text"])
+	var hall := (o.y + 9) * sim.w + o.x
+	var why := String(game.call("_tile_text", hall))
+	check(sim.deal_by_id(id) < 0 and last.contains("moved its data centre") and sim.tiles[hall] == T.AI_DATA_CENTRE
+		and why.contains("OpenAI left in") and why.contains("more power"),
+		"AI data centre: three no's and OpenAI leaves; its empty halls stay, and say why (%s)" % why)
+	# A cloud company may take over the empty halls.
+	var halls: int = (sim.empty_site_at(hall)["tiles"] as Array).size()
+	check(sim.interest_lines()[-1].contains("take over OpenAI's %d empty halls" % halls),
+		"empty halls: Who's interested says a cloud company may take them over")
+	sim.letters.clear()
+	var offer := -1
+	for n: int in 600:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters:
+			if String(letter["kind"]) == "takeover":
+				offer = letter["id"]
+		if offer >= 0:
+			break
+		sim.letters.clear()
+	check(offer >= 0 and String(sim.letter_by_id(offer)["body"]).contains("OpenAI"),
+		"empty halls: a cloud company writes to take them over")
+	if offer < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", offer)
+	await _frames(3)
+	var take := _find_button(hud.get("letter_panel"), "Let them move in")
+	check(take != null, "empty halls: the letter offers Let them move in")
+	await _shot("p51_takeover_letter")
+	var who := String(sim.letter_by_id(offer)["company"])
+	await _click(take)
+	await _frames(2)
+	var dk: int = sim.deal_by_id(offer)
+	check(dk >= 0 and sim.tiles[hall] == T.DATA_CENTRE and sim.empty_sites.is_empty()
+		and String(sim.deals[dk]["company"]) == who and int(sim.deals[dk]["count"]) == halls,
+		"empty halls: %s takes over all %d halls as a %s data centre" % [who, halls, String(sim.deal_scale(sim.deals[dk])["name"]).to_lower()])
+	# Saved and loaded; halls with no record (an older save) are put down to OpenAI.
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(sim.deal_by_id(offer) >= 0 and sim.empty_sites.is_empty(), "empty halls: saved and loaded")
+	sim.deals.remove_at(sim.deal_by_id(offer))
+	sim.tiles[hall] = T.AI_DATA_CENTRE
+	sim.call("_index_deals")
+	sim.call("_tidy_empty_sites")
+	check(String(game.call("_tile_text", hall)).contains("OpenAI left, because"),
+		"empty halls: AI halls with no record are put down to OpenAI")
+	sim.letters.clear()
+	sim.empty_sites.clear()
 	game.call("_refresh_hud")
 
 

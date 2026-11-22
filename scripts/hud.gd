@@ -1714,6 +1714,27 @@ func open_letter(id: int) -> void:
 		more.tooltip_text = "It will use a quarter more power (and pay a little more tax). Say no %d times and OpenAI leaves" % Settings.AI_REFUSALS
 		more.pressed.connect(func(): letter_answered.emit(id, true, 0))
 		_letter_buttons.add_child(more)
+	if String(letter.get("kind", "")) == "takeover":
+		var site: Dictionary = _sim.empty_site_at(int(letter.get("site", -1)))
+		if not site.is_empty():
+			var scale: Dictionary = Settings.DC_SCALES[_sim.takeover_scale(site)]
+			var terms := _label("A %s data centre in the %d empty halls: %d power · %d water · %d jobs · %s tax a month · %s invested" % [
+				String(scale["name"]).to_lower(), (site["tiles"] as Array).size(), int(scale["power"]), int(scale["water"]),
+				int(scale["jobs"]), money_text(int(scale["tax"])),
+				money_text(roundi(int(scale["investment"]) * Settings.TAKEOVER_INVESTMENT))], 13, TEXT)
+			terms.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			terms.custom_minimum_size = Vector2(500, 0)
+			_letter_options.add_child(terms)
+			_letter_options.visible = true
+		var take := _button("Let them move in", false)
+		take.theme_type_variation = "Primary"
+		take.custom_minimum_size = Vector2(150, 36)
+		take.pressed.connect(func(): letter_answered.emit(id, true, 0))
+		_letter_buttons.add_child(take)
+	if bool(letter.get("last", false)):
+		_letter_note.text = "This is OpenAI's last ask: say no, or leave it for %d %s, and it moves out, leaving its halls empty." % [
+			left, "month" if left == 1 else "months"]
+		_letter_note.add_theme_color_override("font_color", WARN)
 	if String(letter.get("kind", "")) == "startup":
 		var yes := _button("Back them (%s)" % money_text(int(letter.get("grant", 0))), false)
 		yes.theme_type_variation = "Primary"

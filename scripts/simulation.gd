@@ -137,6 +137,7 @@ var coverage := PackedFloat32Array()  # per service, per tile: 0 (none) to 1 (fu
 var letters: Array[Dictionary] = []   # unanswered: {id, kind, company, from, subject, body, month, ...}
 var startups: Array[Dictionary] = []  # every start-up the town backed: {tile, name, grant, founded, status, ended, tax, payout, best}
                                       # (status "going", "bought", "bust" or "closed"; only going ones hold their plot)
+var empty_sites: Array[Dictionary] = []  # halls a company left behind: {tiles, company, kind, month, why}
 var letter_log: Array[Dictionary] = []  # every letter: {id, kind, company, subject, month, answer, answered, detail}
                                         # (answer "" while waiting, "yes", "no" or "lapsed")
 var investor_appetite := Settings.APPETITE_START   # 0-1: how keen companies are on the town
@@ -238,6 +239,7 @@ func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	letters.clear()
 	startups.clear()
 	letter_log.clear()
+	empty_sites.clear()
 	deals.clear()
 	_deal_at.clear()
 	company_jobs = 0
@@ -1044,6 +1046,16 @@ func _update_letters() -> void:
 		var chance := startup_chance()
 		if chance > 0.0 and not _has_letter("startup") and _rng.randf() < chance:
 			_send_letter(Companies.startup_letter(_rng, _company_names()))
+	_tidy_empty_sites()
+	if letters.size() < Settings.MAX_LETTERS and not _has_letter("takeover"):
+		for site: Dictionary in empty_sites:
+			if (site["tiles"] as Array).size() >= int(Settings.DC_SCALES[0]["tiles"]) \
+					and _rng.randf() < Settings.TAKEOVER_CHANCE * (0.5 + investor_appetite):
+				var offer := Companies.takeover_letter(_rng, _deal_companies("data_centre"), String(site["company"]),
+					int(site["tiles"][0]))
+				if not offer.is_empty():
+					_send_letter(offer)
+				break
 	for kind: String in Settings.PROJECTS:
 		if letters.size() >= Settings.MAX_LETTERS or _has_letter(kind) or deal_waiting() >= 0:
 			continue
@@ -1249,6 +1261,32 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			recount()
 			return {"ok": true, "text": "You backed %s with %s. They've moved into the Tech zone." % [company, Companies._pounds(grant)], "tile": plot}
 	var kind: String = letter.get("kind", "")
+	if kind == "takeover":
+		letters.erase(letter)
+		var site := empty_site_at(int(letter.get("site", -1)))
+		if site.is_empty():
+			_log_answer(id, "yes", "Said yes, but the halls had gone")
+			return {"ok": true, "text": "The empty halls have gone, so %s has nothing to take over." % company}
+		var k := takeover_scale(site)
+		var scale: Dictionary = Settings.DC_SCALES[k]
+		var spots: Array = []
+		for t in site["tiles"]:
+			tiles[int(t)] = Tile.DATA_CENTRE
+			spots.append(int(t))
+		empty_sites.erase(site)
+		deals.append({"id": id, "kind": "data_centre", "company": company, "scale": k, "month": month,
+			"tiles": spots, "opened": false, "opens": month, "placed": month, "break_left": 0,
+			"priority": bool(scale.get("priority", false)),
+			"investment": roundi(int(scale["investment"]) * Settings.TAKEOVER_INVESTMENT)})
+		_log_answer(id, "yes", "Let them take over: %s data centre" % String(scale["name"]).to_lower())
+		_change_appetite(Settings.APPETITE_YES)
+		_index_deals()
+		_power_dirty = true
+		_value_dirty = true
+		layout_version += 1
+		recount()
+		return {"ok": true, "text": "%s is moving into the empty halls: a %s data centre, open as soon as it has power." % [
+			company, String(scale["name"]).to_lower()]}
 	if kind == "more_power":
 		var dk := deal_by_id(int(letter.get("deal", -1)))
 		letters.erase(letter)
@@ -1606,7 +1644,8 @@ func _update_deals() -> void:
 			if deal_kind(deal) == "ai_data_centre" and age > 0 and age % 12 == 0 \
 					and float(deal.get("power_x", 1.0)) < Settings.AI_POWER_MAX - 0.001 and not _has_letter("more_power"):
 				# Every year: "we need a bit more power".
-				_send_letter(Companies.more_power_letter(int(deal["id"])))
+				_send_letter(Companies.more_power_letter(int(deal["id"]),
+					int(deal.get("refusals", 0)) >= Settings.AI_REFUSALS - 1))
 			if deal_kind(deal) == "launch_site" and _rng.randf() < float(deal_scale(deal).get("launches", 0.0)):
 				# Lift-off. Now and then the rocket blows up and the site stops for repairs.
 				deal["launches"] = int(deal.get("launches", 0)) + 1
@@ -1628,12 +1667,63 @@ func _refuse_more_power(deal_id: int) -> String:
 	var deal: Dictionary = deals[dk]
 	deal["refusals"] = int(deal.get("refusals", 0)) + 1
 	if int(deal["refusals"]) >= Settings.AI_REFUSALS:
+		empty_sites.append({"tiles": (deal["tiles"] as Array).duplicate(), "company": String(deal["company"]),
+			"kind": deal_kind(deal), "month": month,
+			"why": "you said no (or didn't answer) %d times when it asked for more power" % Settings.AI_REFUSALS})
 		deals.remove_at(dk)
 		_change_appetite(-Settings.APPETITE_NO * 3.0)
 		_power_dirty = true
 		_index_deals()
 		return Companies.deal_news("moved", deal)
 	return Companies.deal_news("sulk", deal)
+
+
+func _tidy_empty_sites() -> void:
+	# Bulldozed halls leave the list; a site with none left goes. AI halls with
+	# no company and no record (OpenAI left before the record was kept) are
+	# added as OpenAI's.
+	var listed := {}
+	for site: Dictionary in empty_sites:
+		for t in site["tiles"]:
+			listed[int(t)] = true
+	var orphans := []
+	for i in w * h:
+		if tiles[i] == Tile.AI_DATA_CENTRE and not _deal_at.has(i) and not listed.has(i):
+			orphans.append(i)
+	if not orphans.is_empty():
+		empty_sites.append({"tiles": orphans, "company": "OpenAI", "kind": "ai_data_centre", "month": -1,
+			"why": "it asked for more power and didn't get it"})
+	var kept: Array[Dictionary] = []
+	for site: Dictionary in empty_sites:
+		var t_kind := project_tile(String(site["kind"]))
+		var still := []
+		for t in site["tiles"]:
+			if tiles[int(t)] == t_kind and not _deal_at.has(int(t)):
+				still.append(int(t))
+		if not still.is_empty():
+			site["tiles"] = still
+			kept.append(site)
+	empty_sites = kept
+
+
+func empty_site_at(i: int) -> Dictionary:
+	# The empty halls (left by a company) this tile is part of, or {}.
+	if i < 0 or i >= w * h or _deal_at.has(i):
+		return {}
+	for site: Dictionary in empty_sites:
+		if (site["tiles"] as Array).has(i) and tiles[i] == project_tile(String(site["kind"])):
+			return site
+	return {}
+
+
+func takeover_scale(site: Dictionary) -> int:
+	# The biggest cloud data centre the empty halls hold.
+	var n: int = (site["tiles"] as Array).size()
+	var k := 0
+	for s: int in Settings.DC_SCALES.size():
+		if n >= int(Settings.DC_SCALES[s]["tiles"]):
+			k = s
+	return k
 
 
 func _update_startups() -> void:
@@ -1723,6 +1813,9 @@ func interest_lines() -> Array[String]:
 			if p.has("wants_schools") and schooled_share() < float(p["wants_schools"]):
 				wants.append("schools near more homes (%d%% of residents at least)" % roundi(float(p["wants_schools"]) * 100.0))
 			out.append("%s: interested%s" % [who, "" if wants.is_empty() else ", but would like " + " and ".join(wants)])
+	for site: Dictionary in empty_sites:
+		out.append("Cloud companies: may take over %s's %d empty halls" % [String(site["company"]),
+			(site["tiles"] as Array).size()])
 	return out
 
 
@@ -1738,6 +1831,8 @@ func _load_letters(data: Dictionary) -> void:
 				letter["grant"] = int(letter["grant"])
 			if letter.has("deal"):
 				letter["deal"] = int(letter["deal"])
+			if letter.has("site"):
+				letter["site"] = int(letter["site"])
 			letters.append(letter)
 	startups.clear()
 	for item in data.get("startups", []):
@@ -1778,6 +1873,19 @@ func _load_letters(data: Dictionary) -> void:
 				"power_x": float(d.get("power_x", 1.0)), "tax_x": float(d.get("tax_x", 1.0)),
 				"refusals": int(d.get("refusals", 0)), "opened_month": int(d.get("opened_month", d.get("opens", 0)))})
 	_index_deals()
+	# (Older saves: no record of who left empty halls; they say so on hover.)
+	empty_sites.clear()
+	for item in data.get("empty_sites", []):
+		if typeof(item) == TYPE_DICTIONARY:
+			var e: Dictionary = item
+			var list := []
+			for t in e.get("tiles", []):
+				if int(t) >= 0 and int(t) < w * h:
+					list.append(int(t))
+			empty_sites.append({"tiles": list, "company": String(e.get("company", "A company")),
+				"kind": String(e.get("kind", "ai_data_centre")), "month": int(e.get("month", 0)), "why": String(e.get("why", ""))})
+	if tiles.size() == w * h:
+		_tidy_empty_sites()
 	investor_appetite = clampf(float(data.get("investor_appetite", Settings.APPETITE_START)), 0.0, 1.0)
 	letter_count = int(data.get("letter_count", letters.size()))
 	new_letters.clear()
@@ -2148,7 +2256,12 @@ func building_status(i: int) -> String:
 		return "teaching" if t == Tile.UNIVERSITY else "busy with research"
 	if is_project_tile(t):
 		if not _deal_at.has(i):
-			return "empty: no company runs it"
+			var site := empty_site_at(i)
+			if site.is_empty():
+				return "empty: no company runs it (bulldoze it to use the land)"
+			return "empty: %s left%s, because %s. A cloud company may take it over, or bulldoze it" % [
+				String(site["company"]), "" if int(site["month"]) < 0 else " in " + month_text(int(site["month"])),
+				String(site["why"])]
 		var k: int = _deal_at[i]
 		if deal_building(k):
 			if Companies.is_musk(deals[k]):
@@ -4062,6 +4175,7 @@ func to_save() -> Dictionary:
 		"letters": letters.duplicate(true),
 		"startups": startups.duplicate(true),
 		"letter_log": letter_log.duplicate(true),
+		"empty_sites": empty_sites.duplicate(true),
 		"deals": deals.duplicate(true),
 		"investor_appetite": investor_appetite,
 		"letter_count": letter_count,

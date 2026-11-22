@@ -177,9 +177,47 @@ const MORE_POWER_LETTER := "hi mayor,\n\nthe data centre is going really well. w
 	+ "have to understand somewhere else, though.\n\ngrateful for you,\nsam"
 
 
-static func more_power_letter(deal_id: int) -> Dictionary:
-	return {"kind": "more_power", "company": "OpenAI", "from": "Sam Altman, OpenAI", "deal": deal_id,
-		"subject": "openai would like a bit more power", "body": MORE_POWER_LETTER, "big": true}
+const LAST_POWER_LETTER := "hi mayor,\n\nwe still need a bit more power. we've asked a couple of times now.\n\n" \
+	+ "we really love your town. but if it's a no again, we'll move the data centre somewhere with more power. " \
+	+ "the halls would stay. they'd just be very quiet.\n\nno pressure (some pressure),\nsam"
+
+
+static func more_power_letter(deal_id: int, last: bool = false) -> Dictionary:
+	# last: one more no (or no answer) and OpenAI leaves; the game opens it for you.
+	return {"kind": "more_power", "company": "OpenAI", "from": "Sam Altman, OpenAI", "deal": deal_id, "last": last,
+		"subject": "openai: last ask for more power, or we move" if last else "openai would like a bit more power",
+		"body": LAST_POWER_LETTER if last else MORE_POWER_LETTER, "big": true}
+
+
+# A cloud company offering to take over empty halls another company left
+# (%s: who left). [company, who signs, the letter]
+const TAKEOVER_LETTERS := [
+	["Amazon", "Jeff Bezos",
+		"Mayor,\n\nWe noticed %s left your town some very large, very empty halls. At Amazon we never waste a "
+		+ "warehouse.\n\nLet us turn them into a cloud data centre. We'll move in straight away, and we won't ask for a "
+		+ "tax break. Frugality is one of our leadership principles.\n\nJeff Bezos, Amazon"],
+	["Microsoft", "Satya Nadella",
+		"Dear Mayor,\n\nWe were sorry to hear %s moved on. Partnerships can be complicated; we would know.\n\n"
+		+ "We'd love to turn the empty halls into a cloud data centre, with a growth mindset and a little less "
+		+ "electricity. We can start this month.\n\nWith gratitude,\nSatya Nadella, Microsoft"],
+	["Google", "Sundar Pichai",
+		"Dear Mayor,\n\nThank you so much for your time. We understand %s has left some empty halls in your town. "
+		+ "We would be honoured to fill them with an AI-ready cloud data centre, run by AI, for AI, starting this "
+		+ "month.\n\nWarm regards,\nSundar Pichai, Google"],
+]
+
+
+static func takeover_letter(rng: RandomNumberGenerator, busy: Array, left_by: String, site: int) -> Dictionary:
+	# {} if every cloud company is already here (busy). site: a tile of the empty halls.
+	var free := []
+	for entry: Array in TAKEOVER_LETTERS:
+		if not busy.has(entry[0]):
+			free.append(entry)
+	if free.is_empty():
+		return {}
+	var e: Array = free[rng.randi() % free.size()]
+	return {"kind": "takeover", "company": e[0], "from": "%s, %s" % [e[1], e[0]], "site": site, "big": true,
+		"subject": "%s would like to take over %s's empty halls" % [e[0], left_by], "body": String(e[2]) % left_by}
 
 
 static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array) -> Dictionary:
@@ -263,9 +301,11 @@ static func deal_news(kind: String, deal: Dictionary) -> String:
 			return "OpenAI's data centre now uses %s power (x%.2f since it opened)." % [_pounds(int(deal.get("power_now", 0))).trim_prefix("£"),
 				float(deal.get("power_x", 1.0))]
 		"sulk":
-			return "Sam Altman says that's totally fine. (That's %d no's now. OpenAI has noticed.)" % int(deal.get("refusals", 0))
+			var left: int = Settings.AI_REFUSALS - int(deal.get("refusals", 0))
+			return "Sam Altman says that's totally fine. (That's %d no's now. %s)" % [int(deal.get("refusals", 0)),
+				"One more and OpenAI leaves." if left == 1 else "OpenAI has noticed."]
 		"moved":
-			return "OpenAI has moved its data centre to a town with more power. Its empty halls are still yours."
+			return "OpenAI has moved its data centre to a town with more power. Its empty halls are still yours: a cloud company may take them over."
 		"boom":
 			return "SpaceX's rocket underwent a \"rapid unscheduled disassembly\" over the launch site. Elon says the data is excellent. No launches for %d months." % Settings.LAUNCH_REPAIR_MONTHS
 	return ""

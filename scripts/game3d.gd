@@ -518,6 +518,11 @@ func _process(delta: float) -> void:
 					gone, "building was" if gone == 1 else "buildings were"])
 			elif not sim.new_letters.is_empty():
 				var letter := sim.letter_by_id(sim.new_letters[0])
+				# A last ask (one more no and a company leaves) opens by itself, so it
+				# can't lapse unseen on Fast.
+				for id: int in sim.new_letters:
+					if bool(sim.letter_by_id(id).get("last", false)) and not hud.is_modal():
+						hud.open_letter(id)
 				hud.flash("A letter from %s (%s): open it from the envelope, top left." % [
 					String(letter.get("from", "")), String(letter.get("company", ""))])
 			elif not sim.news.is_empty():

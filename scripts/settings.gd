@@ -202,6 +202,8 @@ const STARTUP_GROW := 0.25          # each year a start-up the town backed may g
 const STARTUP_FOLD := 0.15          # fold (its plot empties),
 const STARTUP_ACQUIRED := 0.04      # or be bought by a big firm, paying out the town's stake:
 const STARTUP_PAYOUT := 8           # this many times the grant
+const TAKEOVER_CHANCE := 0.04       # a month, empty company halls get an offer from a cloud company (x investor appetite)
+const TAKEOVER_INVESTMENT := 0.5    # ...which invests this share of a new data centre's investment (the halls are there)
 const LETTER_LOG_MAX := 200         # the Records window keeps this many letters (the oldest answered ones go first)
 # Data centres: Amazon, Microsoft or Google write from DC_POP people once a Tech
 # zone has open land for the smallest; you pick a size, then drag out its site
