@@ -139,6 +139,7 @@ func _run() -> void:
 	await _campus()
 	await _launch_site()
 	await _ai_data_centre()
+	await _chip_factory()
 	await _education()
 	await _examples()
 	await _new_buildings()
@@ -1102,6 +1103,61 @@ func _gigafactory() -> void:
 	await _look_at(o + Vector2i(1, 6), PLAY_DISTANCE * 0.6, -30.0, 32.0, [])
 	await _shot("p38_gigafactory_open")
 	sim.letters.clear()
+	await _musk_threat(id, tile)
+
+
+func _musk_threat(id: int, tile: int) -> void:
+	# Elon threatens to move to Texas when the Tech zone tax goes up (Big Tech,
+	# Nov 2026). Put it back and he's happy; keep it and he leaves (or bluffs).
+	var T := Simulation.Tile
+	var was: float = sim.tech_tax_rate
+	sim.change_tech_tax(0.02)
+	sim.call("_check_musk_tax")
+	var letter: Dictionary = {}
+	for l: Dictionary in sim.letters:
+		if String(l["kind"]) == "musk_threat":
+			letter = l
+	check(not letter.is_empty() and String(letter["body"]).contains("Texas") and is_equal_approx(float(letter["rate"]), was),
+		"Elon: raising the Tech zone tax brings a letter threatening to move Tesla to Texas")
+	if letter.is_empty():
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", int(letter["id"]))
+	await _frames(3)
+	var back := _find_button(hud.get("letter_panel"), "Put it back to %d%%" % roundi(was * 100.0))
+	check(back != null and _find_button(hud.get("letter_panel"), "Keep the tax") != null,
+		"Elon: the card offers Put it back or Keep the tax")
+	await _shot("p52_elon_threat")
+	await _click(back)
+	await _frames(2)
+	check(is_equal_approx(sim.tech_tax_rate, was) and sim.deal_by_id(id) >= 0 and not hud.call("letter_open"),
+		"Elon: put back, the tax is %d%% again and Tesla stays" % roundi(sim.tech_tax_rate * 100.0))
+	# Keep it: he leaves, or now and then changes his mind (and accepts the new rate).
+	var outcomes := {}
+	for n: int in 12:
+		if sim.deal_by_id(id) < 0:
+			break
+		sim.change_tech_tax(0.01)
+		sim.call("_check_musk_tax")
+		var lid := -1
+		for l: Dictionary in sim.letters:
+			if String(l["kind"]) == "musk_threat":
+				lid = l["id"]
+		if lid < 0:
+			break
+		var said := String(sim.answer_letter(lid, false)["text"])
+		if said.contains("changed his mind"):
+			outcomes["bluff"] = true
+			check(sim.deal_by_id(id) >= 0 and is_equal_approx(float(sim.deals[sim.deal_by_id(id)]["tax_seen"]), sim.tech_tax_rate),
+				"Elon: a bluff: Tesla stays and he puts up with the new rate (%s)" % said)
+		elif said.contains("Texas"):
+			outcomes["left"] = true
+	var why := String(game.call("_tile_text", tile))
+	check(outcomes.has("left") and sim.deal_by_id(id) < 0 and sim.tiles[tile] == T.GIGAFACTORY and why.contains("Tesla left")
+		and why.contains("Tech zone tax"), "Elon: keep the tax and Tesla moves to Texas; its empty halls say why (%s)" % why)
+	sim.tech_tax_rate = was
+	sim.letters.clear()
+	sim.empty_sites.clear()
 
 
 func _campus() -> void:
@@ -1135,7 +1191,7 @@ func _campus() -> void:
 	sim.recount()
 	var line := ""
 	for l: String in sim.interest_lines():
-		if l.begins_with("Google's campus"):
+		if l.begins_with("Campuses (Google, Apple, Meta)"):
 			line = l
 	check(sim.population >= 6000 and line.contains("schools near more homes"), "campus: %d people: %s" % [sim.population, line])
 	var no_schools: float = sim.project_chance("campus")
@@ -1148,7 +1204,7 @@ func _campus() -> void:
 	while not sim.call("_has_letter", "campus") and tries < 600:
 		sim.call("_update_letters")
 		for letter: Dictionary in sim.letters.duplicate():
-			if String(letter["kind"]) != "campus":
+			if String(letter["kind"]) != "campus" or String(letter["company"]) != "Google":   # (Google's first)
 				sim.letters.erase(letter)
 		tries += 1
 	var id := -1
@@ -1220,6 +1276,42 @@ func _campus() -> void:
 	game.call("_refresh_hud")
 	await _look_at(o + Vector2i(9, 12), PLAY_DISTANCE * 0.9, -30.0, 40.0, [])
 	await _shot("p41_campus_mega")
+	# The same site as Apple's: a ring, which won't open beside dirty air.
+	var mega: Dictionary = sim.deals[sim.deal_by_id(900)]
+	mega["company"] = "Apple"
+	sim.recount()
+	check(sim.deal_problem(sim.deal_by_id(900)) == "", "campus: Apple's opens where the air is clean")
+	_place("coal", o + Vector2i(13, 10))
+	sim.recount()
+	var why: String = sim.deal_problem(sim.deal_by_id(900))
+	check(why.contains("isn't clean enough for Apple") and String(game.call("_tile_text", spots[0])).contains("clean enough"),
+		"campus: with a coal plant beside it, Apple's stays shut (%s)" % why)
+	_place("bulldoze", o + Vector2i(13, 10), o + Vector2i(14, 11))
+	sim.recount()
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	await _look_at(o + Vector2i(9, 12), PLAY_DISTANCE * 0.9, -30.0, 40.0, [])
+	await _shot("p55_campus_apple")
+	# ...and as Meta's: one long building with a park on its roof, which pivots.
+	mega["company"] = "Meta"
+	mega["pivot_at"] = sim.month
+	mega["opened_month"] = sim.month - 1
+	var jobs_before: int = sim.deal_jobs(mega)
+	var power_before: int = sim.deal_power(mega)
+	sim.news.clear()
+	sim.call("_update_deals")
+	var pivot := String(mega.get("pivot", ""))
+	check((pivot == "metaverse" and sim.deal_jobs(mega) < jobs_before) or (pivot == "ai" and sim.deal_power(mega) == power_before * 3),
+		"campus: Meta pivots (%s): %s" % [pivot, sim.news[0] if not sim.news.is_empty() else ""])
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(String(sim.deals[sim.deal_by_id(900)].get("pivot", "")) == pivot, "campus: the pivot is saved")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	await _look_at(o + Vector2i(9, 12), PLAY_DISTANCE * 0.9, -30.0, 40.0, [])
+	await _shot("p56_campus_meta")
 	sim.letters.clear()
 
 
@@ -1604,6 +1696,96 @@ func _ai_data_centre() -> void:
 	game.call("_refresh_hud")
 
 
+func _chip_factory() -> void:
+	# Nvidia's chip factory (Big Tech, Nov 2026): Jensen writes from 8,000 people;
+	# the bigger the better the deal (the Mega one asks no tax break); it drinks
+	# water and gives off a little chemical pollution.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_2)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var o := _find_land(34, 16)
+	check(o.x >= 0, "chip factory: a new city with flat land at %s" % o)
+	if o.x < 0:
+		return
+	sim.money = 5000000
+	for row: int in [0, 4, 8]:
+		_place("road", o + Vector2i(0, row), o + Vector2i(33, row))
+	_place("homes_1", o + Vector2i(0, 1), o + Vector2i(29, 3))
+	_place("homes_1", o + Vector2i(0, 5), o + Vector2i(29, 7))
+	for n: int in 3:
+		_place("water_pump", o + Vector2i(30, 1 + n))
+		_place("water_pump", o + Vector2i(30, 5 + n))
+	_fill_plots(o + Vector2i(0, 1), o + Vector2i(29, 7))
+	sim.population = 9000
+	_place("nuclear", o + Vector2i(32, 1))
+	_place("tech_zone", o + Vector2i(0, 9), o + Vector2i(15, 14))
+	sim.change_tech_tax(-0.03)
+	sim.recount()
+	check(sim.project_chance("chip_factory") > 0.0 and sim.interest_lines().any(func(l: String): return l.begins_with("Nvidia")),
+		"chip factory: %d people and a Tech zone: Nvidia is interested" % sim.population)
+	var tries := 0
+	while not sim.call("_has_letter", "chip_factory") and tries < 2000:
+		sim.call("_update_letters")
+		for letter: Dictionary in sim.letters.duplicate():
+			if String(letter["kind"]) != "chip_factory":
+				sim.letters.erase(letter)
+		tries += 1
+	var id := -1
+	for letter: Dictionary in sim.letters:
+		if String(letter["kind"]) == "chip_factory":
+			id = letter["id"]
+	check(id >= 0 and String(sim.letter_by_id(id)["body"]).contains("the more you save"),
+		"chip factory: Jensen writes (after %d months' worth of chances)" % tries)
+	if id < 0:
+		return
+	game.call("_refresh_hud")
+	hud.call("open_letter", id)
+	await _frames(3)
+	var sizes: Array[Button] = []
+	for child: Node in (hud.get("_letter_options") as VBoxContainer).get_children():
+		if child is Button:
+			sizes.append(child)
+	check(sizes.size() == 3 and sizes[0].text.contains("no tax for 8 years") and not sizes[2].text.contains("no tax"),
+		"chip factory: the bigger the better: Small asks 8 years without tax, Mega none")
+	await _shot("p53_chip_factory_letter")
+	await _click(sizes[0])
+	await _frames(2)
+	await _look_at(o + Vector2i(2, 11), PLAY_DISTANCE, -40.0, 50.0, [o + Vector2i(0, 8), o + Vector2i(6, 8), o + Vector2i(6, 14)])
+	await _drag(_screen_of(o + Vector2i(0, 9)), _screen_of(o + Vector2i(2, 11)))
+	await _frames(2)
+	var k: int = sim.deal_by_id(id)
+	check(k >= 0 and int(sim.deals[k]["count"]) == 9 and sim.deal_building(k), "chip factory: a 3 x 3 site, being built")
+	var months := 0
+	while k >= 0 and not bool(sim.deals[k]["opened"]) and months < 40:
+		sim.tick()
+		months += 1
+		k = sim.deal_by_id(id)
+	var tile := (o.y + 9) * sim.w + o.x
+	var drinks := 0
+	if k >= 0:
+		for t in sim.deals[k]["tiles"]:
+			drinks += int(sim.call("_deal_share", int(t), "water"))
+	check(k >= 0 and bool(sim.deals[k]["opened"]) and drinks >= 340 and sim.company_jobs >= 500,
+		"chip factory: open after %d months: %d jobs, drinking %d water" % [months, sim.company_jobs, drinks])
+	var text := String(game.call("_tile_text", tile))
+	check(sim.pollution_at(tile + 4 * sim.w) > 0.0 and text.contains("drinks water") and text.contains("Nvidia"),
+		"chip factory: a little chemical pollution nearby, and its hover says so")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_set_overlay", WorldView.Overlay.NONE)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(o + Vector2i(1, 10), PLAY_DISTANCE * 0.5, -30.0, 32.0, [])
+	await _shot("p54_chip_factory")
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(sim.deal_by_id(id) >= 0 and sim.tiles[tile] == T.CHIP_FACTORY, "chip factory: saved and loaded")
+	sim.letters.clear()
+
+
 func _education() -> void:
 	# Education and tech workers (tech layer step 3, Nov 2026): a college, a
 	# university dragged out as a campus and a research park beside it, from the
@@ -1677,7 +1859,7 @@ func _education() -> void:
 	var low: float = sim.project_chance("campus")
 	var line := ""
 	for l: String in sim.interest_lines():
-		if l.begins_with("Google's campus"):
+		if l.begins_with("Campuses (Google, Apple, Meta)"):
 			line = l
 	sim.tech_share = 0.4
 	var high: float = sim.project_chance("campus")

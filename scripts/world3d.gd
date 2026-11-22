@@ -85,7 +85,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
-	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }   # same order as simulation.gd
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
+	CHIP_FACTORY }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1637,7 +1638,7 @@ func _plan_lots() -> void:
 						Tile.LANDFILL, Tile.RECYCLING, Tile.INCINERATOR, Tile.BUS_DEPOT, Tile.HARBOUR, Tile.DATA_CENTRE, \
 						Tile.GIGAFACTORY:
 					kind = LOT_YARD
-				Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE:
+				Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE, Tile.CHIP_FACTORY:
 					kind = LOT_YARD
 				Tile.COLLEGE:
 					kind = LOT_CIVIC
@@ -4622,6 +4623,11 @@ const DC_LOOKS := {
 	# its own gas turbines and transformers (it needs power like a city).
 	"OpenAI": {"wall": Color(0.20, 0.21, 0.23), "roof": Color(0.30, 0.31, 0.33), "band": Color(0.85, 0.86, 0.86),
 		"trim": Color(0.12, 0.12, 0.13), "entrance": STYLE_GLASS, "kit": "ai"},
+	# Nvidia's chip factory: a clean white fab with a green entrance, exhaust stacks
+	# and air scrubbers on the roof, and a yard of chemical and water tanks.
+	# (The hall model paints its roof in "band", so the green goes on the entrance and tanks.)
+	"Nvidia": {"wall": Color(0.92, 0.93, 0.93), "roof": Color(0.66, 0.68, 0.69), "band": Color(0.36, 0.38, 0.40),
+		"trim": Color(0.46, 0.72, 0.10), "entrance": STYLE_GLASS, "kit": "fab"},
 }
 const DC_DEFAULT_LOOK := {"wall": Color(0.60, 0.64, 0.68), "roof": Color(0.46, 0.48, 0.50), "band": Color(0.34, 0.37, 0.40),
 	"trim": Color(0.34, 0.37, 0.40), "entrance": STYLE_PAINT, "kit": "air_handlers"}
@@ -4693,7 +4699,7 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 	var band: Color = look["band"]
 	var trim: Color = look["trim"]
 	var kit: String = look["kit"]
-	var hall_h := 22.0 if kit == "factory" else (18.0 if kit == "ai" else 14.0)
+	var hall_h := 22.0 if kit == "factory" else (18.0 if kit == "ai" or kit == "fab" else 14.0)
 	# Each hall is a row of bays (the model, repeated: a stretched model would smear
 	# its details), or a box where the model isn't there.
 	var bay_model := "gigafactory_bay" if kit == "factory" else ("ai_hall" if kit == "ai" else "dc_hall")
@@ -4703,7 +4709,13 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 		_plan_site_works(site, wide, deep, margin, front_strip, hall_w, hall_d, wall_list, roof_list)
 		return true
 	if sim.deal_kind(deal) == "campus":
-		_plan_campus(site, wide, deep, int(deal["id"]), wall_list, roof_list)
+		match String(deal["company"]):
+			"Apple":
+				_plan_apple_ring(site, wide, deep, int(deal["id"]), wall_list, roof_list)
+			"Meta":
+				_plan_meta_campus(site, wide, deep, int(deal["id"]), wall_list, roof_list)
+			_:
+				_plan_campus(site, wide, deep, int(deal["id"]), wall_list, roof_list)
 		return true
 	if sim.deal_kind(deal) == "launch_site":
 		_plan_launch_site(site, wide, deep, deal, wall_list, roof_list, chimney_list)
@@ -4734,6 +4746,20 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 					for c: int in cols:
 						_site_box(site, -hall_w * 0.5 + (c + 0.5) * hall_w / cols, back + (r + 0.5) * each_d / rows - 3.0,
 							6.5, 6.0, 3.2, Color(0.62, 0.64, 0.66), top)
+			"fab":
+				# Exhaust stacks and air scrubbers in rows over the clean rooms.
+				var cols := maxi(int(hall_w / 16.0), 2)
+				var rows := maxi(int(each_d / 20.0), 1)
+				for r: int in rows:
+					for c: int in cols:
+						var along := -hall_w * 0.5 + (c + 0.5) * hall_w / cols
+						var at := back + (r + 0.5) * each_d / rows
+						if (r + c) % 2 == 0:
+							var stack := _site_spot(site, along, at, 2.0, 2.0)
+							stack["pos"] = Vector3((stack["pos"] as Vector3).x, top, (stack["pos"] as Vector3).z)
+							_cylinder(chimney_list, stack["pos"], 1.0, 7.0, Color(0.78, 0.80, 0.80))
+						else:
+							_site_box(site, along, at - 3.0, 9.0, 6.0, 3.4, Color(0.70, 0.72, 0.72), top)
 			"air_handlers":
 				# Rows of grey boxes over the server rooms.
 				var cols := maxi(int(hall_w / 14.0), 2)
@@ -4786,6 +4812,13 @@ func _plan_data_centre(i: int, wall_list: Array, roof_list: Array, chimney_list:
 			var spot := _site_spot(site, along, yard_back - 3.0, 6.0, 6.0)
 			_cylinder(chimney_list, spot["pos"], 2.6, 7.0, Color(0.72, 0.74, 0.76))
 			_cylinder(chimney_list, (spot["pos"] as Vector3) + Vector3.UP * 7.0, 0.9, 6.0, Color(0.40, 0.42, 0.44))
+	elif kit == "fab":
+		# Tanks of ultra-pure water and process chemicals, in pairs.
+		var tanks := maxi(int(hall_w / 9.0), 2)
+		for n: int in tanks:
+			var spot := _site_spot(site, -hall_w * 0.5 + (n + 0.5) * hall_w / tanks, yard_back, 6.0, 6.0)
+			_cylinder(chimney_list, spot["pos"], 3.0 if n % 3 else 2.2, 9.0 if n % 3 else 12.0,
+				Color(0.86, 0.88, 0.88) if n % 3 else Color(0.46, 0.72, 0.10))
 	elif kit == "cooling_towers":
 		var towers := maxi(int(hall_w / 22.0), 2)
 		for n: int in towers:
@@ -4867,6 +4900,79 @@ func _plan_campus(site: Dictionary, wide: float, deep: float, seed_id: int, wall
 					TreeKind.ORNAMENTAL if n == 0 else TreeKind.BIRCH])
 			for n: int in 6:
 				_site_box(site, along - 6.0 + n * 2.2, back - pd * 0.5 - 3.0, 0.5, 1.7, 1.0, bikes[(n + r + c) % bikes.size()])
+
+
+func _plan_apple_ring(site: Dictionary, wide: float, deep: float, seed_id: int, wall_list: Array, roof_list: Array) -> void:
+	# Apple's campus: one ring of curved glass, four storeys, with a pale solar
+	# roof overhanging it, an orchard of trees inside and round it, and a car park at the front.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_id * 6007 + 11
+	var front: Vector2 = site["front"]
+	var away: Vector2 = site["away"]
+	var across: Vector2 = site["across"]
+	var centre := front + away * deep * 0.5
+	var radius := minf(wide, deep) * 0.36
+	var ring_d := clampf(radius * 0.22, 8.0, 18.0)
+	var h := 16.0
+	var segments := clampi(int(TAU * radius / 9.0), 24, 72)
+	var seg_w := TAU * radius / segments + 0.6
+	var base := INF
+	for n: int in 8:
+		var a := TAU * n / 8.0
+		var q := centre + Vector2(cos(a), sin(a)) * radius
+		base = minf(base, height_at(q.x, q.y))
+	base = maxf(base, 0.3) - 0.3
+	var glass := Color(0.62, 0.70, 0.74)
+	var roof := Color(0.60, 0.63, 0.66)       # (pale grey: seen from above it's mostly roof)
+	for n: int in segments:
+		var a := TAU * (n + 0.5) / segments
+		var out := Vector2(cos(a), sin(a))
+		var tangent := Vector2(-out.y, out.x)
+		var c := centre + out * radius
+		var spot := {"pos": Vector3(c.x, base, c.y), "x": Vector3(tangent.x, 0.0, tangent.y),
+			"z": Vector3(out.x, 0.0, out.y), "rise": 0.0, "ground": maxf(height_at(c.x, c.y), 0.0)}
+		# (A very shallow pitched roof: flat box tops are always drawn dark, a roof takes its colour.)
+		_add_block(spot, seg_w, ring_d, h, glass, STYLE_GLASS, 0.5, roof, wall_list, roof_list)
+	# An orchard inside the ring and trees round it.
+	for n: int in clampi(int(radius * radius / 120.0), 12, 90):
+		var a := rng.randf() * TAU
+		var r := sqrt(rng.randf()) * (radius - ring_d * 0.5 - 6.0)
+		var p := centre + Vector2(cos(a), sin(a)) * r
+		_extra_trees.append([p, rng.randf_range(5.0, 8.0), TreeKind.ORNAMENTAL])
+	for n: int in clampi(segments / 2, 12, 36):
+		var a := TAU * n / clampi(segments / 2, 12, 36)
+		var p := centre + Vector2(cos(a), sin(a)) * (radius + ring_d * 0.5 + 9.0)
+		if (p - front).dot(away) > 4.0:
+			_extra_trees.append([p, rng.randf_range(8.0, 12.0), TreeKind.BROADLEAF])
+
+
+func _plan_meta_campus(site: Dictionary, wide: float, deep: float, seed_id: int, wall_list: Array, roof_list: Array) -> void:
+	# Meta's campus: one huge, long, low building with a park on its roof (trees
+	# and lawn up there), white with a blue band, and a car park in front.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_id * 4421 + 5
+	var margin := 8.0
+	var bw := wide - margin * 2.0
+	var bd := minf(deep - 30.0, maxf(deep * 0.55, 30.0))
+	var back := 22.0
+	var h := 12.0
+	var spot := _site_spot(site, 0.0, back, bw, bd)
+	_add_block(spot, bw, bd, h, Color(0.90, 0.91, 0.92), STYLE_MODERN, 0.0, Color(0.26, 0.38, 0.20), wall_list, roof_list)
+	var top := float((spot["pos"] as Vector3).y) + h
+	_site_box(site, 0.0, back - 0.3, bw + 0.6, 1.2, 1.4, Color(0.10, 0.40, 0.85), top - 1.6)   # blue band at the front
+	_site_box(site, 0.0, back + 1.0, bw - 2.0, bd - 2.0, 0.5, Color(0.27, 0.40, 0.21), top + 0.05)   # the roof park
+	# Clumps of trees up on the roof (boxes: planted trees stand on the ground).
+	for n: int in clampi(int(bw * bd / 300.0), 10, 80):
+		var along := rng.randf_range(-bw * 0.5 + 4.0, bw * 0.5 - 4.0)
+		var b := rng.randf_range(back + 4.0, back + bd - 6.0)
+		var size := rng.randf_range(3.0, 5.5)
+		_site_box(site, along, b, size, size, rng.randf_range(2.5, 4.5),
+			Color(0.20, 0.36, 0.16).lerp(Color(0.30, 0.46, 0.20), rng.randf()), top + 0.5)
+	var park := _site_spot(site, 0.0, 3.0, bw, back - 6.0)
+	var x_axis: Vector3 = park["x"]
+	var z_axis: Vector3 = park["z"]
+	_paving_items.append([Transform3D(Basis(x_axis * bw, Vector3.UP * (float(park["rise"]) + 0.45),
+		z_axis * (back - 6.0)), park["pos"]), Color(CAR_PARK, _surface_of(CAR_PARK))])
 
 
 func _plan_launch_site(site: Dictionary, wide: float, deep: float, deal: Dictionary, wall_list: Array,
@@ -5119,7 +5225,7 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 2:
 				_prop(i, front, 13.0 + k * 5.0, 6.0, 2.6, 8.0, 3.4, Color(0.22, 0.42, 0.28))   # bin lorries
 			_plan_fence(i, front, depth)
-		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS, Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE:
+		Tile.DATA_CENTRE, Tile.GIGAFACTORY, Tile.TECH_CAMPUS, Tile.LAUNCH_SITE, Tile.AI_DATA_CENTRE, Tile.CHIP_FACTORY:
 			# A company's project (data centre, Gigafactory) is drawn whole, from the first tile of its site
 			# (_plan_data_centre); its other tiles draw nothing. An odd-shaped site
 			# (or a tile with no deal) falls back to a hall per tile.
@@ -6389,7 +6495,8 @@ func _plant_street_trees(tiles: PackedByteArray, lists: Array) -> void:
 					var bt := tiles[beside.y * map_w + beside.x]
 					if bt == Tile.INDUSTRY or sim.makes_power(bt) or bt == Tile.LANDFILL \
 							or bt == Tile.HARBOUR or bt == Tile.RECYCLING or bt == Tile.INCINERATOR \
-							or bt == Tile.DATA_CENTRE or bt == Tile.GIGAFACTORY or bt == Tile.AI_DATA_CENTRE:
+							or bt == Tile.DATA_CENTRE or bt == Tile.GIGAFACTORY or bt == Tile.AI_DATA_CENTRE \
+							or bt == Tile.CHIP_FACTORY:
 						continue
 					if bt != Tile.EMPTY and bt != Tile.PARK and bt != Tile.POWER_LINE and bt != Tile.WOODLAND:
 						offset = road_hw + 2.6   # in the pavement in front of the buildings

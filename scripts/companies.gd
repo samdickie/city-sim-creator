@@ -148,6 +148,15 @@ const GIGAFACTORY_LETTER := ["Tesla", "Elon Musk",
 	+ "great. Zero taxes would be even better.\n\nThis will be hardcore. Thousands of jobs. Let's go.\n\nElon"]
 
 
+# Nvidia's chip factory: Jensen Huang, leather jacket, enormous enthusiasm. The
+# bigger the scale, the better the deal (Settings.CHIP_SCALES).
+const CHIP_LETTER := ["Nvidia", "Jensen Huang",
+	"Mayor!\n\nThis is an incredible moment. Every town is going to become an AI factory, and yours is going to make "
+	+ "the chips.\n\nWe'd like to build a chip factory in your Tech zone. It needs a LOT of very clean water and "
+	+ "a little chemistry, and it brings thousands of brilliant people.\n\nAnd remember: the more you buy, the more "
+	+ "you save. The bigger you go, the better the deal.\n\nJensen (yes, the jacket)"]
+
+
 # Google's campus: Sundar Pichai, endlessly polite, mentioning AI. Its quirk is
 # that it's the one company that opens exactly when it says (nine months).
 const CAMPUS_LETTER := ["Google", "Sundar Pichai",
@@ -156,6 +165,30 @@ const CAMPUS_LETTER := ["Google", "Sundar Pichai",
 	+ "Our people love great schools and a nice place to live, so we do hope your town has both. Homes nearby "
 	+ "may become a little more popular.\n\nThe campus will open in exactly nine months. We checked this with AI.\n\n"
 	+ "Warm regards,\nSundar Pichai, Google"]
+
+
+# Apple's campus: Tim Cook, calm, polished, secretive. A ring; takes longer;
+# won't open beside dirty air (Settings.APPLE_CLEAN_AIR).
+const APPLE_LETTER := ["Apple", "Tim Cook",
+	"Dear Mayor,\n\nAt Apple, we believe a campus should be as beautifully designed as the products made inside it.\n\n"
+	+ "We'd like to build one in your Tech zone. We can't tell you what it's for. We can tell you it's a circle.\n\n"
+	+ "It will take a little longer than other campuses, because we sweat every detail. And we'd ask that the air "
+	+ "round it be clean: it won't open beside smoke.\n\nWe think you're going to love it.\n\nTim Cook, Apple"]
+
+
+# Meta's campus: Mark Zuckerberg, "bringing the world closer together". It
+# pivots once after opening (Settings.META_PIVOTS).
+const META_LETTER := ["Meta", "Mark Zuckerberg",
+	"Hey Mayor,\n\nOur mission is to give people the power to build community and bring the world closer together. "
+	+ "Your town is part of the world, so we'd like to bring it closer.\n\nWe'd like to build a campus in your Tech "
+	+ "zone: one huge building with a park on the roof, and thousands of jobs.\n\nWe'll probably change what it's for "
+	+ "at some point. We move fast.\n\nMark"]
+
+
+static func meta_pivot_news(way: String) -> String:
+	if way == "metaverse":
+		return "Meta has pivoted its campus to the metaverse. Half the staff now work from home, in VR, as legless avatars."
+	return "Meta has pivoted its campus to AI. It's the same building, but now it needs three times the power."
 
 
 # SpaceX's launch site: Elon again. Explosions are "excellent data".
@@ -238,6 +271,12 @@ static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array
 				return {}
 			return {"kind": "launch_site", "company": e2[0], "from": "%s, %s" % [e2[1], e2[0]],
 				"subject": "SpaceX wants to launch rockets from your coast", "body": e2[2], "big": true}
+		"chip_factory":
+			var n: Array = CHIP_LETTER
+			if busy.has(n[0]):
+				return {}
+			return {"kind": "chip_factory", "company": n[0], "from": "%s, %s" % [n[1], n[0]],
+				"subject": "Nvidia wants to make chips in your Tech zone (the bigger the better!)", "body": n[2], "big": true}
 		"ai_data_centre":
 			var a: Array = AI_LETTER
 			if busy.has(a[0]):
@@ -245,11 +284,16 @@ static func project_letter(kind: String, rng: RandomNumberGenerator, busy: Array
 			return {"kind": "ai_data_centre", "company": a[0], "from": "%s, %s" % [a[1], a[0]],
 				"subject": "openai wants to build a very big data centre in your town", "body": a[2], "big": true}
 		"campus":
-			var c: Array = CAMPUS_LETTER
-			if busy.has(c[0]):
+			# Google, Apple or Meta: whoever isn't building one here already.
+			var free := []
+			for c: Array in [CAMPUS_LETTER, APPLE_LETTER, META_LETTER]:
+				if not busy.has(c[0]):
+					free.append(c)
+			if free.is_empty():
 				return {}
+			var c: Array = free[rng.randi() % free.size()]
 			return {"kind": "campus", "company": c[0], "from": "%s, %s" % [c[1], c[0]],
-				"subject": "Google would like to build a campus in your Tech zone", "body": c[2], "big": true}
+				"subject": "%s would like to build a campus in your Tech zone" % c[0], "body": c[2], "big": true}
 	return {}
 
 
@@ -261,11 +305,13 @@ static func project_who(kind: String) -> String:
 		"gigafactory":
 			return "Tesla's Gigafactory"
 		"campus":
-			return "Google's campus"
+			return "Campuses (Google, Apple, Meta)"
 		"launch_site":
 			return "SpaceX's launch site"
 		"ai_data_centre":
 			return "OpenAI's AI data centre"
+		"chip_factory":
+			return "Nvidia's chip factory"
 	return kind
 
 
@@ -320,6 +366,25 @@ static func deal_news(kind: String, deal: Dictionary) -> String:
 			return "OpenAI has moved its data centre to a town with more power. Its empty halls are still yours: a cloud company may take them over."
 		"boom":
 			return "SpaceX's rocket underwent a \"rapid unscheduled disassembly\" over the launch site. Elon says the data is excellent. No launches for %d months." % Settings.LAUNCH_REPAIR_MONTHS
+	return ""
+
+
+static func musk_threat_letter(names: Array[String], was: float, now: float) -> Dictionary:
+	# Elon, when the Tech zone tax goes up. "was": the rate to put it back to.
+	var who := " and ".join(names)
+	return {"kind": "musk_threat", "company": who, "from": "Elon Musk, %s" % who, "rate": was, "big": true,
+		"subject": "%s will leave unless the Tech zone tax goes back down" % who,
+		"body": ("Mayor,\n\nYou raised the Tech zone tax from %d%% to %d%%. Not cool.\n\nPut it back or %s moves to Texas. "
+			+ "Texas has no state income tax. Just saying.\n\nYou have 6 months. Real ones, not my ones.\n\nElon") % [
+			roundi(was * 100.0), roundi(now * 100.0), who]}
+
+
+static func musk_news(kind: String, who: String = "") -> String:
+	match kind:
+		"bluff":
+			return "Elon has changed his mind: his companies are staying. \"Never said we'd leave.\" (He did.)"
+		"left":
+			return "Elon has moved %s to Texas over the Tech zone tax. The empty buildings are still yours." % who
 	return ""
 
 

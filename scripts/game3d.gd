@@ -31,7 +31,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
-	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }   # same order as simulation.gd
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
+	CHIP_FACTORY }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -508,10 +509,11 @@ func _process(delta: float) -> void:
 			if not sim.grew.is_empty() or not sim.shrank.is_empty():
 				_buildings_dirty = true
 			_refresh_hud()
-			# A last ask (one more no and a company leaves) opens by itself, whatever
+			# A last ask or Elon's threat (a company may leave) opens by itself, whatever
 			# else happened this month, so it can't lapse unseen on Fast.
 			for id: int in sim.new_letters:
-				if bool(sim.letter_by_id(id).get("last", false)) and not hud.is_modal():
+				var urgent: Dictionary = sim.letter_by_id(id)
+				if (bool(urgent.get("last", false)) or String(urgent.get("kind", "")) == "musk_threat") and not hud.is_modal():
 					hud.open_letter(id)
 			if not sim.burned.is_empty():
 				var n := sim.burned.size()
@@ -1808,7 +1810,7 @@ func _project_text(i: int) -> String:
 	var deal: Dictionary = sim.deals[k]
 	var scale: Dictionary = sim.deal_scale(deal)
 	var text := "%s: %s\nUses %s power and %s water · %s jobs" % [sim.deal_name(k), sim.building_status(i),
-		Hud.thousands(sim.deal_power(deal)), Hud.thousands(int(scale["water"])), Hud.thousands(int(scale["jobs"]))]
+		Hud.thousands(sim.deal_power(deal)), Hud.thousands(int(scale["water"])), Hud.thousands(sim.deal_jobs(deal))]
 	var years_left: int = ceili(int(deal.get("break_left", 0)) / 12.0)
 	if not bool(deal.get("opened", false)):
 		text += " · pays %s when it opens" % Hud.money_text(int(deal.get("investment", 0)))
@@ -1828,8 +1830,18 @@ func _project_text(i: int) -> String:
 		text += "\nIts fans hum (homes within %d m are worth up to %d%% less), and it always wants more: uses %s power now (x%.2f since it opened; no's so far: %d of %d)" % [
 			roundi(Settings.DC_HUM_RADIUS * sim_cell_m()), _hum_most_pct(),
 			Hud.thousands(sim.deal_power(deal)), float(deal.get("power_x", 1.0)), int(deal.get("refusals", 0)), Settings.AI_REFUSALS]
+	elif sim.tiles[i] == Tile.CHIP_FACTORY:
+		text += "\nIt drinks water (ultra-pure, to rinse the chips) and gives off a little chemical pollution"
 	elif sim.tiles[i] == Tile.TECH_CAMPUS:
 		text += "\nWell-paid staff push house prices up across town (up %d%% now)" % roundi(sim.campus_price_rise() * 100.0)
+		if String(deal.get("pivot", "")) == "metaverse":
+			text += "\nPivoted to the metaverse: half its staff work from home in VR"
+		elif String(deal.get("pivot", "")) == "ai":
+			text += "\nPivoted to AI: uses three times the power it did"
+		elif String(deal["company"]) == "Meta":
+			text += "\nMeta moves fast: it may change what this campus is for"
+		elif String(deal["company"]) == "Apple":
+			text += "\nApple won't open it while the air round it is dirty"
 	else:
 		text += "\nLorries and a little smoke: lowers land value nearby"
 	return text

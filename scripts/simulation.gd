@@ -15,7 +15,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
 	COLLEGE, UNIVERSITY, RESEARCH_PARK,
-	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
+	CHIP_FACTORY }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -31,11 +32,13 @@ const BUILDING_KEYS := {
 	Tile.COLLEGE: "college", Tile.UNIVERSITY: "university", Tile.RESEARCH_PARK: "research_park",
 	Tile.PAINTED_LADIES: "painted_ladies", Tile.COIT_TOWER: "coit_tower", Tile.FERRY_BUILDING: "ferry_building",
 	Tile.FINE_ARTS: "fine_arts", Tile.TRANSAMERICA: "transamerica", Tile.SALESFORCE_TOWER: "salesforce_tower",
+	Tile.CHIP_FACTORY: "chip_factory",
 }
-const LAST_TILE := Tile.SALESFORCE_TOWER   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.CHIP_FACTORY   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
 const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
-	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE}
+	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE,
+	"chip_factory": Tile.CHIP_FACTORY}
 # What residents complain about, by happiness part: [the complaint, how to fix it].
 # Kept in one place so the HUD, zone hover text and advisors all say the same thing.
 const COMPLAINTS := {
@@ -1034,6 +1037,8 @@ func _update_letters() -> void:
 			_log_answer(int(letter.get("id", -1)), "lapsed")
 			if String(letter.get("kind", "")) == "more_power":
 				news.append(_refuse_more_power(int(letter.get("deal", -1))))
+			elif String(letter.get("kind", "")) == "musk_threat":
+				news.append(_musk_kept_tax())
 			else:
 				news.append(Companies.expired_news(letter))
 			_change_appetite(-Settings.APPETITE_NO)
@@ -1042,6 +1047,7 @@ func _update_letters() -> void:
 	letters = kept
 	_update_startups()
 	_update_deals()
+	_check_musk_tax()
 	# A new letter? (Rolled only when someone could write, so towns without a
 	# Tech zone play exactly as before.)
 	if letters.size() < Settings.MAX_LETTERS:
@@ -1051,7 +1057,7 @@ func _update_letters() -> void:
 	_tidy_empty_sites()
 	if letters.size() < Settings.MAX_LETTERS and not _has_letter("takeover"):
 		for site: Dictionary in empty_sites:
-			if (site["tiles"] as Array).size() >= int(Settings.DC_SCALES[0]["tiles"]) \
+			if String(site["kind"]) != "launch_site" and (site["tiles"] as Array).size() >= int(Settings.DC_SCALES[0]["tiles"]) \
 					and _rng.randf() < Settings.TAKEOVER_CHANCE * (0.5 + investor_appetite):
 				var offer := Companies.takeover_letter(_rng, _deal_companies("data_centre"), String(site["company"]),
 					int(site["tiles"][0]))
@@ -1239,6 +1245,8 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 		_change_appetite(-Settings.APPETITE_NO)
 		if String(letter.get("kind", "")) == "more_power":
 			return {"ok": true, "text": _refuse_more_power(int(letter.get("deal", -1)))}
+		if String(letter.get("kind", "")) == "musk_threat":
+			return {"ok": true, "text": _musk_kept_tax()}
 		return {"ok": true, "text": "You turned down %s." % company}
 	match String(letter.get("kind", "")):
 		"startup":
@@ -1263,6 +1271,14 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			recount()
 			return {"ok": true, "text": "You backed %s with %s. They've moved into the Tech zone." % [company, Companies._pounds(grant)], "tile": plot}
 	var kind: String = letter.get("kind", "")
+	if kind == "musk_threat":
+		letters.erase(letter)
+		var rate: float = letter.get("rate", tech_tax_rate)
+		tech_tax_rate = minf(tech_tax_rate, rate)
+		_log_answer(id, "yes", "Put the Tech zone tax back to %d%%" % roundi(rate * 100.0))
+		_change_appetite(Settings.APPETITE_YES)
+		_update_demand()
+		return {"ok": true, "text": "The Tech zone tax is back to %d%%. Elon posts a thumbs-up emoji." % roundi(tech_tax_rate * 100.0)}
 	if kind == "takeover":
 		letters.erase(letter)
 		var site := empty_site_at(int(letter.get("site", -1)))
@@ -1317,7 +1333,8 @@ func answer_letter(id: int, yes: bool, choice: int = 0) -> Dictionary:
 			return {"ok": false, "text": "A %s has to be on the coast: paint a Tech zone over open land by the sea." % what}
 		var deal := {"id": int(letter["id"]), "kind": kind, "company": company, "scale": k, "month": month, "tiles": [],
 			"opened": false, "opens": 0, "break_left": int(scale.get("break_years", 0)) * 12,
-			"priority": bool(scale.get("priority", false)), "investment": int(scale["investment"])}
+			"priority": bool(scale.get("priority", false)), "investment": int(scale["investment"]),
+			"tax_seen": tech_tax_rate}
 		deals.append(deal)
 		letters.erase(letter)
 		_log_answer(id, "yes", "Agreed: %s %s" % [String(scale["name"]).to_lower(), project_word(kind)])
@@ -1472,6 +1489,11 @@ func deal_problem(k: int) -> String:
 	for i in mine:
 		if watered[i] == 0:
 			return "not enough water (it needs %d)" % int(deal_scale(deal)["water"])
+	if String(deal["company"]) == "Apple":
+		_update_land_value()
+		for i in mine:
+			if pollution[i] >= Settings.APPLE_CLEAN_AIR:
+				return "the air round it isn't clean enough for Apple (keep industry away, or plant parks and woodland)"
 	return ""
 
 
@@ -1503,7 +1525,8 @@ func place_deal(id: int, spots: Array[int]) -> void:
 		if tiles[i] == t_kind:
 			list.append(i)
 	deals[k]["tiles"] = list
-	var span: Array = Settings.PROJECTS[deal_kind(deals[k])]["build_months"]
+	var span: Array = Settings.CAMPUS_BUILD_MONTHS.get(String(deals[k]["company"]), Settings.PROJECTS[deal_kind(deals[k])]["build_months"]) \
+		if deal_kind(deals[k]) == "campus" else Settings.PROJECTS[deal_kind(deals[k])]["build_months"]
 	deals[k]["opens"] = month + _rng.randi_range(int(span[0]), int(span[1]))
 	deals[k]["placed"] = month
 	_power_dirty = true
@@ -1537,8 +1560,13 @@ func campus_jobs() -> int:
 	var n := 0
 	for k: int in deals.size():
 		if deal_kind(deals[k]) == "campus" and deal_working(k):
-			n += int(deal_scale(deals[k])["jobs"])
+			n += deal_jobs(deals[k])
 	return n
+
+
+func deal_jobs(deal: Dictionary) -> int:
+	# A project's jobs now (Meta's change when it pivots).
+	return roundi(float(deal_scale(deal)["jobs"]) * float(deal.get("jobs_x", 1.0)))
 
 
 func campus_price_rise() -> float:
@@ -1643,6 +1671,20 @@ func _update_deals() -> void:
 			elif int(deal.get("break_left", 0)) > 0:
 				deal["break_left"] = int(deal["break_left"]) - 1
 			var age := month - int(deal.get("opened_month", month))
+			if String(deal["company"]) == "Meta" and deal_kind(deal) == "campus" and String(deal.get("pivot", "")) == "":
+				# Meta pivots once, a year to three after opening.
+				if int(deal.get("pivot_at", 0)) <= 0:
+					deal["pivot_at"] = int(deal.get("opened_month", month)) + _rng.randi_range(
+						int(Settings.META_PIVOT_MONTHS[0]), int(Settings.META_PIVOT_MONTHS[1]))
+				elif month >= int(deal["pivot_at"]):
+					var way: String = "metaverse" if _rng.randf() < 0.5 else "ai"
+					var p: Dictionary = Settings.META_PIVOTS[way]
+					deal["pivot"] = way
+					deal["jobs_x"] = float(p["jobs_x"])
+					deal["tax_x"] = float(p["tax_x"])
+					deal["power_x"] = float(p["power_x"])
+					_power_dirty = true
+					news.append(Companies.meta_pivot_news(way))
 			if deal_kind(deal) == "ai_data_centre" and age > 0 and age % 12 == 0 \
 					and float(deal.get("power_x", 1.0)) < Settings.AI_POWER_MAX - 0.001 and not _has_letter("more_power"):
 				# Every year: "we need a bit more power".
@@ -1678,6 +1720,60 @@ func _refuse_more_power(deal_id: int) -> String:
 		_index_deals()
 		return Companies.deal_news("moved", deal)
 	return Companies.deal_news("sulk", deal)
+
+
+func musk_deals() -> Array[int]:
+	# Elon's deals with a site (Tesla's Gigafactory, SpaceX's launch site).
+	var out: Array[int] = []
+	for k: int in deals.size():
+		if Companies.is_musk(deals[k]) and not (deals[k]["tiles"] as Array).is_empty():
+			out.append(k)
+	return out
+
+
+func _check_musk_tax() -> void:
+	# Elon writes when the Tech zone tax is above what it was when his deal was
+	# agreed (one letter for all his companies).
+	if _has_letter("musk_threat") or letters.size() >= Settings.MAX_LETTERS:
+		return
+	var lowest := 1.0
+	var names: Array[String] = []
+	for k: int in musk_deals():
+		var seen: float = deals[k].get("tax_seen", tech_tax_rate)
+		if tech_tax_rate > seen + 0.001:
+			lowest = minf(lowest, seen)
+			if not names.has(String(deals[k]["company"])):
+				names.append(String(deals[k]["company"]))
+	if not names.is_empty():
+		_send_letter(Companies.musk_threat_letter(names, lowest, tech_tax_rate))
+
+
+func _musk_kept_tax() -> String:
+	# No (or no answer) to Elon: he leaves, his buildings stay empty... unless
+	# he changes his mind.
+	var ks := musk_deals()
+	if ks.is_empty():
+		return "Elon has nothing left here to move."
+	if _rng.randf() < Settings.ELON_BLUFF:
+		for k: int in ks:
+			deals[k]["tax_seen"] = tech_tax_rate
+		return Companies.musk_news("bluff")
+	var names: Array[String] = []
+	ks.reverse()
+	for k: int in ks:
+		var deal: Dictionary = deals[k]
+		names.append(String(deal["company"]))
+		empty_sites.append({"tiles": (deal["tiles"] as Array).duplicate(), "company": String(deal["company"]),
+			"kind": deal_kind(deal), "month": month,
+			"why": "you raised the Tech zone tax to %d%% and kept it there" % roundi(tech_tax_rate * 100.0)})
+		deals.remove_at(k)
+	names.reverse()
+	_change_appetite(-Settings.APPETITE_NO * 3.0)
+	_power_dirty = true
+	_value_dirty = true
+	_index_deals()
+	recount()
+	return Companies.musk_news("left", " and ".join(names))
 
 
 func _tidy_empty_sites() -> void:
@@ -1873,7 +1969,9 @@ func _load_letters(data: Dictionary) -> void:
 				"priority": bool(d.get("priority", false)), "investment": int(d.get("investment", 0)),
 				"launches": int(d.get("launches", 0)), "repair_until": int(d.get("repair_until", 0)),
 				"power_x": float(d.get("power_x", 1.0)), "tax_x": float(d.get("tax_x", 1.0)),
-				"refusals": int(d.get("refusals", 0)), "opened_month": int(d.get("opened_month", d.get("opens", 0)))})
+				"refusals": int(d.get("refusals", 0)), "opened_month": int(d.get("opened_month", d.get("opens", 0))),
+				"tax_seen": float(d.get("tax_seen", tech_tax_rate)), "jobs_x": float(d.get("jobs_x", 1.0)),
+				"pivot": String(d.get("pivot", "")), "pivot_at": int(d.get("pivot_at", 0))})
 	_index_deals()
 	# (Older saves: no record of who left empty halls; they say so on hover.)
 	empty_sites.clear()
@@ -2077,7 +2175,7 @@ func recount() -> void:
 	company_jobs = 0
 	for k: int in deals.size():
 		if deal_working(k):
-			company_jobs += int(deal_scale(deals[k])["jobs"])
+			company_jobs += deal_jobs(deals[k])
 	_measure_campus_rise()
 	var open_before := airports_open
 	_update_airports()
@@ -2270,7 +2368,7 @@ func building_status(i: int) -> String:
 				return "being built: Elon says six more months"   # (it always is)
 			var left := int(deals[k]["opens"]) - month
 			return "being built, opens in %d %s%s" % [left, "month" if left == 1 else "months",
-				" (exactly, says Google)" if deal_kind(deals[k]) == "campus" else ""]
+				" (exactly, says Google)" if String(deals[k]["company"]) == "Google" else ""]
 		var problem := deal_problem(k)
 		if t == Tile.LAUNCH_SITE and problem == "":
 			return "ready for launch (%d so far)" % int(deals[k].get("launches", 0))

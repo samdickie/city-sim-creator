@@ -243,6 +243,18 @@ const GIGA_SCALES := [
 	{"name": "Mega", "tiles": 42, "power": 3000, "water": 800, "jobs": 4000, "tax": 12000, "investment": 300000,
 		"break_years": 15, "priority": true},
 ]
+# Nvidia's chip factory (Jensen Huang): high-skill jobs, but a fab drinks water
+# (ultra-pure water to rinse the wafers: a real one uses millions of litres a
+# day) and gives off a little chemical pollution. Jensen's quirk: the bigger the
+# better the deal: the Mega one asks for no tax break and pays most per tile.
+const CHIP_SCALES := [
+	{"name": "Small", "tiles": 9, "power": 400, "water": 350, "jobs": 500, "tax": 2500, "investment": 40000,
+		"break_years": 8, "priority": false},
+	{"name": "Standard", "tiles": 20, "power": 1000, "water": 900, "jobs": 1400, "tax": 9000, "investment": 180000,
+		"break_years": 3, "priority": false},
+	{"name": "Mega", "tiles": 42, "power": 2400, "water": 2200, "jobs": 3600, "tax": 26000, "investment": 600000,
+		"break_years": 0, "priority": false},
+]
 # Google's campus (Sundar Pichai): thousands of well-paid office jobs (from
 # outside: they draw people in), and big tech salaries push house prices up
 # (CAMPUS_PRICE_EFFECT: "cost of living" in happiness). Reliable: it opens in
@@ -289,6 +301,23 @@ const AI_POWER_STEP := 0.25
 const AI_TAX_STEP := 0.15
 const AI_POWER_MAX := 3.0
 const AI_REFUSALS := 3
+# Elon (Tesla, SpaceX): raise the Tech zone tax above what it was when his deal
+# was agreed and he writes threatening to move to Texas. Put it back, or he
+# goes when the letter runs out... unless he changes his mind (this often).
+const ELON_BLUFF := 0.3
+# Campuses come from Google, Apple or Meta, each its own way:
+#   Google opens in exactly nine months (PROJECTS["campus"]["build_months"]);
+#   Apple takes longer (perfectionism) and won't open while the air round it is
+#   dirtier than APPLE_CLEAN_AIR (pollution, 0-1);
+#   Meta pivots once, META_PIVOT_MONTHS after opening: to the metaverse (people
+#   stay home in VR: fewer jobs, less tax) or to AI (it needs far more power).
+const CAMPUS_BUILD_MONTHS := {"Apple": [24, 36], "Meta": [9, 15]}
+const APPLE_CLEAN_AIR := 0.15
+const META_PIVOT_MONTHS := [12, 36]
+const META_PIVOTS := {
+	"metaverse": {"jobs_x": 0.5, "tax_x": 0.7, "power_x": 1.0},
+	"ai": {"jobs_x": 0.8, "tax_x": 1.0, "power_x": 3.0},
+}
 const DC_HUM_RADIUS := 4           # homes within this many tiles of a working data centre (or AI one) are worth less:
 const DC_HUM_VALUE := 0.15          # its cooling fans hum day and night. Land value off a home right beside one (less further off)
 const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect round about, however big it is
@@ -327,6 +356,8 @@ const PROJECTS := {
 		"build_months": [18, 48], "wants_motorway": false, "near_sea": true, "tech_workers": 600},
 	"ai_data_centre": {"name": "AI data centre", "pop": 10000, "chance": 0.03, "scales": AI_SCALES,
 		"build_months": [12, 18], "wants_motorway": false, "tech_workers": 1000},
+	"chip_factory": {"name": "chip factory", "pop": 8000, "chance": 0.03, "scales": CHIP_SCALES,
+		"build_months": [18, 30], "wants_motorway": false, "tech_workers": 1200},
 }
 const BILLS_EFFECT := 0.4           # appeal lost when data centres take all the power on a grid that's full
 const BILLS_FROM := 0.6             # bills start rising once the town uses this share of its power
@@ -451,6 +482,8 @@ const BUILDINGS := {
 		"about": "SpaceX's rockets: tourists come to watch, but it's loud and nobody may live close by"},
 	"ai_data_centre": {"name": "AI data centre", "cost": 0, "uses_power": 1, "area": true, "value": -0.04, "radius": 4,
 		"about": "OpenAI's AI data centre: power like a city, a few hundred jobs, and it always wants more"},
+	"chip_factory": {"name": "Chip factory", "cost": 0, "uses_power": 1, "area": true, "value": -0.05, "radius": 4,
+		"about": "Nvidia's chip factory: high-skill jobs, but it drinks water and gives off a little chemical pollution"},
 	# Education (the tech layer): they turn residents into tech workers (see Tech workers).
 	#   tech       share of residents it makes tech workers (a university: per tile)
 	#   students   residents' worth of students per tile (they need homes)
@@ -506,6 +539,7 @@ const POLLUTION_SOURCES := {
 	"harbour": [0.35, 5],                 # ships' engines
 	"airport": [0.012, 4],                # per tile: jet fumes round a working airport
 	"gigafactory": [0.02, 4],             # per tile: paint shops and lorries
+	"chip_factory": [0.025, 4],           # per tile: solvents and chemical fumes
 }
 const PARK_CLEANING := 0.1                # each park tile soaks up this much within its spread (golf half)
 const PARK_CLEANING_SPREAD := 2

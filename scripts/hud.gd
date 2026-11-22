@@ -111,6 +111,7 @@ var _inbox_badge: Label
 var _inbox_box: VBoxContainer
 var _inbox_said := ""                      # what the inbox last showed (it's rebuilt when that changes)
 var _inbox_net: Label                     # what the start-ups made the town (updated in place each month)
+var _inbox_rows := {}                     # letter id -> its row; deal id -> its label (months left: updated in place)
 var _letter_dim: ColorRect
 var _letter_id := -1
 var _letter_from: Label
@@ -1578,17 +1579,21 @@ func _show_letters(sim) -> void:
 	# Rebuilt only when something in it changes (so a click isn't lost mid-rebuild).
 	var said := [sim.appetite_word(), sim.interest_lines()]
 	for letter: Dictionary in sim.letters:
-		said.append([letter["id"], sim.letter_months_left(letter)])
+		said.append(letter["id"])
 	# (Start-ups' counts, not their money: that changes every month, and is
 	# updated in place below.)
 	var tot: Dictionary = sim.startup_totals()
 	said.append([tot["backed"], tot["going"], tot["bought"], tot["bust"], tot["closed"], sim.letter_log.size()])
 	for deal: Dictionary in sim.deals:
-		said.append([deal["id"], deal.get("count", 0), deal.get("opened", false), sim.month - int(deal["month"])])
+		said.append([deal["id"], deal.get("count", 0), deal.get("opened", false)])
+	# (Months left change every month: they're updated in place, so the list
+	# isn't rebuilt under the mouse when a month ticks over.)
 	var key := str(said)
 	if key == _inbox_said:
 		_show_startup_net(tot)
+		_show_inbox_months(sim)
 		return
+	_inbox_rows.clear()
 	_inbox_said = key
 	for child: Node in _inbox_box.get_children():
 		_inbox_box.remove_child(child)
@@ -1601,8 +1606,8 @@ func _show_letters(sim) -> void:
 	for letter: Dictionary in sim.letters:
 		var id: int = letter["id"]
 		var left: int = sim.letter_months_left(letter)
-		var b := _menu_row("mail", "%s\n%s" % [String(letter.get("subject", "")),
-			"From %s · %d %s left to answer" % [String(letter.get("from", "")), left, "month" if left == 1 else "months"]])
+		var b := _menu_row("mail", _inbox_letter_text(letter, left))
+		_inbox_rows[id] = b
 		b.custom_minimum_size = Vector2(380, 0)
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.tooltip_text = "Read the letter"
@@ -1616,8 +1621,8 @@ func _show_letters(sim) -> void:
 		var deal_id: int = deal["id"]
 		var left: int = sim.deal_months_left(k)
 		var row := _hbox(_inbox_box, 8)
-		var what := _label("%s needs a site: %d tiles in your Tech zone · %d %s left" % [sim.deal_name(k),
-			int(sim.deal_scale(deal)["tiles"]), left, "month" if left == 1 else "months"], 13, WARN)
+		var what := _label(_inbox_deal_text(sim, k, left), 13, WARN)
+		_inbox_rows["deal %d" % deal_id] = what
 		what.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		what.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(what)
@@ -1650,6 +1655,27 @@ func _show_letters(sim) -> void:
 		more.tooltip_text = "How each start-up you backed is doing, and every letter and your answer"
 		more.pressed.connect(func(): open_records("startups" if not sim.startups.is_empty() else "letters"))
 		_inbox_box.add_child(more)
+
+
+static func _inbox_letter_text(letter: Dictionary, left: int) -> String:
+	return "%s\nFrom %s · %d %s left to answer" % [String(letter.get("subject", "")), String(letter.get("from", "")),
+		left, "month" if left == 1 else "months"]
+
+
+static func _inbox_deal_text(sim, k: int, left: int) -> String:
+	return "%s needs a site: %d tiles in your Tech zone · %d %s left" % [sim.deal_name(k),
+		int(sim.deal_scale(sim.deals[k])["tiles"]), left, "month" if left == 1 else "months"]
+
+
+func _show_inbox_months(sim) -> void:
+	for letter: Dictionary in sim.letters:
+		var row: Button = _inbox_rows.get(int(letter["id"]), null)
+		if row != null and is_instance_valid(row):
+			row.text = _inbox_letter_text(letter, sim.letter_months_left(letter))
+	for k: int in sim.deals.size():
+		var label: Label = _inbox_rows.get("deal %d" % int(sim.deals[k]["id"]), null)
+		if label != null and is_instance_valid(label):
+			label.text = _inbox_deal_text(sim, k, sim.deal_months_left(k))
 
 
 func _show_startup_net(tot: Dictionary) -> void:
@@ -1704,7 +1730,7 @@ func open_letter(id: int) -> void:
 	later.custom_minimum_size = Vector2(88, 36)
 	later.pressed.connect(close_letter)
 	_letter_buttons.add_child(later)
-	var no := _button("No thanks", false)
+	var no := _button("Keep the tax" if String(letter.get("kind", "")) == "musk_threat" else "No thanks", false)
 	no.custom_minimum_size = Vector2(108, 36)
 	no.pressed.connect(func(): letter_answered.emit(id, false, 0))
 	_letter_buttons.add_child(no)
@@ -1715,6 +1741,15 @@ func open_letter(id: int) -> void:
 		more.tooltip_text = "It will use a quarter more power (and pay a little more tax). Say no %d times and OpenAI leaves" % Settings.AI_REFUSALS
 		more.pressed.connect(func(): letter_answered.emit(id, true, 0))
 		_letter_buttons.add_child(more)
+	if String(letter.get("kind", "")) == "musk_threat":
+		var back := _button("Put it back to %d%%" % roundi(float(letter.get("rate", 0.0)) * 100.0), false)
+		back.theme_type_variation = "Primary"
+		back.custom_minimum_size = Vector2(160, 36)
+		back.tooltip_text = "Lower the Tech zone tax to what it was when Elon agreed his deal"
+		back.pressed.connect(func(): letter_answered.emit(id, true, 0))
+		_letter_buttons.add_child(back)
+		_letter_note.text = "Keep the tax and %s will probably leave when this letter runs out (%d %s), leaving its buildings empty. Probably." % [
+			String(letter.get("company", "")), left, "month" if left == 1 else "months"]
 	if String(letter.get("kind", "")) == "takeover":
 		var site: Dictionary = _sim.empty_site_at(int(letter.get("site", -1)))
 		if not site.is_empty():
