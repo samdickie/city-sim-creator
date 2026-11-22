@@ -484,6 +484,30 @@ Data centre scales, as an example:
 - *Started Nov 2026:* SpaceX's lattice launch tower (with its "chopstick" arms) and stainless two-stage rocket, and Google's glass pavilions (3 and 4 storeys: frames, floor bands, columns, door canopy, planted roof) are Blender models now (`launch_tower`, `rocket`, `google_pavilion3/4` in tools/make_buildings.py), with the boxes kept as the fallback. Since then, also the halls: data centres, OpenAI and Tesla's factory are drawn as rows of model bays (`dc_hall` 30 m, `ai_hall` 30 m with ribbed fins, louvre bands and stair towers, `gigafactory_bay` 40 m with tall glazing strips and a black band), each in its company's colours, so a hall of any length keeps its details.
 - **Proper Blender models for the company buildings**, in place of today's boxes and cylinders: glass pavilions with real window frames for Google, a lattice launch tower and a stainless rocket for SpaceX, Tesla's factory, and more detailed halls for the data centres and OpenAI. The box versions stay as the fallback (the usual rule), and the menu and letter pictures come from the same models.
 
+## To do, in recommended order (Sam's feedback, Nov 2026)
+Fixes and clear gaps first (they change how every game plays), then new features.
+
+1. **Play the `tech-layer` branch, merge it into `main`, push.** Nothing since the Tech zone has been played. Pushing needs Sam to sign in once (`gh auth login`, `gh auth setup-git`).
+2. **Start-ups: say what you get and keep the list.** *Sam: "What do I get by investing? Just jobs? Do I know how well they succeed? They disappear from the list after a while."*
+   - What the code does now: backing one costs £1,000-3,000 and fills an empty Tech zone office plot at level 1 straight away (jobs and office tax). Each year it may grow a level (25%), fold (15%, its plot empties), or be bought by a big firm (4%, paying the town 8x its grant); backing them also makes investors keener (more letters).
+   - Why they vanish: a fold is removed from the list (with one news line), and one whose plot declines to nothing, is bulldozed or rezoned is dropped silently. There's no limit on how many, but the inbox doesn't scroll, so a long list would run off the screen.
+   - To do: a record of every start-up backed (growing, folded, bought out, with its payout), its jobs and tax, and its odds; the letter says up front what backing it gets you; the inbox scrolls; nothing disappears without a news line.
+3. **Demand check: shops against offices, and by density.** *Sam: "There's always demand for shops over offices"; "we don't know the demand by density"; "does a tech office need a particular density?"*
+   - What the code does now: shop demand follows residents and also gets every visitor (stations, landmarks, the airport, launches), while offices get only a share of the workers not in shops, starting at 800 people, reaching half at 12,000, and halved where homes have no school. So shops lead for most of a game. The bars are scaled differently too (each against its own jobs).
+   - Demand is per zone, not per density: density only sets how tall plots can grow, and the game never says which density is wanted.
+   - Tech zone: any office or industry plot in it, at any density, pays its tax rate and draws outside firms; start-ups want an empty office plot there, any density. Nothing says so in the game.
+   - To do: check the balance with numbers from the example cities and rebalance (offices may need their own pull, e.g. from tech workers and the Tech zone); show demand by density (or which density is wanted) on the bars' hover; say the Tech zone's rules in its menu text.
+4. **Homes near data centres lose value, and the hover says why.** *Sam: "Homes within a certain distance should be worth less, and the hover should say that's the reason."*
+   - What the code does now: data centres already lower land value round them (-0.05 within 3 tiles; Gigafactory -0.06 and AI data centre -0.04 within 4), but it's small, capped with the other company effects, and the hover text doesn't name it.
+   - To do: a clearer drop in home value near data centres (noise, humming fans, big sheds), and a hover line such as "Worth less: next to a data centre".
+5. **Data centres' power and water: realistic?** *Sam: "It seems a lot of both for the mega data centres."*
+   - What the code does now (power in zone levels, roughly one per home plot level): data centre Small 160 / Standard 480 / Mega 1,200 power, water half that; AI data centre 1,000 / 2,500 / 6,000, and up to 3x more if you keep saying yes. A nuclear plant gives 1,500, so a Mega AI data centre needs four.
+   - First look: power is about right or even low against real ones (a big AI site uses as much as a city of a million; the game's Mega uses several times a 40,000 town), so it's the point of the dilemma. Water looks high: real data centres use far less water than their power would suggest next to homes. To do: check against real figures, probably cut water by half or more, and show both against the town's own use in the letter ("as much power as 3 towns like yours").
+6. **Finish Big Tech (step 5):** Elon threatening to move Tesla and SpaceX if the Tech zone tax goes up; letters from Apple, Meta and Nvidia.
+7. **Deals and drama (step 6):** Palantir and Waymo deals, companies leaving town, a headline ticker, goals.
+8. **The rest of the Californian look:** medium and high density (terraces, tenements, sandstone shops and offices are still Scottish) and warmer light.
+9. **The Golden Gate Bridge and Alcatraz** (need building over water).
+
 ## Phases
 1. **Sandbox** — map, pan and zoom, paint roads and zones, bulldoze, save and load. *Done when you can paint a city.*
 2. **Living city** — simulation tick, demand, zones grow, power, taxes and upkeep. *Done when the city grows on its own.*

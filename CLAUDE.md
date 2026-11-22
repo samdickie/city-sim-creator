@@ -136,6 +136,7 @@ Read this first, then `GAME_DESIGN.md` (the full design) before changing gamepla
 - **Californian look (Nov 2026, branch `tech-layer`), not yet played by Sam:** house models `ranch`, `mission`, `ca_villa`, `ca_modern` (variants of bungalow and villa: same declared sizes, lower roofs built inside), stucco `HOUSE_PALETTES`, `TreeKind.PALM` on half the streets, `GOLDEN` (terrain shader `golden` uniform, `sunburnt()`), `FIELD_HEDGE` 0.15. Set `GOLDEN` 0, `FIELD_HEDGE` 0.72, the old variants and `SCOTTISH_HOUSE_PALETTES` for the Troon look. Strip malls and office parks: `strip_mall`, `glass_office2/3` used by `_plan_strip_mall` / `_plan_office_park` (front car park, `_front_car_park`) for shops and offices at stages 1-2 when the models are loaded.
 
 ## Ideas not started
+- **Sam's to-do list, in recommended order:** GAME_DESIGN.md "To do, in recommended order" (start-ups, demand balance, data centre neighbours and power/water, then Big Tech, deals, the look). Work from it.
 - Sam's to-consider list (Nov 2026; details in GAME_DESIGN.md, Tech layer, "To consider next"): make it feel like Silicon Valley (Californian buildings, palm trees, golden hills, a bay); San Francisco landmarks done apart from the Golden Gate Bridge and Alcatraz (building over water); proper Blender models for the company buildings (box versions kept as fallback)
 - Goals and scenarios
 - Sound
