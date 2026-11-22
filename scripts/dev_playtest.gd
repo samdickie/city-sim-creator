@@ -907,6 +907,17 @@ func _data_centre() -> void:
 	k = sim.deal_by_id(id)
 	sim.deals[k]["break_left"] = 0
 	check(sim.company_tax() == 1500, "data centre: after that it pays %s a month" % Hud.money_text(1500))
+	# Its fans hum: homes nearby are worth less, and their hover says why (Sam, Nov 2026).
+	var near := (o.y + 3) * sim.w + o.x + 1
+	var far := (o.y + 2) * sim.w + o.x + 20
+	sim.set("_value_dirty", true)
+	var near_text := String(game.call("_tile_text", near))
+	check(sim.hum_at(near) > 0.08 and sim.hum_at(far) == 0.0 and sim.hum_price_drop(near) > 0.08
+		and near_text.contains("less: next to a data centre") and not String(game.call("_tile_text", far)).contains("data centre"),
+		"data centre: homes beside it are worth %d%% less, and say why; homes far off aren't (%s)" % [
+			roundi(sim.hum_price_drop(near) * 100.0), near_text.get_slice("\n", near_text.get_slice_count("\n") - 1)])
+	var dc_text := String(game.call("_tile_text", dc))
+	check(dc_text.contains("homes within 200 m are worth up to"), "data centre: its hover says it lowers homes' value nearby")
 	game.set("_buildings_dirty", true)
 	game.call("_refresh_hud")
 	await _look_at(o + Vector2i(2, 6), PLAY_DISTANCE * 0.6, -35.0, 34.0, [])

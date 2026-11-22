@@ -92,7 +92,8 @@ const WORKER_SHARE := 0.5         # share of residents who work
 # (Was 0.2 until Nov 2026: shops then took 40% of workers and, with visitors on
 # top, were always wanted while offices sat full. Sam: "always a demand for shops".)
 const SHOP_JOBS_PER_PERSON := 0.16
-const VISITOR_SHOP_MAX := 0.05      # all visitors' shopping (stations, tourists, the airport) adds at most this share of the population in shop jobs
+const VISITOR_SHOP_MAX := 0.06      # all visitors' shopping (stations, tourists, the airport) adds less than this share of the population in shop jobs
+                                    # (a soft cap: each source still adds something, less and less as they pile up)
 # Offices (their own zone): as a town grows, more of the workers who aren't in
 # shops want office work rather than industry. The share starts at OFFICE_START_POP
 # and reaches OFFICE_SHARE_MAX at OFFICE_FULL_POP; part of it (OFFICE_SCHOOL_SHARE)
@@ -280,6 +281,8 @@ const AI_POWER_STEP := 0.25
 const AI_TAX_STEP := 0.15
 const AI_POWER_MAX := 3.0
 const AI_REFUSALS := 3
+const DC_HUM_RADIUS := 4           # homes within this many tiles of a working data centre (or AI one) are worth less:
+const DC_HUM_VALUE := 0.15          # its cooling fans hum day and night. Land value off a home right beside one (less further off)
 const PROJECT_VALUE_MAX := 0.15     # a company project's land value effect round about, however big it is
 # --- Tech workers: residents with tech skills (simulation.gd, Tech workers) ---
 # Each month the share moves TECH_SETTLE of the way to its target: schools (x the

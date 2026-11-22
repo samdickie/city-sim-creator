@@ -109,6 +109,7 @@ var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
 # Negative means too many already.
 var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
+var _hum := PackedFloat32Array()       # land value homes lose to a data centre's hum, per tile (see _measure_hum)
 var visitor_share := 0.0               # visitors' shopping last month, as a share of the population (capped)
 var last_income := 0
 var last_upkeep := 0
@@ -3036,6 +3037,12 @@ func _update_land_value() -> void:
 		_sum_woodland(int(info(t).get("radius", 0)), amount, t)
 		for i in w * h:
 			land_value[i] += clampf(_wood_effect[i], -Settings.PROJECT_VALUE_MAX, Settings.PROJECT_VALUE_MAX)
+	# Data centres hum day and night: homes nearby are worth less (only homes:
+	# it's where people sleep).
+	_measure_hum()
+	for i in w * h:
+		if tiles[i] == Tile.HOMES:
+			land_value[i] -= _hum[i]
 	# Motorway noise, the same way.
 	if road_kind.has(Settings.MOTORWAY):
 		_sum_woodland(Settings.MOTORWAY_NOISE_RADIUS, Settings.MOTORWAY_NOISE, MOTORWAY_TILES)
@@ -3059,6 +3066,42 @@ func _update_land_value() -> void:
 
 
 const MOTORWAY_TILES := -1     # for _sum_woodland: every motorway tile
+const HUM_TILES := [Tile.DATA_CENTRE, Tile.AI_DATA_CENTRE]
+
+
+func _measure_hum() -> void:
+	# Each tile's loss from the nearest working data centre's hum: DC_HUM_VALUE
+	# right beside one, fading to nothing past DC_HUM_RADIUS. (Empty halls and
+	# ones still being built are quiet.)
+	if _hum.size() != w * h:
+		_hum.resize(w * h)
+	_hum.fill(0.0)
+	var r := Settings.DC_HUM_RADIUS
+	for i: int in _deal_at:
+		if not HUM_TILES.has(tiles[i]) or deal_building(int(_deal_at[i])):
+			continue
+		var cx := i % w
+		var cy := i / w
+		for y in range(maxi(cy - r, 0), mini(cy + r, h - 1) + 1):
+			for x in range(maxi(cx - r, 0), mini(cx + r, w - 1) + 1):
+				var d := Vector2(x - cx, y - cy).length()
+				if d <= r + 0.5:
+					var j := y * w + x
+					_hum[j] = maxf(_hum[j], Settings.DC_HUM_VALUE * (1.0 - maxf(d - 1.0, 0.0) / r))
+
+
+func hum_at(i: int) -> float:
+	# The land value a home here loses to a data centre's hum (0 if none).
+	_update_land_value()
+	return _hum[i] if _hum.size() == w * h else 0.0
+
+
+func hum_price_drop(i: int) -> float:
+	# 0-1: how much less a home here sells for because of the hum.
+	var hum := hum_at(i)
+	if hum <= 0.0:
+		return 0.0
+	return hum / (0.5 + land_value[i] + hum)
 
 
 func _sum_woodland(radius: int, amount: float, kind: int = Tile.WOODLAND) -> void:
@@ -3506,7 +3549,7 @@ func _update_demand() -> void:
 		visitors += Settings.AIRPORT_VISITORS
 		office_boost += Settings.AIRPORT_OFFICE_BOOST
 		trade += Settings.AIRPORT_FREIGHT
-	visitor_share = minf(visitors, Settings.VISITOR_SHOP_MAX)
+	visitor_share = Settings.VISITOR_SHOP_MAX * (1.0 - exp(-visitors / Settings.VISITOR_SHOP_MAX))
 	shop_target += population * visitor_share
 	var b := business_appeal()
 	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, b)

@@ -508,6 +508,11 @@ func _process(delta: float) -> void:
 			if not sim.grew.is_empty() or not sim.shrank.is_empty():
 				_buildings_dirty = true
 			_refresh_hud()
+			# A last ask (one more no and a company leaves) opens by itself, whatever
+			# else happened this month, so it can't lapse unseen on Fast.
+			for id: int in sim.new_letters:
+				if bool(sim.letter_by_id(id).get("last", false)) and not hud.is_modal():
+					hud.open_letter(id)
 			if not sim.burned.is_empty():
 				var n := sim.burned.size()
 				hud.flash("Fire! %d %s burned down. A fire station nearby would stop that." % [
@@ -518,11 +523,6 @@ func _process(delta: float) -> void:
 					gone, "building was" if gone == 1 else "buildings were"])
 			elif not sim.new_letters.is_empty():
 				var letter := sim.letter_by_id(sim.new_letters[0])
-				# A last ask (one more no and a company leaves) opens by itself, so it
-				# can't lapse unseen on Fast.
-				for id: int in sim.new_letters:
-					if bool(sim.letter_by_id(id).get("last", false)) and not hud.is_modal():
-						hud.open_letter(id)
 				hud.flash("A letter from %s (%s): open it from the envelope, top left." % [
 					String(letter.get("from", "")), String(letter.get("company", ""))])
 			elif not sim.news.is_empty():
@@ -1788,6 +1788,9 @@ func _tile_text(i: int) -> String:
 		text += "   ·   %s" % sim.pollution_word(i)
 	if t == Tile.HOMES:
 		text += "   ·   homes here worth about %s" % Hud.money_text(sim.home_price(i))
+		var drop: float = sim.hum_price_drop(i)
+		if drop >= 0.01:
+			text += "\nWorth %d%% less: next to a data centre, whose cooling fans hum day and night" % roundi(drop * 100.0)
 		if sim.campus_price_rise() >= 0.01:
 			text += " (up %d%% with tech salaries)" % roundi(sim.campus_price_rise() * 100.0)
 	return text
@@ -1816,18 +1819,29 @@ func _project_text(i: int) -> String:
 	if bool(deal.get("priority", false)):
 		text += "\nGets power before homes when the grid runs short"
 	if sim.tiles[i] == Tile.DATA_CENTRE:
-		text += "\nIt hums: lowers land value nearby"
+		text += "\nIts cooling fans hum day and night: homes within %d m are worth up to %d%% less" % [
+			roundi(Settings.DC_HUM_RADIUS * sim_cell_m()), _hum_most_pct()]
 	elif sim.tiles[i] == Tile.LAUNCH_SITE:
 		text += "\nTourists come to watch (%d launches so far) · nobody may live within %d tiles: homes there can't grow" % [
 			int(deal.get("launches", 0)), int(scale.get("zone", 0))]
 	elif sim.tiles[i] == Tile.AI_DATA_CENTRE:
-		text += "\nIt hums, and it always wants more: uses %s power now (x%.2f since it opened; no's so far: %d of %d)" % [
+		text += "\nIts fans hum (homes within %d m are worth up to %d%% less), and it always wants more: uses %s power now (x%.2f since it opened; no's so far: %d of %d)" % [
+			roundi(Settings.DC_HUM_RADIUS * sim_cell_m()), _hum_most_pct(),
 			Hud.thousands(sim.deal_power(deal)), float(deal.get("power_x", 1.0)), int(deal.get("refusals", 0)), Settings.AI_REFUSALS]
 	elif sim.tiles[i] == Tile.TECH_CAMPUS:
 		text += "\nWell-paid staff push house prices up across town (up %d%% now)" % roundi(sim.campus_price_rise() * 100.0)
 	else:
 		text += "\nLorries and a little smoke: lowers land value nearby"
 	return text
+
+
+func sim_cell_m() -> float:
+	return cell_size_m
+
+
+func _hum_most_pct() -> int:
+	# How much less a home of average value sells for right beside a data centre.
+	return roundi(Settings.DC_HUM_VALUE / (0.5 + 0.4) * 100.0)
 
 
 func _rubbish_text(i: int) -> String:
