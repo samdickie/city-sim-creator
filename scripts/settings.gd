@@ -89,15 +89,19 @@ const ABANDONED_RADIUS := 2             # ...out to this many tiles
 # --- Demand ---
 const WORKER_SHARE := 0.5         # share of residents who work
 # Shop and office jobs a town supports per resident (industry employs the rest of the workers).
-const SHOP_JOBS_PER_PERSON := 0.2
+# (Was 0.2 until Nov 2026: shops then took 40% of workers and, with visitors on
+# top, were always wanted while offices sat full. Sam: "always a demand for shops".)
+const SHOP_JOBS_PER_PERSON := 0.16
+const VISITOR_SHOP_MAX := 0.05      # all visitors' shopping (stations, tourists, the airport) adds at most this share of the population in shop jobs
 # Offices (their own zone): as a town grows, more of the workers who aren't in
 # shops want office work rather than industry. The share starts at OFFICE_START_POP
 # and reaches OFFICE_SHARE_MAX at OFFICE_FULL_POP; part of it (OFFICE_SCHOOL_SHARE)
 # only counts where homes have a school nearby (offices want schooled workers).
 # Offices only take workers when they're zoned: with none, industry employs them all.
-const OFFICE_START_POP := 800
-const OFFICE_FULL_POP := 12000
-const OFFICE_SHARE_MAX := 0.5
+const OFFICE_START_POP := 500
+const OFFICE_FULL_POP := 10000
+const OFFICE_SHARE_MAX := 0.55
+const OFFICE_SHARE_CAP := 0.8      # with tech workers (who all want office work) on top, at most this share
 const OFFICE_SCHOOL_SHARE := 0.5   # this much of the office share depends on school cover
 const OFFICE_TAX := 1.25           # an office job pays this much more tax than other jobs
 const TOWN_PULL := 100            # people who'd like to move to even a brand-new town

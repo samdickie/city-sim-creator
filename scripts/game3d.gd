@@ -64,7 +64,7 @@ const DISTRICT_ORDER := [2, 3, 1, 0]
 const DISTRICT_IDS := ["cbd", "tech_zone", "conservation", "normal"]
 const DISTRICT_ABOUT := [
 	"Central business district: high-density plots can become skyscrapers (with 8,000 people and a station or bus depot nearby). Raises land value.",
-	"Tech zone: offices and industry here pay their own tax rate (set it in the City panel). Set it below the town's and firms come from outside to fill it, bringing jobs and people; residents may grumble that it's unfair.",
+	"Tech zone: paint it over office and industry zones (any density) and open land. Offices and industry here pay their own tax rate (set it in the City panel). Set it below the town's and firms come from outside to fill it, bringing jobs and people; residents may grumble that it's unfair. Start-ups want an empty office plot here; big companies want open land here.",
 	"Conservation area: nothing taller than four storeys, to keep the old town's character. A little extra land value.",
 	"Normal: the usual height rules for each density."]
 # Tools that open a picker of several buildings (Tab or the buttons choose one).
@@ -1168,7 +1168,7 @@ const SHORT := {
 	"painted_ladies": "Postcard Row's Victorian houses", "coit_tower": "The column on Telegraph Hill",
 	"ferry_building": "The clock tower on the waterfront", "fine_arts": "The rotunda by the lagoon",
 	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
-	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Its own tax rate, to draw firms", "conservation": "Keeps the old town low",
+	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Offices and industry, any density", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
 

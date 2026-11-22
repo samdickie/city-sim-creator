@@ -163,7 +163,7 @@ Build a thriving town on a blank map of Troon's real land and coastline. Balance
 
 ## Offices (a zone of their own)
 - Low, medium and high density like shops (£70 / £90 / £140 a tile): small offices and chambers, office blocks, glass towers, skyscrapers in a CBD.
-- Demand: a share of the workers who aren't in shops want office work: none under 800 people, rising to half at 12,000; half of that share only counts where homes have a school nearby. Only offices that are built take workers from industry, so a town with no office zone runs as before (and when offices arrive, industry shrinks).
+- Demand: a share of the workers who aren't in shops want office work: none under 500 people, rising to 55% at 10,000; half of that share only counts where homes have a school nearby; tech workers all want office work on top (at most 80% in all). Only offices that are built take workers from industry, so a town with no office zone runs as before (and when offices arrive, industry shrinks).
 - Offices are clean, pay 25% more tax per job, add a little land value, and want police cover like shops. Shops' tall stages are now big stores and hotels.
 - Visitors' shopping (stations, the airport, landmarks) is extra shop demand: it no longer takes workers from offices or industry.
 
@@ -501,6 +501,9 @@ Fixes and clear gaps first (they change how every game plays), then new features
    - Demand is per zone, not per density: density only sets how tall plots can grow, and the game never says which density is wanted.
    - Tech zone: any office or industry plot in it, at any density, pays its tax rate and draws outside firms; start-ups want an empty office plot there, any density. Nothing says so in the game.
    - To do: check the balance with numbers from the example cities and rebalance (offices may need their own pull, e.g. from tech workers and the Tech zone); show demand by density (or which density is wanted) on the bars' hover; say the Tech zone's rules in its menu text.
+   - **Done (Nov 2026), not yet played by Sam.** Measured in the example City (43,000 people): shops were 41% of jobs and still wanted 6,200 more, because visitors (station, tourists, airport) added 57% on top of residents' shopping, while offices were full. Now: shops serve 16% of residents (was 20%; about a third of workers), all visitors' shopping is capped at 5% of the population, offices start at 500 people and reach 55% of the non-shop workers at 10,000, and tech workers all want office work. In the old examples shops come out about right and offices are wanted; the examples were rebuilt.
+   - Demand by density: demand is still per zone (in SimCity 4 the split is by wealth, not height). The bars' hover now says how many people or jobs each zone wants, the room left on its zoned plots by density, and roughly how many more low, medium or high density plots would take the rest (high only builds tall on valuable land).
+   - The Tech zone's menu line, its picker text and the help now say it covers offices and industry at any density, start-ups want its empty office plots and big companies its open land.
 4. **Homes near data centres lose value, and the hover says why.** *Sam: "Homes within a certain distance should be worth less, and the hover should say that's the reason."*
    - What the code does now: data centres already lower land value round them (-0.05 within 3 tiles; Gigafactory -0.06 and AI data centre -0.04 within 4), but it's small, capped with the other company effects, and the hover text doesn't name it.
    - To do: a clearer drop in home value near data centres (noise, humming fans, big sheds), and a hover line such as "Worth less: next to a data centre".

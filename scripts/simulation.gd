@@ -109,6 +109,7 @@ var power_used := 0                   # zone levels currently built
 # How many more residents / shop jobs / industry jobs the town wants.
 # Negative means too many already.
 var demand := {Tile.HOMES: 0.0, Tile.SHOPS: 0.0, Tile.INDUSTRY: 0.0, Tile.OFFICES: 0.0}
+var visitor_share := 0.0               # visitors' shopping last month, as a share of the population (capped)
 var last_income := 0
 var last_upkeep := 0
 var last_tech_relief := 0             # tax the Tech zone's lower rate gave up last month (below 0: it paid more)
@@ -3494,24 +3495,25 @@ func _update_demand() -> void:
 	demand[Tile.HOMES] = homes
 	# Railway stations bring visitors (shop demand); harbours bring trade (industry).
 	var stations := mini(_working_count(Tile.STATION), 2)
-	var visitors: float = info(Tile.STATION).get("visitors", 0.0)
-	shop_target += population * visitors * stations
+	var visitors: float = info(Tile.STATION).get("visitors", 0.0) * stations
 	var port_jobs: int = info(Tile.HARBOUR).get("port_jobs", 0)
 	var trade := port_jobs * _working_count(Tile.HARBOUR)
 	# Landmarks bring tourists (more of them with an airport to fly in to).
-	shop_target += population * (tourism + project_tourism()) * (Settings.AIRPORT_TOURISM if airports_open > 0 else 1.0)
+	visitors += (tourism + project_tourism()) * (Settings.AIRPORT_TOURISM if airports_open > 0 else 1.0)
 	# An airport brings visitors, business and freight.
 	var office_boost := 1.0
 	if airports_open > 0:
-		shop_target += population * Settings.AIRPORT_VISITORS
+		visitors += Settings.AIRPORT_VISITORS
 		office_boost += Settings.AIRPORT_OFFICE_BOOST
 		trade += Settings.AIRPORT_FREIGHT
+	visitor_share = minf(visitors, Settings.VISITOR_SHOP_MAX)
+	shop_target += population * visitor_share
 	var b := business_appeal()
 	demand[Tile.SHOPS] = _business_demand(shop_target - shop_jobs, shop_jobs, b)
 	# Offices: a share of the workers who aren't in shops (see office_share). Only
 	# offices that are built take workers from industry, so a town with no office
 	# zone runs exactly as before.
-	var office_target := maxf(workers - local_shops, 0.0) * minf(office_share() * office_boost, 1.0)
+	var office_target := maxf(workers - local_shops, 0.0) * minf(office_share() * office_boost, Settings.OFFICE_SHARE_CAP)
 	# A Tech zone's tax break brings firms from outside, on top (see tech_incoming):
 	# their jobs don't take the town's workers from industry; they bring people in.
 	var incoming := tech_incoming()
@@ -3523,12 +3525,41 @@ func _update_demand() -> void:
 		industry_jobs, b)
 
 
+func demand_room() -> Dictionary:
+	# Room left on zoned plots, by density: residents (homes) or jobs each zone's
+	# plots could still take if they all grew to their full height.
+	# {tile: [low, medium, high]}
+	var out := {Tile.HOMES: [0, 0, 0], Tile.SHOPS: [0, 0, 0], Tile.OFFICES: [0, 0, 0], Tile.INDUSTRY: [0, 0, 0]}
+	var startup_plots := _startup_tiles()      # (they grow by themselves)
+	for i in w * h:
+		var t: int = tiles[i]
+		if not out.has(t) or abandoned[i] == 1 or startup_plots.has(i):
+			continue
+		var extra := units_at_stage(t, stage_at(i, max_level(i))) - units(i)
+		if extra > 0:
+			var d: int = 0 if t == Tile.INDUSTRY else density[i]
+			out[t][d] = int(out[t][d]) + extra
+	return out
+
+
+func plot_holds(t: int, d: int) -> int:
+	# What one plot of a zone holds at a density's full height (no district).
+	if t == Tile.INDUSTRY:
+		return units_at_stage(t, 3)
+	return units_at_stage(t, Settings.DENSITY_START[d] + Settings.DENSITY_MAX_LEVEL[d])
+
+
 func office_share() -> float:
 	# The share of non-shop workers who want office work: none in a village, up
 	# to OFFICE_SHARE_MAX in a city, and less where homes have no school nearby.
 	var size := clampf(float(population - Settings.OFFICE_START_POP)
 		/ float(Settings.OFFICE_FULL_POP - Settings.OFFICE_START_POP), 0.0, 1.0)
-	return Settings.OFFICE_SHARE_MAX * size * lerpf(1.0 - Settings.OFFICE_SCHOOL_SHARE, 1.0, schooled_share())
+	var share := Settings.OFFICE_SHARE_MAX * size * lerpf(1.0 - Settings.OFFICE_SCHOOL_SHARE, 1.0, schooled_share())
+	# Tech workers all want office work (on top, as a share of the workers).
+	var workers := population * Settings.WORKER_SHARE
+	if workers > 0.0:
+		share += tech_workers() / workers
+	return minf(share, Settings.OFFICE_SHARE_CAP)
 
 
 func schooled_share() -> float:

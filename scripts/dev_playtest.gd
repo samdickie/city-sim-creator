@@ -1706,6 +1706,12 @@ func _examples() -> void:
 		check(sim.abandoned_count == 0 and sim.happiness >= 0.55, "the example %s is a happy town (%d%%), nothing abandoned" % [
 			title, roundi(sim.happiness * 100.0)])
 		people_before = sim.population
+	# Demand (Sam, Nov 2026: "always a demand for shops"): visitors' shopping is
+	# capped, and the bars' hover gives numbers and room by density.
+	var said := String((hud.get("demand_box") as Control).tooltip_text)
+	check(sim.visitor_share <= Settings.VISITOR_SHOP_MAX + 0.0001 and said.contains("Offices:") and said.contains("Shops:")
+		and (said.contains("low ") or said.contains("about right")) and not said.contains("steady"),
+		"demand: visitors' shopping capped (%.3f), and the bars' hover gives numbers and density:\n%s" % [sim.visitor_share, said])
 	# The last one is the big city: a year on, it's still growing richer.
 	var money := sim.money
 	var people := sim.population

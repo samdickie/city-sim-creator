@@ -43,6 +43,7 @@ signal show_tile(i: int)                    # fly the camera to a plot (a start-
 const Settings = preload("res://scripts/settings.gd")
 const Icons = preload("res://scripts/icons.gd")
 const Companies = preload("res://scripts/companies.gd")
+const Simulation = preload("res://scripts/simulation.gd")
 const GLASS_SHADER = preload("res://shaders/glass.gdshader")
 const BULLDOZE_TOOL := 4                   # (game3d.gd's Tool.BULLDOZE)
 const ADVICE_URGENT := 3                   # (advisors.gd's URGENT; WARNING is 2, ADVICE 1)
@@ -1301,7 +1302,7 @@ func _build_help() -> void:
 			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
 			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
 			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
-			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry pay their own tax rate (set it in the City panel; below the town's draws firms in), or a conservation area kept low-rise.",
+			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry (any density) pay their own tax rate (set it in the City panel; below the town's draws firms in; start-ups want its empty office plots, big companies its open land), or a conservation area kept low-rise.",
 			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
 			"Education (Build menu): a college, then a university (drag out a campus) and a research park beside it. They turn residents into tech workers, which the big companies want before they'll come; a research park makes them keener. Students need homes, and universities are costly to run.",
 			"Data centres: Amazon, Microsoft or Google write once you have %s people and open land in a Tech zone. Pick a size, then drag out its site in the Tech zone. They pay well and bring a little work, but use power and water like a small town; on a stretched grid everyone's bills go up." % "1,500",
@@ -2263,14 +2264,53 @@ func show_city(sim, money_str: String, net_text: String, income_text: String, up
 			tech_tax_label.text += " · the break cost %s last month" % money_text(sim.last_tech_relief)
 	tech_tax_label.add_theme_color_override("font_color", TEXT if has_tech else TEXT_DIM)
 
-	# Demand, in words for the tooltip.
-	var parts: Array[String] = []
-	for t: int in _demand_colours:
-		var v: float = sim.demand_bar(t)
-		var label: String = _demand_colours[t][1]
-		parts.append("%s: %s" % [label, "wanted" if v > 0.1 else ("too many" if v < -0.1 else "steady")])
-	demand_box.tooltip_text = "Demand (bars up: wanted; down: too many)\n" + "\n".join(parts)
+	demand_box.tooltip_text = demand_text(sim)
 	demand_box.queue_redraw()
+
+
+static func _plots(n: int) -> String:
+	return "%d more %s" % [n, "plot" if n == 1 else "plots"]
+
+
+func demand_text(sim) -> String:
+	# The demand bars' tooltip: for each zone, how much is wanted, the room left on
+	# its zoned plots by density, and how many more plots of each density would
+	# take the rest.
+	var room: Dictionary = sim.demand_room()
+	var lines: Array[String] = ["Demand (bars up: wanted; down: too many)"]
+	for t: int in _demand_colours:
+		var label: String = _demand_colours[t][1]
+		var what := "people" if t == Simulation.Tile.HOMES else "jobs"
+		var want := roundi(float(sim.demand[t]))
+		var r: Array = room[t]
+		var free := int(r[0]) + int(r[1]) + int(r[2])
+		var industry := t == Simulation.Tile.INDUSTRY
+		var room_text := "no room left on zoned plots" if free == 0 else (
+			"room on zoned plots for %s" % thousands(free) if industry else
+			"room on zoned plots for %s (low %s · medium %s · high %s)" % [thousands(free), thousands(int(r[0])),
+				thousands(int(r[1])), thousands(int(r[2]))])
+		var small: float = sim.plot_holds(t, 0) * 0.5
+		var line := ""
+		if want > small:
+			line = "%s: wanted, about %s more %s; %s." % [label, thousands(want), what, room_text]
+			if want > free:
+				var need := float(want - free)
+				if industry:
+					line += " Zone about %s." % _plots(ceili(need / sim.plot_holds(t, 0)))
+				else:
+					var low := ceili(need / sim.plot_holds(t, 0))
+					line += " Zone about %d more low-density %s, or %d medium, or %d high (high only builds tall on valuable land)." % [
+						low, "plot" if low == 1 else "plots", ceili(need / sim.plot_holds(t, 1)), ceili(need / sim.plot_holds(t, 2))]
+			else:
+				line += " Enough zoned for now."
+		elif want < -small:
+			line = "%s: too many, about %s %s more than wanted." % [label, thousands(-want), what]
+		else:
+			line = "%s: about right." % label
+		if t == Simulation.Tile.SHOPS and sim.visitor_share > 0.0:
+			line += " (Visitors' shopping adds %s.)" % thousands(roundi(sim.population * sim.visitor_share))
+		lines.append(line)
+	return "\n".join(lines)
 
 
 func _show_loans(sim) -> void:
