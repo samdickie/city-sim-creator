@@ -30,7 +30,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
-	COLLEGE, UNIVERSITY, RESEARCH_PARK }   # same order as simulation.gd
+	COLLEGE, UNIVERSITY, RESEARCH_PARK,
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
 	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION }   # DEAL: placing a company's data centre (not in the Build menu)
 
@@ -74,8 +75,10 @@ const GROUPS := {
 	Tool.LEISURE: [Tile.WOODLAND, Tile.GOLF, Tile.LIBRARY, Tile.MUSEUM, Tile.STADIUM, Tile.MARINA, Tile.TOWN_HALL],
 	Tool.TRANSPORT: [Tile.BUS_DEPOT, Tile.STATION, Tile.HARBOUR, Tile.AIRPORT],
 	Tool.EDUCATION: [Tile.COLLEGE, Tile.UNIVERSITY, Tile.RESEARCH_PARK],
-	Tool.LANDMARK: [Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE,
-		Tile.EIFFEL, Tile.EMPIRE_STATE],
+	# San Francisco's landmarks (the eight world ones, Big Ben to the Empire State, still
+	# load and work in old cities, but are no longer in the menu).
+	Tool.LANDMARK: [Tile.PAINTED_LADIES, Tile.COIT_TOWER, Tile.FERRY_BUILDING, Tile.FINE_ARTS, Tile.TRANSAMERICA,
+		Tile.SALESFORCE_TOWER],
 }
 const TOOL_TO_TILE := {
 	Tool.ROAD: Tile.ROAD,
@@ -1155,7 +1158,10 @@ const SHORT := {
 	"harbour": "Ships bring trade", "airport": "Drag out a runway: visitors and trade",
 	"big_ben": "The great clock tower", "colosseum": "The ancient amphitheatre", "great_pyramid": "A wonder of the ancient world",
 	"liberty": "Torch held high, by the sea", "taj_mahal": "White marble domes", "opera_house": "White sails by the water",
-	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
+	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper",
+	"painted_ladies": "Postcard Row's Victorian houses", "coit_tower": "The column on Telegraph Hill",
+	"ferry_building": "The clock tower on the waterfront", "fine_arts": "The rotunda by the lagoon",
+	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
 	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Its own tax rate, to draw firms", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }

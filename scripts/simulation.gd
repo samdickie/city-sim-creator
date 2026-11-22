@@ -14,7 +14,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
-	COLLEGE, UNIVERSITY, RESEARCH_PARK }
+	COLLEGE, UNIVERSITY, RESEARCH_PARK,
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }
 # Which entry in Settings.BUILDINGS describes each of the other buildings.
 const BUILDING_KEYS := {
 	Tile.POWER_PLANT: "coal", Tile.GAS: "gas", Tile.NUCLEAR: "nuclear", Tile.WIND: "wind",
@@ -28,8 +29,10 @@ const BUILDING_KEYS := {
 	Tile.INCINERATOR: "incinerator", Tile.DATA_CENTRE: "data_centre", Tile.GIGAFACTORY: "gigafactory",
 	Tile.TECH_CAMPUS: "tech_campus", Tile.LAUNCH_SITE: "launch_site", Tile.AI_DATA_CENTRE: "ai_data_centre",
 	Tile.COLLEGE: "college", Tile.UNIVERSITY: "university", Tile.RESEARCH_PARK: "research_park",
+	Tile.PAINTED_LADIES: "painted_ladies", Tile.COIT_TOWER: "coit_tower", Tile.FERRY_BUILDING: "ferry_building",
+	Tile.FINE_ARTS: "fine_arts", Tile.TRANSAMERICA: "transamerica", Tile.SALESFORCE_TOWER: "salesforce_tower",
 }
-const LAST_TILE := Tile.RESEARCH_PARK   # (new tiles go on the end, so saved tile numbers never change)
+const LAST_TILE := Tile.SALESFORCE_TOWER   # (new tiles go on the end, so saved tile numbers never change)
 # Company projects (Settings.PROJECTS): the tile each kind is built as.
 const PROJECT_TILES := {"data_centre": Tile.DATA_CENTRE, "gigafactory": Tile.GIGAFACTORY, "campus": Tile.TECH_CAMPUS,
 	"launch_site": Tile.LAUNCH_SITE, "ai_data_centre": Tile.AI_DATA_CENTRE}

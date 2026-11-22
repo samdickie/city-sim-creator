@@ -961,6 +961,27 @@ def eiffel(): _landmark("eiffel", (0.44, 0.35, 0.27), (0.30, 0.25, 0.20), 3.0, 4
 def empire_state(): _landmark("empire_state", (0.74, 0.72, 0.67), (0.30, 0.32, 0.35), 10.0, 40.0, 28.0)
 
 
+LADIES = [((0.84, 0.78, 0.90), (0.42, 0.22, 0.40)), ((0.95, 0.86, 0.62), (0.30, 0.42, 0.55)),
+          ((0.70, 0.84, 0.80), (0.55, 0.22, 0.20)), ((0.96, 0.80, 0.78), (0.25, 0.35, 0.30)),
+          ((0.74, 0.82, 0.92), (0.62, 0.40, 0.18)), ((0.92, 0.92, 0.86), (0.30, 0.40, 0.58))]   # world3d PAINTED_LADIES
+
+
+def painted_ladies():
+    ground()
+    for k, (wall, trim) in enumerate(LADIES):
+        model("painted_lady", -19.0 + k * 7.6, 3.0, 7.6, 14.0, None, wall, trim, r=0.15 * k)
+    for along, back, h in ((-15, 30, 10), (-3, 36, 12), (9, 28, 9), (18, 40, 11)):
+        tree(along, back, h)
+    palm(-20.0, 42.0, 12.0)
+
+
+def coit_tower(): _landmark("coit_tower", (0.90, 0.88, 0.82), (0.60, 0.58, 0.54), 8.0, 34.0, 34.0, kind="grass")
+def ferry_building(): _landmark("ferry_building", (0.86, 0.84, 0.78), (0.38, 0.42, 0.44), 12.0, 46.0, 20.0, sea=True)
+def fine_arts(): _landmark("fine_arts", (0.84, 0.70, 0.54), (0.72, 0.42, 0.30), 2.0, 46.0, 46.0, kind="grass")
+def transamerica(): _landmark("transamerica", (0.92, 0.91, 0.88), (0.60, 0.60, 0.60), 5.0, 40.0, 40.0)
+def salesforce_tower(): _landmark("salesforce_tower", (0.74, 0.80, 0.86), (0.92, 0.92, 0.90), 5.0, 40.0, 40.0)
+
+
 def _district(colour, tall):
     ground()
     slab(0.0, 0.0, 50.0, 50.0, colour, 0.0)
@@ -1037,12 +1058,15 @@ ITEMS = {
     "museum": museum, "stadium": stadium, "marina": marina, "town_hall": town_hall, "bus_depot": bus_depot,
     "station": station, "harbour": harbour, "airport": airport,
     "big_ben": big_ben, "colosseum": colosseum, "great_pyramid": great_pyramid, "liberty": liberty,
-    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "cbd": cbd, "tech_zone": tech_zone, "college": college, "university": university, "research_park": research_park, "conservation": conservation, "normal": normal,
+    "taj_mahal": taj_mahal, "opera_house": opera_house, "eiffel": eiffel, "empire_state": empire_state, "painted_ladies": painted_ladies, "coit_tower": coit_tower,
+    "ferry_building": ferry_building, "fine_arts": fine_arts, "transamerica": transamerica,
+    "salesforce_tower": salesforce_tower, "cbd": cbd, "tech_zone": tech_zone, "college": college, "university": university, "research_park": research_park, "conservation": conservation, "normal": normal,
 }
 TALL = {"coal": 1.9, "incinerator": 1.7, "gas": 1.5, "nuclear": 1.45, "wind": 1.9, "cbd": 1.9, "power_line": 1.2, "harbour": 1.35,
         "marina": 1.2, "water_tower": 1.35, "stadium": 1.15, "town_hall": 1.25, "homes_2": 1.15,
         "hospital": 1.1, "shops_2": 1.15, "offices_1": 1.1, "offices_2": 1.6,
-        "big_ben": 2.3, "liberty": 2.1, "eiffel": 2.9, "empire_state": 4.0, "taj_mahal": 1.2}
+        "big_ben": 2.3, "liberty": 2.1, "eiffel": 2.9, "empire_state": 4.0, "taj_mahal": 1.2,
+        "coit_tower": 2.0, "ferry_building": 2.0, "fine_arts": 1.3, "transamerica": 4.6, "salesforce_tower": 5.4}
 
 
 # ------------------------------------------------------------------ render

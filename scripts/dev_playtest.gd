@@ -160,7 +160,7 @@ func _new_buildings() -> void:
 	for item: Dictionary in game.call("_menu_items"):
 		ids[item["id"]] = item["locked"]
 	var wanted := ["offices_0", "offices_1", "offices_2", "police_office", "fire_small", "clinic", "airport",
-		"big_ben", "colosseum", "great_pyramid", "liberty", "taj_mahal", "opera_house", "eiffel", "empire_state"]
+		"painted_ladies", "coit_tower", "ferry_building", "fine_arts", "transamerica", "salesforce_tower"]
 	var missing: Array[String] = []
 	for id: String in wanted:
 		if not ids.has(id) or bool(ids[id]):
@@ -235,16 +235,19 @@ func _new_buildings() -> void:
 		check(sim.airports_open == 1, "airport: mended, it opens again")
 	# Landmarks: one of each, bringing tourists.
 	var all := true
-	for t: int in [T.BIG_BEN, T.COLOSSEUM, T.GREAT_PYRAMID, T.LIBERTY, T.TAJ_MAHAL, T.OPERA_HOUSE, T.EIFFEL, T.EMPIRE_STATE]:
+	for t: int in [T.PAINTED_LADIES, T.COIT_TOWER, T.FERRY_BUILDING, T.FINE_ARTS, T.TRANSAMERICA, T.SALESFORCE_TOWER]:
 		if sim.count_of(t) != 1:
 			all = false
-	check(all and sim.tourism > 0.0, "landmarks: the city has all eight, and tourists (%.1f%% of its people)" % (sim.tourism * 100.0))
-	check(sim.can_build_here(T.EIFFEL, clinic).contains("only build one"), "landmarks: only one of each (%s)" % sim.can_build_here(T.EIFFEL, clinic))
+	check(all and sim.tourism > 0.0, "landmarks: the city has all six of San Francisco's, and tourists (%.1f%% of its people)" % (sim.tourism * 100.0))
+	check(sim.can_build_here(T.TRANSAMERICA, clinic).contains("only build one"), "landmarks: only one of each (%s)" % sim.can_build_here(T.TRANSAMERICA, clinic))
+	# The old world landmarks are out of the menu, but an old city's still count.
+	check(not ids.has("big_ben") and not ids.has("eiffel") and sim.is_landmark(T.BIG_BEN) and sim.is_landmark(T.EIFFEL),
+		"landmarks: Big Ben and the Eiffel Tower are gone from the menu, but still landmarks in old cities")
 	# A save keeps them all.
-	var before := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.EIFFEL),
+	var before := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.TRANSAMERICA),
 		sim.population, sim.office_jobs, sim.airports_open]
 	sim.from_save(sim.to_save())
-	var after := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.EIFFEL),
+	var after := [sim.count_of(T.OFFICES), sim.count_of(T.CLINIC), sim.count_of(T.AIRPORT), sim.count_of(T.TRANSAMERICA),
 		sim.population, sim.office_jobs, sim.airports_open]
 	check(before == after, "new buildings: saving and loading keeps them (%s)" % [after])
 	world.refresh_all()
@@ -544,10 +547,13 @@ func _letters() -> void:
 	check(inbox.visible and row != null and row.text.contains(String(letter["company"])),
 		"letters: the envelope opens the inbox with the letter in it")
 	await _shot("p30_inbox")
+	# (The clock runs: a new month rebuilds the inbox, so find the row just before clicking.)
+	await _wait(0.2)
 	for child: Node in (hud.get("_inbox_box") as VBoxContainer).get_children():
-		if child is Button:
+		if child is Button and not child.is_queued_for_deletion():
 			row = child
-	await _click(row)
+	await _click_at(row.get_global_rect().get_center())
+	await _wait(0.15)
 	await _frames(3)
 	var body: Label = hud.get("_letter_body")
 	check(hud.call("letter_open") and not inbox.visible and body.text.contains(String(letter["company"]))

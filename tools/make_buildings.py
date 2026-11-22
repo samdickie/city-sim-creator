@@ -2110,6 +2110,289 @@ def great_pyramid():
     return mb, (w, d, 29.8, 0.0)
 
 
+# ------------------------------------------------ San Francisco's landmarks
+
+def rounded_square(hw, hd, r, z, n=4):
+    """A ring of points round a rounded rectangle (half sizes hw, hd, corner radius r) at height z."""
+    pts = []
+    for cx, cy, a0 in ((hw - r, hd - r, 0.0), (-hw + r, hd - r, 90.0), (-hw + r, -hd + r, 180.0), (hw - r, -hd + r, 270.0)):
+        for k in range(n + 1):
+            a = math.radians(a0 + 90.0 * k / n)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a), z))
+    return pts
+
+
+def loft(mb, rings, mat, caps=True):
+    """Side faces joining rings of points (each the same length, going round the same way)."""
+    n = len(rings[0])
+    base = len(mb.verts)
+    for ring in rings:
+        mb.verts.extend(ring)
+    for i in range(1, len(rings)):
+        for k in range(n):
+            j = (k + 1) % n
+            mb.faces.append([base + (i - 1) * n + k, base + (i - 1) * n + j, base + i * n + j, base + i * n + k])
+            mb.mats.append(MAT_INDEX[mat])
+    if caps:
+        mb.faces.append([base + k for k in range(n)][::-1])
+        mb.mats.append(MAT_INDEX[mat])
+        top = base + (len(rings) - 1) * n
+        mb.faces.append([top + k for k in range(n)])
+        mb.mats.append(MAT_INDEX[mat])
+
+
+def painted_lady():
+    # One of the Painted Ladies: a narrow Victorian house over a raised basement,
+    # a two-storey bay window, a stoop up to the door, white trim, a steep front
+    # gable with shingles in the trim colour. The game draws a row of them, each
+    # painted its own colour (wall colour; second colour: trim and gable).
+    w, d = 7.6, 14.0
+    mb = Builder()
+    hw, hd = w / 2, d / 2
+    mb.box(-hw, hw, -hd, hd, -0.3, 1.8, "accent")                     # the raised basement
+    mb.box(-hw, hw, -hd, hd, 1.8, 11.4, "render")
+    f = front(w, d)
+    # The bay: three faces, angled at the sides.
+    bay = [(0.0, hd), (3.6, hd), (3.0, hd + 1.3), (0.6, hd + 1.3)]
+    mb.prism(bay, 1.8, 8.8, "render")
+    mb.prism([(x, y + (0.15 if y > hd else 0.0)) for x, y in [(-0.15, hd), (3.75, hd), (3.1, hd + 1.45), (0.5, hd + 1.45)]],
+             8.8, 9.3, "frame")
+    for z in (2.6, 6.0):
+        mb.box(0.9, 2.7, hd + 1.3, hd + 1.36, z, z + 2.4, "glass")
+        mb.box(0.85, 2.75, hd + 1.32, hd + 1.42, z - 0.2, z, "frame")
+        mb.box(0.85, 2.75, hd + 1.32, hd + 1.42, z + 2.4, z + 2.6, "frame")
+        mb.box(1.77, 1.83, hd + 1.32, hd + 1.42, z, z + 2.4, "frame")
+        for a, b in (((0.12, hd + 0.45), (0.55, hd + 1.15)), ((3.48, hd + 0.45), (3.05, hd + 1.15))):
+            beam(mb, (a[0], a[1], z + 1.2), (b[0], b[1], z + 1.2), 0.08, "glass", 2.4)
+    # The door up a stoop, a window over it, white bands and a bracketed cornice.
+    window(mb, f, -2.2, 5.9, 1.4, 2.4, surround=False, sill=False, lintel=False)
+    f.slab(mb, -3.2, -1.3, 1.8, 4.6, -0.02, 0.05, "door")
+    f.slab(mb, -3.45, -1.05, 4.6, 5.0, 0.0, 0.35, "frame")             # the door hood
+    for k in range(6):                                                 # the stoop
+        f.slab(mb, -3.4, -1.1, -0.3, 1.8 - k * 0.3, 0.0, 0.4 + k * 0.4, "frame")
+    for z in (1.8, 5.4):
+        f.slab(mb, -hw, hw, z - 0.15, z + 0.1, 0.0, 0.12, "frame")
+    f.slab(mb, -hw - 0.1, hw + 0.1, 10.8, 11.5, 0.0, 0.55, "frame")
+    for k in range(7):
+        a = -hw + 0.4 + k * (w - 0.8) / 6
+        f.slab(mb, a - 0.12, a + 0.12, 10.3, 10.8, 0.0, 0.4, "accent")
+    # The steep gable, with its shingled face and an attic window.
+    mb.extrude_y([(-hw - 0.2, 11.4), (hw + 0.2, 11.4), (0.0, 16.0)], -hd, hd + 0.25, "lead")   # (dark slate: the second colour is the trim)
+    mb.extrude_y([(-hw + 0.3, 11.5), (hw - 0.3, 11.5), (0.0, 15.4)], hd + 0.25, hd + 0.35, "accent")
+    mb.box(-0.7, 0.7, hd + 0.33, hd + 0.4, 12.0, 13.6, "glass")
+    mb.box(-0.85, 0.85, hd + 0.33, hd + 0.45, 11.85, 12.0, "frame")
+    return mb, (w, d, 16.0, 0.0)
+
+
+def coit_tower():
+    # The fluted concrete column on Telegraph Hill, its arched lookout at the top,
+    # and the low hall at its foot (with the murals inside).
+    w = d = 34.0
+    mb = Builder()
+    mb.box(-15.0, 15.0, 2.0, 15.0, -0.3, 7.0, "render")                # the hall
+    mb.box(-15.4, 15.4, 1.6, 15.4, 7.0, 7.8, "render")
+    for k in range(9):                                                 # its arched windows
+        a = -12.0 + k * 3.0
+        mb.box(a - 0.8, a + 0.8, 15.0, 15.06, 1.2, 5.0, "glass")
+        revolve(mb, a, 15.0, [(0.8, 5.0, "glass"), (0.55, 5.55, "glass"), (0.05, 5.8, "glass")], 8)
+    mb.box(-2.0, 2.0, 15.0, 15.1, 0.0, 4.4, "door")
+    cx, cy = 0.0, -2.0
+    sides = 48
+    plan = [(cx + (5.6 if k % 2 == 0 else 5.25) * math.cos(2 * math.pi * k / sides),
+             cy + (5.6 if k % 2 == 0 else 5.25) * math.sin(2 * math.pi * k / sides)) for k in range(sides)]
+    mb.prism(plan, -0.3, 54.0, "render")                               # the fluted shaft
+    for k in range(4):                                                 # slit windows up it
+        a = math.pi / 2 * k + math.pi / 4
+        for z in range(12, 50, 6):
+            x, y = cx + 5.62 * math.cos(a), cy + 5.62 * math.sin(a)
+            mb.box(x - 0.25, x + 0.25, y - 0.25, y + 0.25, z, z + 2.6, "glass")
+    revolve(mb, cx, cy, [(5.9, 54.0, "render"), (5.9, 54.8, "render")], 24)
+    revolve(mb, cx, cy, [(5.5, 54.8, "render"), (5.5, 60.0, "render")], 24)
+    for k in range(12):                                                # the lookout's arches
+        a = 2 * math.pi * k / 12
+        x, y = cx + 5.52 * math.cos(a), cy + 5.52 * math.sin(a)
+        beam(mb, (x, y, 55.4), (x, y, 59.0), 0.5, "glass", 1.6)
+    revolve(mb, cx, cy, [(6.0, 60.0, "render"), (6.0, 61.0, "render"), (5.0, 61.4, "render"),
+                         (4.6, 63.6, "render"), (4.9, 64.2, "render"), (2.0, 64.6, "lead")], 24)
+    beacon(mb, cx, cy, 64.6)
+    return mb, (w, d, 65.3, 0.0)
+
+
+def ferry_building():
+    # The Ferry Building: a long two-storey hall in pale stone, a ground-floor
+    # arcade, arched windows over it, and the clock tower in the middle (after
+    # Seville's Giralda): clock faces, a belfry, a lantern and a small cupola.
+    w, d = 46.0, 20.0
+    mb = Builder()
+    hw, hd = w / 2, d / 2
+    mb.box(-hw, hw, -hd, hd, -0.3, 13.0, "stone")
+    mb.box(-hw - 0.3, hw + 0.3, -hd - 0.3, hd + 0.3, 13.0, 13.8, "stone")   # cornice
+    mb.extrude_x([(-hd, 13.8), (hd, 13.8), (0.0, 17.5)], -hw, hw, "roof")
+    for y, out in ((hd, 1), (-hd, -1)):
+        for k in range(15):                                             # the arcade and upper windows
+            a = -hw + 1.6 + k * (w - 3.2) / 14
+            y0, y1 = sorted((y, y + out * 0.06))
+            mb.box(a - 0.9, a + 0.9, y0, y1, 0.0, 4.4, "glass")
+            revolve(mb, a, y, [(0.9, 4.4, "glass"), (0.6, 5.1, "glass"), (0.05, 5.35, "glass")], 8)
+            mb.box(a - 0.7, a + 0.7, y0, y1, 7.0, 10.4, "glass")
+            revolve(mb, a, y, [(0.7, 10.4, "glass"), (0.45, 10.95, "glass"), (0.05, 11.1, "glass")], 8)
+        y0, y1 = sorted((y, y + out * 0.5))
+        mb.box(-hw, hw, y0, y1, 6.0, 6.5, "stone")
+    for x in (-hw, hw - 4.0):                                           # end pavilions
+        mb.box(x - 0.2, x + 4.2, -hd - 0.4, hd + 0.4, -0.3, 15.5, "stone")
+        mb.box(x - 0.4, x + 4.4, -hd - 0.6, hd + 0.6, 15.5, 16.2, "stone")
+    # The tower.
+    h = 3.6
+    mb.box(-h, h, -h, h, 13.0, 44.0, "stone")
+    for k in range(3):
+        a = -2.0 + k * 2.0
+        for z in range(18, 42, 6):
+            for y in (-h - 0.05, h + 0.05):
+                mb.box(a - 0.35, a + 0.35, y - 0.05, y + 0.05, z, z + 2.8, "glass")
+            for x in (-h - 0.05, h + 0.05):
+                mb.box(x - 0.05, x + 0.05, a - 0.35, a + 0.35, z, z + 2.8, "glass")
+    mb.box(-h - 0.3, h + 0.3, -h - 0.3, h + 0.3, 44.0, 51.0, "stone")
+    clock_face(mb, (0, 1), h + 0.3, 47.5, 2.6)
+    clock_face(mb, (0, -1), -h - 0.3, 47.5, 2.6)
+    clock_face(mb, (1, 0), h + 0.3, 47.5, 2.6)
+    clock_face(mb, (-1, 0), -h - 0.3, 47.5, 2.6)
+    mb.box(-h - 0.6, h + 0.6, -h - 0.6, h + 0.6, 51.0, 51.8, "stone")
+    mb.box(-h + 0.2, h - 0.2, -h + 0.2, h - 0.2, 51.8, 58.0, "stone")  # the belfry
+    for a in (-1.6, 1.6):
+        for y in (-h + 0.15, h - 0.15):
+            mb.box(a - 0.9, a + 0.9, y - 0.08, y + 0.08, 52.6, 57.0, "metal")
+        for x in (-h + 0.15, h - 0.15):
+            mb.box(x - 0.08, x + 0.08, a - 0.9, a + 0.9, 52.6, 57.0, "metal")
+    mb.box(-h, h, -h, h, 58.0, 58.8, "stone")
+    mb.box(-2.4, 2.4, -2.4, 2.4, 58.8, 64.0, "lamp")                    # the lantern, lit at night
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            mb.box(sx * 2.4 - 0.4, sx * 2.4 + 0.4, sy * 2.4 - 0.4, sy * 2.4 + 0.4, 58.8, 64.0, "stone")
+    mb.box(-2.8, 2.8, -2.8, 2.8, 64.0, 64.6, "stone")
+    revolve(mb, 0.0, 0.0, [(2.2, 64.6, "roof"), (2.1, 66.0, "roof"), (1.4, 67.6, "roof"), (0.3, 68.6, "roof")], 12)
+    mb.box(-0.1, 0.1, -0.1, 0.1, 68.6, 71.0, "metal")
+    return mb, (w, d, 71.0, 0.0)
+
+
+def fine_arts():
+    # The Palace of Fine Arts: an open rotunda of paired columns under a domed
+    # drum (the dome in the second colour), a curved colonnade behind it with its
+    # planter boxes on top, and the lagoon in front.
+    w = d = 46.0
+    mb = Builder()
+    cx, cy = 0.0, 2.0
+    lagoon = [(16.0 * math.cos(math.pi * k / 12), 23.0 - 9.0 * math.sin(math.pi * k / 12)) for k in range(13)]
+    mb.prism([(x, y) for x, y in lagoon][::-1] + [(-16.0, 23.0)], -0.2, 0.05, "metal")   # the lagoon (dark water)
+    mb.prism([(cx + 11.0 * math.cos(2 * math.pi * (k + 0.5) / 8), cy + 11.0 * math.sin(2 * math.pi * (k + 0.5) / 8))
+              for k in range(8)], -0.3, 1.2, "stone")                   # the platform
+    for k in range(8):                                                  # paired columns at the corners
+        a = 2 * math.pi * (k + 0.5) / 8
+        for off in (-0.09, 0.09):
+            x, y = cx + 9.6 * math.cos(a + off), cy + 9.6 * math.sin(a + off)
+            revolve(mb, x, y, [(0.55, 1.2, "stone"), (0.5, 17.0, "stone"), (0.7, 17.6, "stone")], 8)
+    octagon = lambda r: [(cx + r * math.cos(2 * math.pi * (k + 0.5) / 8), cy + r * math.sin(2 * math.pi * (k + 0.5) / 8))
+                         for k in range(8)]
+    mb.prism(octagon(10.6), 17.6, 21.0, "stone")                       # the entablature
+    for k in range(8):                                                  # arches between the columns
+        a = 2 * math.pi * k / 8
+        x, y = cx + 9.9 * math.cos(a), cy + 9.9 * math.sin(a)
+        beam(mb, (x, y, 15.0), (x, y, 17.6), 0.6, "stone", 6.0)
+    mb.prism(octagon(9.4), 21.0, 26.0, "stone")                        # the drum
+    revolve(mb, cx, cy, [(8.6, 26.0, "accent"), (8.4, 28.5, "accent"), (7.4, 32.0, "accent"), (5.4, 35.2, "accent"),
+                         (2.6, 37.4, "accent"), (0.8, 38.0, "accent")], 24)
+    revolve(mb, cx, cy, [(1.0, 38.0, "stone"), (0.8, 40.0, "stone"), (0.2, 40.6, "stone")], 8)
+    # The colonnade: an arc of columns behind, beams along the top, planter boxes.
+    arc = [math.radians(190.0 + k * 160.0 / 18) for k in range(19)]
+    tops = []
+    for a in arc:
+        x, y = cx + 19.0 * math.cos(a), cy + 19.0 * math.sin(a)
+        revolve(mb, x, y, [(0.6, -0.3, "stone"), (0.5, 11.0, "stone"), (0.7, 11.5, "stone")], 8)
+        x2, y2 = cx + 21.5 * math.cos(a), cy + 21.5 * math.sin(a)
+        revolve(mb, x2, y2, [(0.6, -0.3, "stone"), (0.5, 11.0, "stone"), (0.7, 11.5, "stone")], 8)
+        tops.append(((x, y), (x2, y2)))
+    for (p0, q0), (p1, q1) in zip(tops, tops[1:]):
+        mb.hexa([(p0[0], p0[1], 11.5), (q0[0], q0[1], 11.5), (q1[0], q1[1], 11.5), (p1[0], p1[1], 11.5),
+                 (p0[0], p0[1], 13.2), (q0[0], q0[1], 13.2), (q1[0], q1[1], 13.2), (p1[0], p1[1], 13.2)], "stone")
+    for k in (1, 5, 9, 13, 17):
+        (p, q) = tops[k]
+        x, y = (p[0] + q[0]) / 2, (p[1] + q[1]) / 2
+        mb.box(x - 1.4, x + 1.4, y - 1.4, y + 1.4, 13.2, 16.4, "stone")
+        mb.box(x - 1.6, x + 1.6, y - 1.6, y + 1.6, 16.4, 16.9, "stone")
+    return mb, (w, d, 40.6, 0.0)
+
+
+def transamerica():
+    # The Transamerica Pyramid: white storeys tapering to a spire, the two
+    # "wings" (lift and stair towers) standing out from its upper sides, a lit
+    # tip, and slanting columns round the open ground floor.
+    w = d = 40.0
+    mb = Builder()
+    z_base, z_top, h0, h1 = 9.0, 196.0, 17.0, 4.0
+
+    def hw(z):
+        return h0 - (h0 - h1) * (z - z_base) / (z_top - z_base)
+    mb.box(-13.5, 13.5, -13.5, 13.5, -0.3, z_base, "office")           # the lobby
+    for side in range(4):
+        c, s = (1, 0, -1, 0)[side], (0, 1, 0, -1)[side]
+        for k in range(7):
+            a = -15.0 + k * 5.0
+            p0 = (c * 16.6 + -s * a, s * 16.6 + c * a, -0.3)
+            p1 = (c * h0 + -s * a * h0 / 16.6, s * h0 + c * a * h0 / 16.6, z_base)
+            beam(mb, p0, p1, 0.9, "render")
+    z = z_base
+    while z < z_top - 0.1:
+        z1 = min(z + 3.8, z_top)
+        frustum(mb, 0.0, 0.0, hw(z), hw(z), hw(z + 1.1), hw(z + 1.1), z, z + 1.1, "render")
+        frustum(mb, 0.0, 0.0, hw(z + 1.1) - 0.25, hw(z + 1.1) - 0.25, hw(z1) - 0.25, hw(z1) - 0.25, z + 1.1, z1, "office")
+        z = z1
+    for sx in (-1, 1):                                                  # the wings
+        x0, x1 = sorted((sx * 3.0, sx * (hw(100.0) + 0.6)))
+        mb.box(x0, x1, -3.4, 3.4, 100.0, 202.0, "render")
+        mb.extrude_y([(x0, 202.0), (x1, 202.0), (sx * 3.0, 208.0)] if sx < 0 else [(x0, 202.0), (x1, 202.0), (x0, 208.0)],
+                     -3.4, 3.4, "render")
+    frustum(mb, 0.0, 0.0, h1, h1, 0.8, 0.8, z_top, 232.0, "render")   # the spire
+    frustum(mb, 0.0, 0.0, 0.8, 0.8, 0.3, 0.3, 232.0, 236.0, "lamp")
+    mb.box(-0.12, 0.12, -0.12, 0.12, 236.0, 240.0, "metal")
+    beacon(mb, 0.0, 0.0, 240.0)
+    return mb, (w, d, 240.7, 0.0)
+
+
+def salesforce_tower():
+    # Salesforce Tower: a rounded square of pale glass striped by white sunshades,
+    # curving in near the top to an open lattice crown with a lit screen inside.
+    w = d = 40.0
+    mb = Builder()
+    top_body, crown_top = 268.0, 296.0
+
+    def half(z):
+        if z < 190.0:
+            return 17.0
+        t = (z - 190.0) / (crown_top - 190.0)
+        return 17.0 - 5.0 * t * t
+
+    def ring(z, grow=0.0):
+        h = half(z) + grow
+        return rounded_square(h, h, h * 0.36, z)
+    zs = [0.0, 12.0] + [12.0 + k * 8.0 for k in range(1, 33) if 12.0 + k * 8.0 < top_body] + [top_body]
+    loft(mb, [ring(-0.3, -1.0), ring(12.0, -1.0)], "office")             # the lobby, set back
+    loft(mb, [ring(z) for z in zs[1:]], "curtain")
+    z = 16.2
+    while z < top_body:                                                 # the sunshades, a band each storey
+        loft(mb, [ring(z, 0.25), ring(z + 0.5, 0.25)], "frame")
+        z += 4.2
+    loft(mb, [ring(top_body, 0.3), ring(top_body + 1.0, 0.3)], "frame")
+    # The crown: an open lattice of white fins and rings round a glowing screen.
+    loft(mb, [ring(top_body + 1.0, -2.2), ring(crown_top - 3.0, -2.2)], "lamp")
+    pts0, pts1 = ring(top_body + 1.0), ring(crown_top)
+    for k in range(0, len(pts0), 2):
+        beam(mb, pts0[k], pts1[k], 0.45, "frame")
+    for zz in (top_body + 7.0, top_body + 14.0, top_body + 21.0, crown_top):
+        loft(mb, [ring(zz - 0.5), ring(zz)], "frame", caps=False)
+    loft(mb, [ring(crown_top - 3.0, -2.2), ring(crown_top - 2.6, -2.2)], "metal")
+    beacon(mb, 0.0, 0.0, crown_top - 2.6, 2.0)
+    return mb, (w, d, crown_top + 0.1, 0.0)
+
+
 # ------------------------------------------------- company projects (tech layer)
 
 def launch_tower():
@@ -2266,6 +2549,8 @@ MODELS = {
     "clubhouse": clubhouse, "museum_wing": museum_wing, "stand": stand, "water_tower": water_tower,
     "eiffel": eiffel, "big_ben": big_ben, "empire_state": empire_state, "liberty": liberty,
     "opera_house": opera_house, "taj_mahal": taj_mahal, "colosseum": colosseum, "great_pyramid": great_pyramid,
+    "painted_lady": painted_lady, "coit_tower": coit_tower, "ferry_building": ferry_building,
+    "fine_arts": fine_arts, "transamerica": transamerica, "salesforce_tower": salesforce_tower,
     "strip_mall": strip_mall, "strip_mall_b": lambda: strip_mall("b"),
     "glass_office2": lambda: glass_office(2), "glass_office3": lambda: glass_office(3),
     "ranch": ranch, "mission": mission, "ca_villa": ca_villa, "ca_modern": ca_modern,

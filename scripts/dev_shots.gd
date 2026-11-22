@@ -253,16 +253,14 @@ func _build_town() -> void:
 	_later("stadium", Vector2i(59, 68))
 	_later("nuclear", Vector2i(83, 73))
 	_later("airport", Vector2i(60, 102), Vector2i(84, 108))
-	# Landmarks: two in the civic quarter, three in the seafront park, two by the
-	# sea and the skyscraper in the CBD's office core.
-	_later("big_ben", Vector2i(71, 53))
-	_later("colosseum", Vector2i(71, 50))
-	_later("great_pyramid", Vector2i(38, 80))
-	_later("taj_mahal", Vector2i(38, 74))
-	_later("eiffel", Vector2i(38, 62))
-	_later("empire_state", Vector2i(50, 64))
-	_later("liberty", Vector2i(36, 70), Vector2i(36, 70), true)
-	_later("opera_house", Vector2i(36, 60), Vector2i(36, 60), true)
+	# San Francisco's landmarks: two in the civic quarter, two in the seafront park,
+	# the Ferry Building by the sea and Salesforce Tower in the CBD's office core.
+	_later("painted_ladies", Vector2i(71, 53))
+	_later("coit_tower", Vector2i(71, 50))
+	_later("fine_arts", Vector2i(38, 74))
+	_later("transamerica", Vector2i(38, 62))
+	_later("salesforce_tower", Vector2i(50, 64))
+	_later("ferry_building", Vector2i(36, 70), Vector2i(36, 70), true)
 
 
 func _build(id: String, from: Vector2i, to: Vector2i = Vector2i(-1, -1)) -> int:
@@ -596,6 +594,10 @@ func _shot_list() -> Array[Dictionary]:
 	# south-west, with the afternoon sun behind); dist in metres.
 	var hp := Vector2(_harbour)
 	var mp := Vector2(_marina)
+	var ferry := Vector2(108, 86)           # (wherever the Ferry Building found the shore)
+	for i: int in sim.tiles.size():
+		if sim.tiles[i] == Simulation.Tile.FERRY_BUILDING:
+			ferry = Vector2(i % sim.w, i / sim.w)
 	var low_pitch: float = rad_to_deg(CameraRig.MIN_PITCH)
 	return [
 		{"name": "01_overview", "at": Vector2(60, 66), "yaw": -40.0, "pitch": 40.0, "dist": 3500.0},
@@ -708,6 +710,7 @@ func _shot_list() -> Array[Dictionary]:
 		# Landmarks: the seafront (Eiffel Tower, Taj Mahal, Great Pyramid and the two by
 		# the sea), the civic quarter (Big Ben, Colosseum), the skyline with the Empire State.
 		{"name": "67_landmarks_seafront", "at": Vector2(39, 70), "yaw": -70.0, "pitch": 28.0, "dist": 1100.0},
+		{"name": "67b_ferry_building", "at": ferry, "yaw": -50.0, "pitch": 24.0, "dist": 380.0},
 		{"name": "68_landmarks_civic", "at": Vector2(70, 51.5), "yaw": -30.0, "pitch": 30.0, "dist": 330.0},
 		{"name": "69_landmarks_skyline", "at": Vector2(47, 64), "yaw": -20.0, "pitch": 16.0, "dist": 900.0},
 		{"name": "70_landmarks_night", "at": Vector2(42, 66), "yaw": -60.0, "pitch": 22.0, "dist": 1000.0, "time": NIGHT},

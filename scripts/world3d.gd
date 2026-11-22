@@ -54,6 +54,9 @@ const MODEL_DIMS := {
 	# Landmarks (tools/make_buildings.py), placed at their built size.
 	"eiffel": Vector4(44.0, 44.0, 139.7, 0.0), "big_ben": Vector4(36.0, 16.0, 98.0, 0.0),
 	"empire_state": Vector4(40.0, 28.0, 196.7, 0.0), "liberty": Vector4(34.0, 34.0, 85.6, 0.0),
+	"painted_lady": Vector4(7.6, 14.0, 16.0, 0.0), "coit_tower": Vector4(34.0, 34.0, 65.3, 0.0),
+	"ferry_building": Vector4(46.0, 20.0, 71.0, 0.0), "fine_arts": Vector4(46.0, 46.0, 40.6, 0.0),
+	"transamerica": Vector4(40.0, 40.0, 240.7, 0.0), "salesforce_tower": Vector4(40.0, 40.0, 296.1, 0.0),
 	"opera_house": Vector4(46.0, 38.0, 24.4, 0.0), "taj_mahal": Vector4(46.0, 46.0, 39.2, 0.0),
 	"colosseum": Vector4(46.0, 38.0, 19.6, 0.0), "great_pyramid": Vector4(46.0, 46.0, 29.8, 0.0),
 }
@@ -81,7 +84,8 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	WOODLAND, OFFICES, POLICE_OFFICE, FIRE_SMALL, CLINIC, AIRPORT,
 	BIG_BEN, COLOSSEUM, GREAT_PYRAMID, LIBERTY, TAJ_MAHAL, OPERA_HOUSE, EIFFEL, EMPIRE_STATE,
 	INCINERATOR, DATA_CENTRE, GIGAFACTORY, TECH_CAMPUS, LAUNCH_SITE, AI_DATA_CENTRE,
-	COLLEGE, UNIVERSITY, RESEARCH_PARK }   # same order as simulation.gd
+	COLLEGE, UNIVERSITY, RESEARCH_PARK,
+	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER }   # same order as simulation.gd
 
 const PADDING := 40            # tiles of scenery drawn beyond each map edge
 const ROAD_HALF_WIDTH := 6.0   # metres (tarmac plus pavements)
@@ -1637,9 +1641,11 @@ func _plan_lots() -> void:
 					kind = LOT_YARD
 				Tile.COLLEGE:
 					kind = LOT_CIVIC
-				Tile.UNIVERSITY, Tile.RESEARCH_PARK:
+				Tile.UNIVERSITY, Tile.RESEARCH_PARK, Tile.PAINTED_LADIES, Tile.COIT_TOWER, Tile.FINE_ARTS:
 					kind = LOT_PARK
 					detail = PARK_LAWN
+				Tile.FERRY_BUILDING, Tile.TRANSAMERICA, Tile.SALESFORCE_TOWER:
+					kind = LOT_CIVIC
 				Tile.TECH_CAMPUS:
 					# Landscaped lawns once it's open; bare concrete while it's being built.
 					var dk: int = sim._deal_at.get(i, -1)
@@ -1650,7 +1656,7 @@ func _plan_lots() -> void:
 	# Parks: each tile picks a layout, knowing which of its sides join more park.
 	for i in tiles.size():
 		if _lot_kind[i] == LOT_PARK and tiles[i] != Tile.TECH_CAMPUS and tiles[i] != Tile.UNIVERSITY \
-				and tiles[i] != Tile.RESEARCH_PARK:   # (campuses are all lawn)
+				and tiles[i] != Tile.RESEARCH_PARK and not sim.is_landmark(tiles[i]):   # (campuses are all lawn)
 			_lot_detail[i] = _park_layout(i)
 
 
@@ -5168,7 +5174,8 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 		Tile.AIRPORT:
 			_plan_airport(i, rng, wall_list, roof_list, chimney_list)
 		Tile.BIG_BEN, Tile.COLOSSEUM, Tile.GREAT_PYRAMID, Tile.LIBERTY, Tile.TAJ_MAHAL, Tile.OPERA_HOUSE, \
-				Tile.EIFFEL, Tile.EMPIRE_STATE:
+				Tile.EIFFEL, Tile.EMPIRE_STATE, Tile.PAINTED_LADIES, Tile.COIT_TOWER, Tile.FERRY_BUILDING, \
+				Tile.FINE_ARTS, Tile.TRANSAMERICA, Tile.SALESFORCE_TOWER:
 			_plan_landmark(i, t, front, wall_list, roof_list)
 		Tile.GOLF:
 			# Fairway (the ground colour), a green with its flag, bunkers, a tee and
@@ -5331,7 +5338,17 @@ const LANDMARKS := {
 	Tile.OPERA_HOUSE: ["opera_house", Color(0.70, 0.56, 0.48), Color(0.95, 0.94, 0.91), 6.0],
 	Tile.EIFFEL: ["eiffel", Color(0.44, 0.35, 0.27), Color(0.30, 0.25, 0.20), 3.0],
 	Tile.EMPIRE_STATE: ["empire_state", Color(0.74, 0.72, 0.67), Color(0.30, 0.32, 0.35), 10.0],
+	Tile.PAINTED_LADIES: ["painted_lady", Color(0.80, 0.78, 0.86), Color(0.45, 0.20, 0.30), 3.0],
+	Tile.COIT_TOWER: ["coit_tower", Color(0.90, 0.88, 0.82), Color(0.60, 0.58, 0.54), 8.0],
+	Tile.FERRY_BUILDING: ["ferry_building", Color(0.86, 0.84, 0.78), Color(0.38, 0.42, 0.44), 12.0],
+	Tile.FINE_ARTS: ["fine_arts", Color(0.84, 0.70, 0.54), Color(0.72, 0.42, 0.30), 2.0],
+	Tile.TRANSAMERICA: ["transamerica", Color(0.92, 0.91, 0.88), Color(0.60, 0.60, 0.60), 5.0],
+	Tile.SALESFORCE_TOWER: ["salesforce_tower", Color(0.74, 0.80, 0.86), Color(0.92, 0.92, 0.90), 5.0],
 }
+# The Painted Ladies: each house its own colour [walls, trim and gable].
+const PAINTED_LADIES := [[Color(0.84, 0.78, 0.90), Color(0.42, 0.22, 0.40)], [Color(0.95, 0.86, 0.62), Color(0.30, 0.42, 0.55)],
+	[Color(0.70, 0.84, 0.80), Color(0.55, 0.22, 0.20)], [Color(0.96, 0.80, 0.78), Color(0.25, 0.35, 0.30)],
+	[Color(0.74, 0.82, 0.92), Color(0.62, 0.40, 0.18)], [Color(0.92, 0.92, 0.86), Color(0.30, 0.40, 0.58)]]
 
 
 func _plan_landmark(i: int, t: int, front: Vector2i, wall_list: Array, roof_list: Array) -> void:
@@ -5343,6 +5360,22 @@ func _plan_landmark(i: int, t: int, front: Vector2i, wall_list: Array, roof_list
 		var sea := _sea_side(i)
 		if sea != Vector2i.ZERO:
 			facing = sea
+	if t == Tile.PAINTED_LADIES:
+		# Postcard Row: six houses along the street, Alamo Square's lawn and trees behind.
+		var rng := RandomNumberGenerator.new()
+		rng.seed = i * 3301 + 7
+		for k in 6:
+			var along := -19.0 + k * 7.6
+			var house := _place(i, front, along, look[3], dims.x, dims.y)
+			var paint: Array = PAINTED_LADIES[k]
+			if _models.has(model_name):
+				_add_model(model_name, house, dims.x, dims.y, dims.z, paint[0], paint[1])
+			else:
+				_add_block(house, dims.x, dims.y, 11.4, paint[0], STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
+		for k in 7:
+			_plant(i, front, rng.randf_range(-21.0, 21.0), rng.randf_range(23.0, 46.0), rng.randf_range(8.0, 13.0),
+				TreeKind.BROADLEAF if k % 3 != 0 else TreeKind.PALM, rng)
+		return
 	var spot := _place(i, facing, 0.0, look[3], dims.x, dims.y)
 	if _models.has(model_name):
 		_add_model(model_name, spot, dims.x, dims.y, dims.z + dims.w, look[1], look[2])

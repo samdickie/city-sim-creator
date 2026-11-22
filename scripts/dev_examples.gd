@@ -203,7 +203,7 @@ func _build_harbour_town() -> void:
 		_build("park", r[0], r[1])
 	_later("library", Vector2i(59, 50))
 	_later("town_hall", Vector2i(62, 50))
-	_later("big_ben", Vector2i(65, 50))
+	_later("painted_ladies", Vector2i(65, 50))
 	_later("bus_depot", Vector2i(53, 44))
 	_later("harbour", _harbour, _harbour, true)
 	_later("gas", Vector2i(86, 55))
