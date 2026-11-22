@@ -32,6 +32,7 @@ MATERIALS = {
     "curtain": (0.20, 0.32, 0.42), "display": (0.12, 0.10, 0.08), "beacon": (0.8, 0.05, 0.03),
     "lamp": (0.85, 0.85, 0.80), "office": (0.05, 0.06, 0.08),
     "green": (0.20, 0.30, 0.10),   # a roof terrace: sedum or gravel
+    "cool": (0.75, 0.75, 0.72),    # a pale flat roof (California's "cool roofs")
 }
 MAT_INDEX = {name: n for n, name in enumerate(MATERIALS)}
 
@@ -492,6 +493,358 @@ def glass_office(storeys):
     for x in (-4.7, 4.7):
         mb.box(x - 0.12, x + 0.12, d / 2 + 3.2, d / 2 + 3.45, 0.0, 3.2, "frame")
     return mb, (w, d, top + 2.4, 0.0)
+
+
+# ------------------------------------- Californian medium and high density
+# Stucco ("render", the wall colour) under clay tile ("roof", the roof colour), in
+# the same declared sizes as the Scottish terraces, tenements, shops with flats and
+# classical blocks, so the game fits them to the same plots.
+
+def face_prism(mb, f, poly, b0, b1, mat):
+    # A flat shape drawn on a wall face [(along, z), ...], b0..b1 out from it.
+    n = len(poly)
+    pts = [f.point(a, b0, z) for a, z in poly] + [f.point(a, b1, z) for a, z in poly]
+    faces = [list(range(n))[::-1], list(range(n, 2 * n))]
+    for k in range(n):
+        j = (k + 1) % n
+        faces.append([k, j, n + j, n + k])
+    mb._add(pts, faces, mat)
+
+
+def arch(mb, f, a, z0, w, h, mat="glass"):
+    """A round-headed opening: the opening, then stucco filling its top corners."""
+    r = w / 2
+    hs = z0 + h - r
+    f.slab(mb, a - r, a + r, z0, z0 + h, -0.03, 0.01, mat)
+    for side in (-1, 1):
+        poly = [(a + side * r, hs), (a + side * r, hs + r), (a, hs + r)]
+        for k in range(1, 6):
+            t = math.pi / 2 * k / 6
+            poly.append((a + side * r * math.sin(t), hs + r * math.cos(t)))
+        face_prism(mb, f, poly, 0.0, 0.04, "render")
+
+
+def tile_hip(mb, x0, x1, y0, y1, z, rise, over=0.5, mat="roof"):
+    """A low hipped roof over any rectangle: clay tile in the game's roof colour."""
+    hx, hy = (x1 - x0) / 2 + over, (y1 - y0) / 2 + over
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    z0, top = z - 0.12, z + rise
+    if hx >= hy:
+        pts = [(cx - hx, cy - hy, z0), (cx + hx, cy - hy, z0), (cx + hx, cy + hy, z0), (cx - hx, cy + hy, z0),
+               (cx - hx + hy, cy, top), (cx + hx - hy, cy, top)]
+        mb._add(pts, [[0, 3, 2, 1], [3, 4, 5, 2], [0, 1, 5, 4], [0, 4, 3], [1, 2, 5]], mat)
+    else:
+        pts = [(cx - hx, cy - hy, z0), (cx + hx, cy - hy, z0), (cx + hx, cy + hy, z0), (cx - hx, cy + hy, z0),
+               (cx, cy - hy + hx, top), (cx, cy + hy - hx, top)]
+        mb._add(pts, [[0, 3, 2, 1], [0, 1, 4], [1, 2, 5, 4], [2, 3, 5], [3, 0, 4, 5]], mat)
+
+
+def pent(mb, f, a0, a1, z, out, drop=0.4, mat="roof"):
+    """A short sloping strip of tiles along a wall (over shopfronts, on parapets)."""
+    t = 0.12
+    p = [f.point(a0, 0.0, z), f.point(a1, 0.0, z), f.point(a1, out, z - drop), f.point(a0, out, z - drop)]
+    mb.hexa(p + [(q[0], q[1], q[2] + t) for q in p], mat)
+
+
+def rail(mb, f, a0, a1, z, out, h=1.0, mat="metal"):
+    """An iron railing: a top rail and thin uprights."""
+    f.slab(mb, a0, a1, z + h - 0.05, z + h, out - 0.06, out, mat)
+    n = max(2, int((a1 - a0) / 0.3))
+    for k in range(n + 1):
+        a = a0 + (a1 - a0) * k / n
+        f.slab(mb, a - 0.025, a + 0.025, z, z + h, out - 0.05, out - 0.01, mat)
+
+
+def balcony(mb, f, a, z, w, out=1.2, glass_rail=False):
+    f.slab(mb, a - w / 2, a + w / 2, z - 0.22, z, 0.0, out, "render")
+    if glass_rail:
+        f.slab(mb, a - w / 2, a + w / 2, z, z + 1.05, out - 0.06, out, "glass")
+        f.slab(mb, a - w / 2, a + w / 2, z + 1.0, z + 1.08, out - 0.08, out + 0.02, "metal")
+    else:
+        rail(mb, f, a - w / 2, a + w / 2, z, out)
+
+
+def slider(mb, f, a, z, w, h=2.25):
+    """A sliding glass door in a dark frame."""
+    f.slab(mb, a - w / 2, a + w / 2, z, z + h, -0.02, 0.02, "glass")
+    for a0, a1, z0, z1 in ((a - w / 2, a - w / 2 + 0.07, z, z + h), (a + w / 2 - 0.07, a + w / 2, z, z + h),
+                           (a - w / 2, a + w / 2, z + h - 0.07, z + h), (a - 0.04, a + 0.04, z, z + h)):
+        f.slab(mb, a0, a1, z0, z1, 0.0, 0.05, "metal")
+
+
+def dark_window(mb, f, a, z, w, h):
+    """A modern window: glass in a thin dark frame."""
+    f.slab(mb, a - w / 2, a + w / 2, z, z + h, -0.02, 0.02, "glass")
+    for a0, a1, z0, z1 in ((a - w / 2, a - w / 2 + 0.06, z, z + h), (a + w / 2 - 0.06, a + w / 2, z, z + h),
+                           (a - w / 2, a + w / 2, z, z + 0.06), (a - w / 2, a + w / 2, z + h - 0.06, z + h)):
+        f.slab(mb, a0, a1, z0, z1, 0.0, 0.05, "metal")
+
+
+def flat_top(mb, x0, x1, y0, y1, z, edge=0.25, up=0.35, over=0.0, mat="frame"):
+    """A flat roof: dark membrane inside a thin edge (white trim, or the wall colour)."""
+    x0, x1, y0, y1 = x0 - over, x1 + over, y0 - over, y1 + over
+    mb.box(x0, x1, y0, y1, z - 0.2, z, mat)
+    for bx0, bx1, by0, by1 in ((x0, x1, y1 - edge, y1), (x0, x1, y0, y0 + edge),
+                               (x0, x0 + edge, y0, y1), (x1 - edge, x1, y0, y1)):
+        mb.box(bx0, bx1, by0, by1, z, z + up, mat)
+    mb.box(x0 + edge, x1 - edge, y0 + edge, y1 - edge, z, z + 0.05, "cool")
+
+
+def awning_on(mb, f, a0, a1, z, out=1.3):
+    p0, p1 = f.point(a0, 0.15, z), f.point(a1, 0.15, z)
+    p2, p3 = f.point(a1, out, z - 0.6), f.point(a0, out, z - 0.6)
+    t = 0.06
+    mb.hexa([p0, p1, p2, p3] + [(q[0], q[1], q[2] + t) for q in (p0, p1, p2, p3)], "awning")
+
+
+def tile_chimney(mb, x, y, z0, z1):
+    """A stucco chimney with a little tiled cap."""
+    mb.box(x - 0.45, x + 0.45, y - 0.45, y + 0.45, z0, z1, "render")
+    pyramid(mb, x, y, 0.6, z1, z1 + 0.45, "roof")
+
+
+def ca_townhouse(variant="a"):
+    # Three joined two-storey townhouses, 5 m each. a: Spanish, under one low
+    # clay-tile roof with deep eaves, arched doorways, tiled hoods and iron
+    # balconettes, the middle house stepped forward. b: modern, three flat-roofed
+    # boxes (the middle one taller), big windows in dark frames, a coloured
+    # panel by each door.
+    w, d, h, rise = 15.0, 8.5, 6.2, 3.2
+    mb = Builder()
+    b = back(w, d)
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.2, 0.12, "stone")
+    for k in range(3):
+        cx = -5.0 + k * 5.0
+        x0, x1 = cx - 2.5, cx + 2.5
+        if variant == "b":
+            top = 7.0 if k == 1 else 6.2
+            mb.box(x0, x1, -d / 2, d / 2, 0.0, top, "render")
+            flat_top(mb, x0, x1, -d / 2, d / 2, top, edge=0.2, up=0.25, over=0.12)
+            f = front(w, d)
+            f.slab(mb, cx + 0.6, cx + 2.3, 0.0, top - 0.6, 0.0, 0.06, "door")        # coloured panel
+            f.slab(mb, cx + 1.0, cx + 1.95, 0.0, 2.3, 0.06, 0.09, "metal")           # the door
+            f.slab(mb, cx + 0.5, cx + 2.4, 2.6, 2.75, 0.0, 1.0, "frame")             # canopy
+            dark_window(mb, f, cx - 0.9, 0.5, 2.6, 2.0)
+            dark_window(mb, f, cx - 0.4, 3.4, 3.6, top - 4.2)
+            dark_window(mb, b, -cx, 0.3, 3.6, 2.2)
+            dark_window(mb, b, -cx, 3.6, 3.0, 1.6)
+        else:
+            y1 = d / 2 + (0.45 if k == 1 else 0.0)
+            mb.box(x0, x1, -d / 2, y1, 0.0, h, "render")
+            f = Face((0, y1, 0), (1, 0, 0), (0, 1, 0))
+            arch(mb, f, cx + 1.4, 0.0, 1.2, 2.7, "door")
+            ca_window(mb, f, cx - 1.0, 0.8, 1.6, 1.4)
+            pent(mb, f, cx - 2.0, cx, 2.6, 0.5, 0.25)
+            ca_window(mb, f, cx - 1.0, 3.6, 1.2, 1.5)
+            f.slab(mb, cx - 1.7, cx - 0.3, 3.45, 3.6, 0.0, 0.4, "render")
+            rail(mb, f, cx - 1.7, cx - 0.3, 3.6, 0.4, h=0.8)
+            ca_window(mb, f, cx + 1.4, 3.8, 0.8, 1.2)
+            ca_window(mb, b, -cx + 1.0, 0.9, 1.4, 1.3)
+            ca_window(mb, b, -cx - 1.2, 3.7, 1.0, 1.2)
+    if variant != "b":
+        tile_hip(mb, -w / 2, w / 2, -d / 2, d / 2, h, 1.7, over=0.6)
+        tile_chimney(mb, w / 2 - 1.0, -0.8, h, h + 2.5)
+    return mb, (w, d, h, rise)
+
+
+def ca_apartments(storeys, variant="a"):
+    # Garden apartments round a courtyard. a: Spanish, stucco under a low tile
+    # roof, a stair tower with an arched entry and its own tiled top, balconies
+    # with iron railings. b: mid-century, flat roof with a deep white edge, an
+    # open walkway along each upper floor, coloured panels (the roof colour)
+    # and parking tucked under the ground floor.
+    w, d, rise = 22.0, 13.0, 4.8
+    ground, storey = 3.4, 3.0
+    h = ground + (storeys - 1) * storey + 0.5
+    mb = Builder()
+    f, b = front(w, d), back(w, d)
+    units = (-8.25, -2.75, 2.75, 8.25)
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, -0.2, 0.25, "stone")
+    if variant == "b":
+        y1 = d / 2 - 1.6                                    # the face behind the walkways
+        mb.box(-w / 2, w / 2, -d / 2, y1, 0.0, h, "render")
+        mb.box(-w / 2, w / 2, y1, d / 2, ground - 0.3, h, "render")    # upper floors over the car port
+        fb = Face((0, y1, 0), (1, 0, 0), (0, 1, 0))
+        fb.slab(mb, -w / 2 + 0.3, w / 2 - 0.3, 0.0, ground - 0.3, -0.05, 0.0, "metal")    # car port
+        for k in range(6):
+            x = -w / 2 + 0.3 + k * (w - 0.6) / 5
+            mb.box(x - 0.2, x + 0.2, d / 2 - 0.4, d / 2, 0.0, ground - 0.3, "render")    # posts
+        mb.box(-w / 2, w / 2, y1, d / 2, ground - 0.3, ground + 0.05, "render")
+        # Each upper floor: doors, windows and coloured panels behind an open walkway.
+        for fl in range(1, storeys):
+            z = ground + (fl - 1) * storey
+            ff = Face((0, d / 2, 0), (1, 0, 0), (0, 1, 0))
+            for cx in units:
+                ff.slab(mb, cx - 2.6, cx - 0.9, z + 0.2, z + 2.6, 0.0, 0.05, "accent")
+                ff.slab(mb, cx - 0.7, cx + 0.2, z + 0.05, z + 2.25, 0.0, 0.05, "door")
+                dark_window(mb, ff, cx + 1.5, z + 0.9, 2.0, 1.3)
+            ff.slab(mb, -w / 2, w / 2, z - 0.2, z + 0.05, 0.0, 1.3, "frame")         # walkway
+            rail(mb, ff, -w / 2, w / 2, z + 0.05, 1.3, h=1.0)
+        beam(mb, (w / 2 + 0.7, d / 2 - 3.5, 0.0), (w / 2 + 0.7, d / 2 + 0.3, ground), 0.9, "frame")   # stair
+        flat_top(mb, -w / 2, w / 2, -d / 2, d / 2, h, edge=0.9, up=0.3, over=0.6)
+        for fl in range(storeys):
+            z = 0.9 if fl == 0 else ground + (fl - 1) * storey + 0.8
+            for a in (-9.0, -5.0, -1.5, 1.5, 5.0, 9.0):
+                dark_window(mb, b, a, z, 1.4, 1.3)
+        return mb, (w, d, h, rise)
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0.0, h, "render")
+    # The stair tower: forward of the front, rising above the eaves.
+    tw = 3.6
+    ty0, ty1 = d / 2 - 1.0, d / 2 + 0.8
+    mb.box(-tw / 2, tw / 2, ty0, ty1, 0.0, h + 1.8, "render")
+    ft = Face((0, ty1, 0), (1, 0, 0), (0, 1, 0))
+    arch(mb, ft, 0.0, 0.0, 2.0, 3.0, "glass")
+    for fl in range(1, storeys):
+        arch(mb, ft, 0.0, ground + (fl - 1) * storey + 0.9, 0.8, 1.4, "glass")
+    tile_hip(mb, -tw / 2, tw / 2, ty0, ty1, h + 1.8, 1.4, over=0.35)
+    for cx in units:
+        ca_window(mb, f, cx - 0.9, 0.9, 1.6, 1.5)
+        ca_window(mb, f, cx + 1.4, 0.9, 0.9, 1.5)
+        pent(mb, f, cx - 1.9, cx + 0.1, 2.75, 0.5, 0.25)
+        for fl in range(1, storeys):
+            z = ground + (fl - 1) * storey
+            slider(mb, f, cx - 0.7, z + 0.1, 2.0)
+            balcony(mb, f, cx - 0.7, z + 0.1, 2.8, out=1.1)
+            ca_window(mb, f, cx + 1.6, z + 0.8, 0.9, 1.4)
+    for fl in range(storeys):
+        z = 0.9 if fl == 0 else ground + (fl - 1) * storey + 0.8
+        for a in (-9.0, -5.0, -1.5, 1.5, 5.0, 9.0):
+            ca_window(mb, b, a, z, 1.0, 1.4)
+    tile_hip(mb, -w / 2, w / 2, -d / 2, d / 2, h, 2.2, over=0.7)
+    tile_chimney(mb, -w / 2 + 2.0, -2.0, h, h + 2.8)
+    return mb, (w, d, h, rise)
+
+
+def ca_mainstreet(storeys, variant="a"):
+    # Shops with flats above on a Californian main street. a: Spanish revival,
+    # arched shopfronts under a tiled hood, deep windows with iron balconettes, a
+    # tiled cap on the parapet and (from three storeys) a little corner tower.
+    # b: modern mixed use, an all-glass ground floor under a steel canopy, floors
+    # of big windows with glass balconies and coloured panels (the roof colour).
+    w, d = 23.0, 18.0
+    ground, storey = 3.8, 3.1
+    h = ground + (storeys - 1) * storey + 0.4
+    mb = Builder()
+    f, b = front(w, d), back(w, d)
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0, h, "render")
+    unit = w / 3
+    if variant == "b":
+        f.slab(mb, -w / 2 + 0.2, w / 2 - 0.2, 0.0, ground - 0.4, -0.03, 0.02, "display")
+        for k in range(4):
+            a = -w / 2 + 0.2 + k * (w - 0.4) / 3
+            f.slab(mb, a - 0.2, a + 0.2, 0.0, ground, 0.0, 0.15, "render")
+        for k in range(3):
+            f.slab(mb, -w / 2 + k * unit + unit / 2 - 0.6, -w / 2 + k * unit + unit / 2 + 0.6, 0.0, 2.4,
+                   0.02, 0.05, "door")
+        f.slab(mb, -w / 2 - 0.1, w / 2 + 0.1, ground - 0.4, ground - 0.15, 0.0, 1.6, "metal")      # canopy
+        f.slab(mb, -w / 2, w / 2, ground - 0.15, ground + 0.5, 0.0, 0.1, "fascia")                 # sign band
+        for fl in range(1, storeys):
+            z = ground + (fl - 1) * storey + 0.6
+            f.slab(mb, -w / 2 - 0.05, w / 2 + 0.05, z - 0.35, z - 0.1, 0.0, 0.12, "frame")
+            for k in range(4):
+                a = -w / 2 + (k + 0.5) * w / 4
+                if k % 2 == fl % 2:
+                    f.slab(mb, a - 2.6, a - 1.4, z - 0.1, z + 2.4, 0.0, 0.05, "accent")
+                    dark_window(mb, f, a + 0.6, z + 0.1, 3.4, 2.2)
+                    balcony(mb, f, a + 0.6, z - 0.1, 3.6, out=1.0, glass_rail=True)
+                else:
+                    dark_window(mb, f, a, z + 0.4, 4.0, 1.7)
+            for k in range(5):
+                dark_window(mb, b, -w / 2 + (k + 0.5) * w / 5, z + 0.3, 2.0, 1.6)
+        flat_top(mb, -w / 2, w / 2, -d / 2, d / 2, h, edge=0.3, up=0.7, over=0.1)
+        roof_clutter(mb, w, d, h + 0.05)
+        return mb, (w, d, h + 0.7, 0.0)
+    for k in range(3):
+        c = -w / 2 + (k + 0.5) * unit
+        arch(mb, f, c, 0.0, unit - 1.6, ground - 0.2, "display")
+        f.slab(mb, c - 0.6, c + 0.6, 0.0, 2.4, 0.01, 0.05, "door")
+        if k != 1:
+            awning_on(mb, f, c - unit / 2 + 1.0, c + unit / 2 - 1.0, ground - 1.0)
+    pent(mb, f, -w / 2, w / 2, ground + 0.35, 0.8, 0.35)
+    for fl in range(1, storeys):
+        z = ground + (fl - 1) * storey + 0.7
+        for k in range(6):
+            a = -w / 2 + (k + 0.5) * w / 6
+            ca_window(mb, f, a, z, 1.2, 1.7)
+            if fl == 1 and k in (1, 4):
+                f.slab(mb, a - 0.8, a + 0.8, z - 0.15, z, 0.0, 0.45, "render")
+                rail(mb, f, a - 0.8, a + 0.8, z, 0.45, h=0.9)
+        for k in range(5):
+            ca_window(mb, b, -w / 2 + (k + 0.5) * w / 5, z, 1.0, 1.5)
+    # Parapet with a tiled cap along the front, a flat roof behind.
+    flat_top(mb, -w / 2, w / 2, -d / 2, d / 2, h, edge=0.3, up=0.7, mat="render")
+    pent(mb, f, -w / 2 - 0.1, w / 2 + 0.1, h + 0.85, 0.55, 0.3)
+    roof_clutter(mb, w, d, h + 0.05)
+    if storeys >= 3:
+        x0, x1 = w / 2 - 4.2, w / 2
+        mb.box(x0, x1, d / 2 - 4.2, d / 2, h, h + 3.2, "render")
+        ft = Face((0, d / 2, 0), (1, 0, 0), (0, 1, 0))
+        arch(mb, ft, (x0 + x1) / 2, h + 0.8, 1.6, 2.0, "glass")
+        tile_hip(mb, x0, x1, d / 2 - 4.2, d / 2, h + 3.2, 1.6, over=0.35)
+    return mb, (w, d, h + 0.7, 0.0)
+
+
+def ca_classical(storeys, kind):
+    # The grand block in Mediterranean revival (offices, mansion flats, big shops,
+    # civic buildings): stucco, an arcade of round arches on the ground floor (or
+    # arched shopfronts), deep-set windows, iron balconies on flats ("bays"), a
+    # band under deep eaves and a low clay-tile hipped roof; a belvedere on the
+    # taller ones.
+    w, d = 21.0, 13.0
+    ground, storey = 4.2, 3.4
+    h = ground + (storeys - 1) * storey + 0.6
+    mb = Builder()
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, 0, h, "render")
+    mb.box(-w / 2 - 0.05, w / 2 + 0.05, -d / 2 - 0.05, d / 2 + 0.05, -0.2, 0.5, "stone")
+    f, b = front(w, d), back(w, d)
+    cols = max(4, int(w / 2.7))
+    xs = [-w / 2 + (k + 0.5) * w / cols for k in range(cols)]
+    if kind == "shops":
+        unit = w / 3
+        for k in range(3):
+            c = -w / 2 + (k + 0.5) * unit
+            arch(mb, f, c, 0.0, unit - 1.4, ground - 0.3, "display")
+            f.slab(mb, c - 0.6, c + 0.6, 0.0, 2.5, 0.01, 0.05, "door")
+            if k == 1:
+                awning_on(mb, f, c - unit / 2 + 1.0, c + unit / 2 - 1.0, ground - 1.2)
+    else:
+        for x in xs:
+            if abs(x) < 1.6:
+                arch(mb, f, x, 0.0, 1.8, 3.4, "door")
+            else:
+                arch(mb, f, x, 0.7, 1.4, 2.8, "glass")
+    f.slab(mb, -w / 2, w / 2, ground - 0.2, ground, 0.0, 0.12, "render")     # a band over the ground floor
+    bays = kind == "bays"
+    for fl in range(1, storeys):
+        z = ground + (fl - 1) * storey + 0.6
+        for k, x in enumerate(xs):
+            if bays and k in (1, cols - 2):
+                slider(mb, f, x, z - 0.4, 1.8, 2.3)
+                balcony(mb, f, x, z - 0.4, 2.6, out=1.0)
+            else:
+                ca_window(mb, f, x, z, 1.1, 1.8)
+                if fl == 1 and not bays:
+                    f.slab(mb, x - 0.7, x + 0.7, z - 0.18, z, 0.0, 0.35, "render")
+                    rail(mb, f, x - 0.7, x + 0.7, z, 0.35, h=0.8)
+        for x in xs[::2]:
+            ca_window(mb, b, x, z, 1.0, 1.7)
+    # A band under the eaves with little corbels, then the low tile roof.
+    f.slab(mb, -w / 2, w / 2, h - 0.45, h, 0.0, 0.15, "render")
+    for x in [-w / 2 + 0.4 + k * 0.9 for k in range(int((w - 0.8) / 0.9) + 1)]:
+        f.slab(mb, x - 0.12, x + 0.12, h - 0.25, h + 0.75, 0.0, 0.55, "metal")   # timber corbels
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, h, h + 0.9, "render")
+    tile_hip(mb, -w / 2, w / 2, -d / 2, d / 2, h + 0.9, 2.4, over=0.8)
+    tile_chimney(mb, w / 2 - 2.0, -2.2, h + 0.9, h + 4.2)
+    if storeys >= 4:
+        x0, x1 = -w / 2 + 1.5, -w / 2 + 5.5
+        y0, y1 = -2.0, 2.0
+        mb.box(x0, x1, y0, y1, h + 0.9, h + 4.3, "render")
+        for fc in (Face(((x0 + x1) / 2, y1, 0), (1, 0, 0), (0, 1, 0)), Face(((x0 + x1) / 2, y0, 0), (-1, 0, 0), (0, -1, 0)),
+                   Face((x0, (y0 + y1) / 2, 0), (0, 1, 0), (-1, 0, 0)), Face((x1, (y0 + y1) / 2, 0), (0, -1, 0), (1, 0, 0))):
+            for a in (-0.9, 0.9):
+                arch(mb, fc, a, h + 2.0, 1.1, 1.9, "glass")
+        tile_hip(mb, x0, x1, y0, y1, h + 4.3, 1.5, over=0.45)
+    return mb, (w, d, h + 0.9, 4.0)
 
 
 def terrace(variant="a"):
@@ -2554,6 +2907,9 @@ MODELS = {
     "strip_mall": strip_mall, "strip_mall_b": lambda: strip_mall("b"),
     "glass_office2": lambda: glass_office(2), "glass_office3": lambda: glass_office(3),
     "ranch": ranch, "mission": mission, "ca_villa": ca_villa, "ca_modern": ca_modern,
+    "ca_townhouse": ca_townhouse, "ca_townhouse_b": lambda: ca_townhouse("b"),
+    "ca_apartments3": lambda: ca_apartments(3), "ca_apartments3_b": lambda: ca_apartments(3, "b"),
+    "ca_apartments4": lambda: ca_apartments(4), "ca_apartments4_b": lambda: ca_apartments(4, "b"),
     "launch_tower": launch_tower, "rocket": rocket,
     "dc_hall": dc_hall, "ai_hall": ai_hall, "gigafactory_bay": gigafactory_bay,
     "google_pavilion3": lambda: google_pavilion(3), "google_pavilion4": lambda: google_pavilion(4),
@@ -2563,6 +2919,14 @@ for _n in range(2, 8):
     MODELS["classical%d_shops" % _n] = (lambda n: lambda: classical(n, "shops"))(_n)
 for _n in range(5, 8):
     MODELS["classical%d_bays" % _n] = (lambda n: lambda: classical(n, "bays"))(_n)
+for _n in range(2, 5):
+    MODELS["ca_mainstreet%d" % _n] = (lambda n: lambda: ca_mainstreet(n))(_n)
+    MODELS["ca_mainstreet%d_b" % _n] = (lambda n: lambda: ca_mainstreet(n, "b"))(_n)
+for _n in range(2, 8):
+    MODELS["ca_classical%d" % _n] = (lambda n: lambda: ca_classical(n, "plain"))(_n)
+    MODELS["ca_classical%d_shops" % _n] = (lambda n: lambda: ca_classical(n, "shops"))(_n)
+for _n in range(5, 8):
+    MODELS["ca_classical%d_bays" % _n] = (lambda n: lambda: ca_classical(n, "bays"))(_n)
 
 
 # ------------------------------------------------------------- Blender side

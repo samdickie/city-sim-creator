@@ -168,6 +168,7 @@ def model_materials(wall, roof, r):
         "display": material("plain", (0.10, 0.09, 0.08), 0.06, 0.3), "beacon": material("plain", (0.5, 0.04, 0.03)),
         "lamp": material("plain", (0.80, 0.80, 0.76), 0.5), "office": material("plain", (0.06, 0.07, 0.085), 0.05, 0.4),
         "green": material("plain", green, 0.95),
+        "cool": material("plain", (0.50, 0.50, 0.48) if finish < 0.6 else (0.36, 0.34, 0.31), 0.85),
     }
     return [parts[name] for name in mb.MATERIALS]
 
@@ -198,8 +199,20 @@ def _mesh_object(name, builder, materials):
     return obj
 
 
+# The Bay Area's versions of the Scottish models (as world3d.gd CALIFORNIA and
+# MODEL_VARIANTS), so the menu matches the game. Empty it for the Troon look.
+CALIFORNIA_MODELS = {"terrace": "ca_townhouse", "terrace_b": "ca_townhouse_b",
+                     "tenement3": "ca_apartments3", "tenement4": "ca_apartments4"}
+
+
 def model(name, along, back, w, d, total_h=None, wall=BLONDE_SANDSTONE, roof=SLATE, r=0.3, z0=0.0, turn=0):
     """turn: quarter turns anticlockwise seen from above (w and d are the model's own, before turning)."""
+    if CALIFORNIA_MODELS:
+        if name.startswith("classical"):
+            name = "ca_" + name
+        name = CALIFORNIA_MODELS.get(name, name)
+        if name.startswith("ca_") and roof == SLATE:
+            roof = CLAY_TILE
     builder, dims = mb.MODELS[name]()
     if total_h is None:
         total_h = dims[2] + dims[3]          # as built, unstretched
@@ -361,7 +374,7 @@ def homes_1():
     ground()
     for row_back, kinds in ((4.0, ("terrace", "terrace_b", "terrace")), (37.0, ("terrace_b", "terrace", "terrace_b"))):
         for along, name in zip((-15.5, 0.0, 15.5), kinds):
-            model(name, along, row_back, 15.0, 8.5, 9.4, BLONDE_SANDSTONE if row_back < 10 else RED_SANDSTONE)
+            model(name, along, row_back, 15.0, 8.5, 9.4, STUCCO_CREAM if row_back < 10 else STUCCO_PEACH)
         hedge(0.0, row_back - 3.6, 47.0, 0.7, 1.0)
     slab(0.0, 0.0, 48.0, 3.0, PAVEMENT)
     slab(0.0, 23.0, 48.0, 3.0, DRIVEWAY)
@@ -387,7 +400,7 @@ TIMBER = (0.56, 0.38, 0.23)
 
 def homes_2():
     ground("grass")
-    model("classical6_bays", -12.5, 3.0, 21.0, 13.0, 27.6, HONEY_STONE)
+    model("classical6_bays", -12.5, 3.0, 21.0, 13.0, 27.6, STUCCO_CREAM)
     modern_block(12.5, 3.0, 21.0, 13.0, 8, TIMBER)
     slab(0.0, 17.5, 46.0, 15.0, LAWN)
     for along in (-15, 0, 15):
@@ -416,9 +429,9 @@ def shops_0():
 
 def shops_1():
     ground()
-    for k, along in enumerate((-16.5, 0.0, 16.5)):
-        model(("shop2", "shop2_b", "shop2")[k], along, 3.0, 15.5, 13.0, 10.2,
-              (CREAM_RENDER, (0.86, 0.62, 0.52), (0.64, 0.72, 0.58))[k], r=0.15 + k * 0.33)
+    # Main-street shops with flats above (the game's medium-density shops).
+    model("ca_mainstreet3", -12.5, 3.0, 23.0, 18.0, 11.1, STUCCO_PEACH, CLAY_TILE, r=0.15)
+    model("ca_mainstreet3_b", 12.5, 3.0, 23.0, 18.0, 11.1, STUCCO_WHITE, (0.80, 0.52, 0.40), r=0.5)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     slab(0.0, 17.0, 47.0, 31.0, CAR_PARK)
     for k in range(7):
@@ -427,8 +440,8 @@ def shops_1():
 
 def shops_2():
     ground()
-    model("classical5_shops", -12.5, 3.0, 23.0, 18.0, 24.2, HONEY_STONE, r=0.4)
-    model("classical6_shops", 12.5, 3.0, 23.0, 18.0, 27.6, BLONDE_SANDSTONE, r=0.7)
+    model("classical5_shops", -12.5, 3.0, 23.0, 18.0, 24.2, STUCCO_CREAM, r=0.4)
+    model("classical6_shops", 12.5, 3.0, 23.0, 18.0, 27.6, STUCCO_SAND, r=0.7)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     box(0.0, 28.0, 40.0, 19.0, 9.0, CONCRETE)
 
@@ -444,7 +457,7 @@ def offices_0():
 
 def offices_1():
     ground()
-    model("classical4", -12.5, 3.0, 23.0, 18.0, 19.9, HONEY_STONE, r=0.5)
+    model("classical4", -12.5, 3.0, 23.0, 18.0, 19.9, STUCCO_WHITE, r=0.5)
     modern_block(12.5, 3.0, 23.0, 18.0, 6, (0.80, 0.81, 0.80), glassy=True)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
     slab(0.0, 25.0, 44.0, 23.0, CAR_PARK)
@@ -1048,8 +1061,8 @@ def _district(colour, tall):
         model("crown_plant", -10.0, 6.0, 16.0, 14.0, None, GLASS_BLUE, (0.15, 0.25, 0.34), z0=70.0)
         model("classical6_shops", 12.0, 4.0, 21.0, 13.0, 27.6, HONEY_STONE)
     else:
-        model("tenement4", -12.0, 3.0, 22.0, 13.0, 17.3, RED_SANDSTONE)
-        model("villa_c", 12.0, 6.0, 7.4, 8.0, 9.2, BLONDE_SANDSTONE)
+        model("tenement4", -12.0, 3.0, 22.0, 13.0, 17.3, STUCCO_PEACH)
+        model("ca_villa", 12.0, 6.0, 7.4, 8.0, 9.2, STUCCO_WHITE, CLAY_TILE)
 
 
 def cbd():
@@ -1101,8 +1114,8 @@ def tech_zone():
 
 def normal():
     ground()
-    model("terrace", -12.0, 4.0, 15.0, 8.5, 9.4, BLONDE_SANDSTONE)
-    model("shop2", 12.0, 3.0, 15.5, 13.0, 10.2, CREAM_RENDER)
+    model("terrace", -12.0, 4.0, 15.0, 8.5, 9.4, STUCCO_CREAM)
+    model("ca_mainstreet2", 12.0, 3.0, 15.5, 13.0, 10.2, STUCCO_PEACH, CLAY_TILE)
 
 
 ITEMS = {

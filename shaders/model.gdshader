@@ -16,7 +16,7 @@ varying flat int part;  // from UV2.x (world3d.gd joins a model's parts into one
 						// 7 fascia, 8 render, 9 awning, 10 lead, 11 cladding, 12 sheet, 13 accent,
 						// 14 curtain (glass in the wall colour), 15 display (shop windows),
 						// 16 beacon (red aviation light), 17 lamp (floodlit trim), 18 office (office glass),
-						// 19 green (a roof terrace: sedum or gravel)
+						// 19 green (a roof terrace: sedum or gravel), 20 cool (a pale Californian flat roof)
 uniform bool use_wall_tex = false;
 uniform sampler2D wall_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform vec3 wall_average = vec3(0.255, 0.22, 0.157);
@@ -165,6 +165,13 @@ void fragment() {
 				rough = 0.95;
 			}
 		}
+	} else if (part == 20) {
+		// A Californian flat roof: a pale reflective membrane, or light gravel.
+		float patch = hash(floor(world_pos.xz / 3.0) + r);
+		float grain = hash(floor(world_pos.xz * 3.0));
+		c = fract(r * 3.3) < 0.6 ? vec3(0.50, 0.50, 0.48) * (0.92 + 0.12 * patch)
+			: vec3(0.36, 0.34, 0.31) * (0.85 + 0.3 * grain);
+		rough = 0.85;
 	} else if (part == 11 || part == 12) {
 		// Ribbed metal: walls in the building's colour, roofs in the roof colour.
 		vec3 base = part == 11 ? tint : extra.rgb;

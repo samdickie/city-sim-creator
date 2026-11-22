@@ -31,6 +31,14 @@ const MODEL_DIMS := {
 	"strip_mall": Vector4(46.0, 17.0, 8.0, 0.0), "glass_office2": Vector4(40.0, 18.0, 10.0, 0.0),
 	"glass_office3": Vector4(40.0, 18.0, 13.8, 0.0),
 	"ca_villa": Vector4(7.4, 8.0, 5.8, 3.4), "ca_modern": Vector4(7.4, 8.0, 5.8, 3.4),
+	# The Bay Area's medium and high density (CALIFORNIA): townhouses, garden apartments,
+	# main-street shops with flats, and the Mediterranean revival block.
+	"ca_townhouse": Vector4(15.0, 8.5, 6.2, 3.2), "ca_apartments3": Vector4(22.0, 13.0, 9.9, 4.8),
+	"ca_apartments4": Vector4(22.0, 13.0, 12.9, 4.8), "ca_mainstreet2": Vector4(23.0, 18.0, 8.0, 0.0),
+	"ca_mainstreet3": Vector4(23.0, 18.0, 11.1, 0.0), "ca_mainstreet4": Vector4(23.0, 18.0, 14.2, 0.0),
+	"ca_classical2": Vector4(21.0, 13.0, 9.1, 4.0), "ca_classical3": Vector4(21.0, 13.0, 12.5, 4.0),
+	"ca_classical4": Vector4(21.0, 13.0, 15.9, 4.0), "ca_classical5": Vector4(21.0, 13.0, 19.3, 4.0),
+	"ca_classical6": Vector4(21.0, 13.0, 22.7, 4.0), "ca_classical7": Vector4(21.0, 13.0, 26.1, 4.0),
 	"launch_tower": Vector4(12.0, 12.0, 152.7, 0.0), "rocket": Vector4(11.0, 11.0, 122.8, 0.0),
 	"dc_hall": Vector4(30.0, 40.0, 14.0, 0.0), "ai_hall": Vector4(30.0, 40.0, 19.5, 0.0),
 	"gigafactory_bay": Vector4(40.0, 60.0, 22.0, 0.0),
@@ -67,12 +75,20 @@ const MODEL_VARIANTS := {
 	# ["bungalow", "bungalow_b"]: put those back for the Troon look).
 	"villa": ["ca_villa", "ca_modern"], "bungalow": ["ranch", "mission"],
 	"strip_mall": ["strip_mall", "strip_mall_b"],
-	"terrace": ["terrace", "terrace_b"], "tenement3": ["tenement3", "tenement3_b"],
-	"tenement4": ["tenement4", "tenement4_b"], "shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
+	# The Bay Area: townhouses, garden apartments and main-street blocks in place of
+	# terraces, tenements and sandstone shops with flats (for Troon: ["terrace",
+	# "terrace_b"], ["tenement3", "tenement3_b"], ["tenement4", "tenement4_b"] and no
+	# shopflats entries, with CALIFORNIA false).
+	"terrace": ["ca_townhouse", "ca_townhouse_b"], "tenement3": ["ca_apartments3", "ca_apartments3_b"],
+	"tenement4": ["ca_apartments4", "ca_apartments4_b"],
+	"shopflats2": ["ca_mainstreet2", "ca_mainstreet2_b"], "shopflats3": ["ca_mainstreet3", "ca_mainstreet3_b"],
+	"shopflats4": ["ca_mainstreet4", "ca_mainstreet4_b"],
+	"shop1": ["shop1", "shop1_b"], "shop2": ["shop2", "shop2_b"],
 	"modern_floor": ["modern_floor", "modern_floor_b"],
 }
 const MODEL_PARTS := ["stone", "roof", "glass", "frame", "door", "metal", "pot", "fascia", "render",
-	"awning", "lead", "cladding", "sheet", "accent", "curtain", "display", "beacon", "lamp", "office", "green"]
+	"awning", "lead", "cladding", "sheet", "accent", "curtain", "display", "beacon", "lamp", "office", "green",
+	"cool"]
 const MODEL_CHUNK := 400.0              # models are drawn in 400 m squares (for culling and detail levels)
 const ROAD_SHADER = preload("res://shaders/road.gdshader")
 const PAVING_SHADER = preload("res://shaders/paving.gdshader")
@@ -399,8 +415,8 @@ const LOOK_EXPOSURE_DAY := 0.6
 const LOOK_EXPOSURE_NIGHT := 1.25
 const LOOK_CONTRAST := 1.12             # colour grade on top of the tone mapping
 const LOOK_SATURATION := 1.0
-const SUN_ENERGY := 2.0                 # the warm key light
-const SUN_DAY_COLOUR := Color(1.0, 0.94, 0.84)
+const SUN_ENERGY := 2.1                 # the warm key light
+const SUN_DAY_COLOUR := Color(1.0, 0.92, 0.78)   # California's warm sun (Troon: 1.0, 0.94, 0.84; energy 2.0)
 const SUN_LOW_COLOUR := Color(1.0, 0.52, 0.26)   # at sunrise and sunset
 const SUN_MAX_ELEVATION := 46.0         # degrees, at noon
 const AMBIENT_DAY := 0.38               # cool fill from the sky (lower = deeper shadows)
@@ -779,6 +795,7 @@ const FIELD_JITTER := 0.55              # how unevenly the fields are cut (share
 const FIELD_WOBBLE := 9.0               # metres the boundaries meander
 const FIELD_SPLIT := 0.35               # chance a field is cut in two
 const FIELD_HEDGE := 0.15               # chance a boundary is a hedge (otherwise a fence; Troon had 0.72)
+const CALIFORNIA := true                 # Bay Area medium and high density (false: Troon's sandstone; see MODEL_VARIANTS)
 const GOLDEN := 1.0                     # Palo Alto: open grass and fields dried to gold (0 = Troon's green)
 const PLANT_CHANCE := 0.06              # chance a field on high ground is a conifer plantation
 const PLANT_MIN_HEIGHT := 35.0          # metres
@@ -3016,7 +3033,7 @@ func _all_model_names() -> Array[String]:
 				names.append(v)
 		else:
 			names.append(base)
-		if base.begins_with("classical"):
+		if base.begins_with("classical") or base.begins_with("ca_classical"):
 			names.append(base + "_shops")
 			names.append(base + "_bays")
 	return names
@@ -3176,6 +3193,8 @@ func _surface_of(colour: Color) -> float:
 		return 0.4
 	if colour == CONCRETE or colour == YARD or colour == FOUNDATION:
 		return 0.2
+	if colour == POOL:
+		return 0.05
 	return 1.0
 
 
@@ -3758,6 +3777,9 @@ func _house_roof(rng: RandomNumberGenerator, i: int) -> Color:
 
 func _tenement_stone(rng: RandomNumberGenerator, i: int) -> Color:
 	# Tenement streets are mostly one stone: red or blonde, by the street's character.
+	# (The Bay Area's garden apartments take the street's stucco.)
+	if CALIFORNIA:
+		return _house_colour(rng, i)
 	var walls: Array = _house_palette(i)["walls"]
 	var first: Color = walls[0]
 	var red_odds := 0.85 if first == RED_SANDSTONE else (0.15 if first == BLONDE_SANDSTONE else 0.5)
@@ -3784,9 +3806,14 @@ func _plan_homes(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 				var stone := _tenement_stone(rng, i)
 				var spot := _place(i, front, along, row_back, 22.0, 13.0)
 				var slate: Color = SLATE_DARK if rng.randf() < 0.5 else SLATE
+				if CALIFORNIA:
+					slate = _house_roof(rng, i)
 				_add_block(spot, 22.0, 13.0, storeys * 3.0 + 0.5, stone, STYLE_FLATS, 4.5, slate, wall_list, roof_list)
 		_slab(i, front, 0.0, 0.0, 48.0, 3.0, PAVEMENT)                       # front pavement
-		_tenement_court(i, front, back_row, rng)
+		if CALIFORNIA:
+			_pool_court(i, front, back_row, rng)
+		else:
+			_tenement_court(i, front, back_row, rng)
 		return
 
 	if lv == 2 and sim.density[i] >= 1:
@@ -3902,6 +3929,44 @@ func _villa_garden(i: int, front: Vector2i, centre: float, from: float, to: floa
 
 const BIN_STORE := Color(0.30, 0.31, 0.30)
 const BINS := [Color(0.16, 0.30, 0.18), Color(0.20, 0.32, 0.55), Color(0.35, 0.36, 0.37), Color(0.55, 0.38, 0.20)]
+
+
+const POOL := Color(0.30, 0.72, 0.80)
+const POOL_DECK := Color(0.86, 0.82, 0.74)
+const LOUNGER := Color(0.95, 0.95, 0.93)
+const PARASOLS := [Color(0.90, 0.45, 0.30), Color(0.95, 0.95, 0.92), Color(0.20, 0.45, 0.65)]
+
+
+func _pool_court(i: int, front: Vector2i, back_row: float, rng: RandomNumberGenerator) -> void:
+	# The Bay Area's garden apartments share a courtyard with a pool: a paved deck,
+	# loungers and parasols, palms in the corners, stucco walls at the sides and a
+	# bin store by each block (its lawn is painted by the shader).
+	var from := 16.5
+	var mid := (from + back_row) * 0.5
+	var room := back_row - from
+	var wall := _house_colour(rng, i).darkened(0.08)
+	for along: float in [-23.9, 23.9]:
+		_prop(i, front, along, from, 0.3, room, 1.8, wall)
+	for along: float in [-17.0, 17.0]:
+		for at: float in [from + 1.6, back_row - 3.6]:
+			_prop(i, front, along, at, 3.0, 1.4, 1.5, BIN_STORE)
+	if room < 9.0:
+		return
+	var deck_d := minf(room - 5.0, 11.0)
+	_slab(i, front, 0.0, mid - deck_d * 0.5, 22.0, deck_d, POOL_DECK)
+	var pool_d := deck_d - 4.0
+	_slab(i, front, 0.0, mid - pool_d * 0.5, 13.0, pool_d, POOL, 0.02)
+	for k in 4:
+		var along := -9.6 + k * 2.2 if k < 2 else 7.4 + (k - 2) * 2.2
+		_prop(i, front, along, mid - deck_d * 0.5 + 0.4, 0.7, 1.9, 0.4, LOUNGER)
+	for side: float in [-1.0, 1.0]:
+		var at := Vector2(side * 9.0, mid + deck_d * 0.5 - 1.2)
+		var colour: Color = PARASOLS[rng.randi_range(0, PARASOLS.size() - 1)]
+		_prop(i, front, at.x, at.y, 0.06, 0.06, 2.3, CHARCOAL)
+		_prop(i, front, at.x, at.y - 1.1, 2.4, 2.2, 0.15, colour, 2.2)
+	for corner: Vector2 in [Vector2(-21.0, from + 3.0), Vector2(21.0, from + 3.0),
+			Vector2(-21.0, back_row - 1.5), Vector2(21.0, back_row - 1.5)]:
+		_plant(i, front, corner.x, corner.y, rng.randf_range(10.0, 13.0), TreeKind.PALM, rng)
 
 
 func _tenement_court(i: int, front: Vector2i, back_row: float, rng: RandomNumberGenerator) -> void:
@@ -4034,8 +4099,10 @@ const GLASS_TINTS := [Color(0.24, 0.38, 0.52), Color(0.26, 0.44, 0.42), Color(0.
 const SPANDRELS := [Color(0.88, 0.88, 0.85), Color(0.20, 0.21, 0.23), Color(0.64, 0.34, 0.24),
 	Color(0.72, 0.58, 0.32), Color(0.30, 0.40, 0.48)]                              # white, charcoal, terracotta, gold, slate blue
 # ...stone and brick for art deco towers, concrete for grids, render for towers of flats.
-const TOWER_STONES := [Color(0.86, 0.82, 0.72), Color(0.84, 0.71, 0.50), Color(0.60, 0.34, 0.27),
-	Color(0.55, 0.28, 0.20), Color(0.80, 0.78, 0.74)]                             # limestone, honey, red sandstone, brick, Portland
+# (San Francisco's downtown: pale granite and buff terracotta in place of Troon's red
+# sandstone (0.60, 0.34, 0.27) and brick (0.55, 0.28, 0.20).)
+const TOWER_STONES := [Color(0.86, 0.82, 0.72), Color(0.84, 0.71, 0.50), Color(0.76, 0.74, 0.70),
+	Color(0.82, 0.72, 0.58), Color(0.80, 0.78, 0.74)]                             # limestone, honey, granite, buff, Portland
 const TOWER_CONCRETE := [Color(0.66, 0.66, 0.63), Color(0.88, 0.88, 0.85), Color(0.76, 0.68, 0.55),
 	Color(0.40, 0.41, 0.42)]                                                        # concrete, white, buff, dark
 const TOWER_RENDER := [Color(0.92, 0.92, 0.90), Color(0.86, 0.80, 0.67), Color(0.70, 0.42, 0.32),
@@ -4212,6 +4279,8 @@ func _stack_tower(at: Vector3, x_axis: Vector3, z_axis: Vector3, tiers: Array, s
 
 func _classical_stone(rng: RandomNumberGenerator) -> Color:
 	var stones := [HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE, CREAM_STONE, HONEY_STONE]
+	if CALIFORNIA:
+		stones = [STUCCO_WHITE, STUCCO_CREAM, STUCCO_SAND, STUCCO_PEACH, STUCCO_WHITE, STUCCO_YELLOW, CREAM_STONE]
 	var c: Color = stones[rng.randi_range(0, stones.size() - 1)]
 	return c.darkened(rng.randf_range(-0.03, 0.05))
 
@@ -4237,9 +4306,13 @@ func _classical_block(spot: Dictionary, w: float, d: float, storeys: int, stone:
 	if mansard:
 		# The detailed model, where there is one for this height and kind.
 		var kind := "_shops" if shops else ("_bays" if bays and storeys >= 5 else "")
-		var model_name := "classical%d%s" % [storeys, kind]
+		var model_name := "%s%d%s" % ["ca_classical" if CALIFORNIA else "classical", storeys, kind]
 		if _models.has(model_name):
-			_add_model(model_name, spot, w, d, h + 0.9 + 4.0, stone, slate)
+			var roof := slate
+			if CALIFORNIA and slate == SLATE:
+				var at: Vector3 = spot["pos"]
+				roof = CLAY_TILE if fposmod(at.x * 0.071 + at.z * 0.113, 1.0) < 0.65 else CLAY_DARK
+			_add_model(model_name, spot, w, d, h + 0.9 + 4.0, stone, roof)
 			return
 	var x_axis: Vector3 = spot["x"]
 	var z_axis: Vector3 = spot["z"]
@@ -4355,11 +4428,15 @@ const SHOP_COLOURS := [Color(0.90, 0.89, 0.85), Color(0.80, 0.69, 0.52), Color(0
 	Color(0.60, 0.34, 0.27), Color(0.62, 0.72, 0.78), Color(0.64, 0.72, 0.58), Color(0.86, 0.62, 0.52),
 	Color(0.90, 0.80, 0.50), Color(0.70, 0.82, 0.76), Color(0.84, 0.71, 0.50), Color(0.55, 0.26, 0.18)]
 	# white, blonde, cream, red sandstone, pale blue, sage, salmon, yellow ochre, mint, honey, brick
+# The Bay Area's main streets: stucco in whites, creams, sand, peach, pale yellow, sage
+# and the odd terracotta or pale blue.
+const CA_SHOP_COLOURS := [STUCCO_WHITE, STUCCO_CREAM, STUCCO_SAND, STUCCO_PEACH, STUCCO_YELLOW,
+	STUCCO_SAGE, STUCCO_WHITE, Color(0.80, 0.52, 0.40), Color(0.70, 0.80, 0.84), STUCCO_CREAM]
 
 
 func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		wall_list: Array, roof_list: Array) -> void:
-	var colours := SHOP_COLOURS
+	var colours := CA_SHOP_COLOURS if CALIFORNIA else SHOP_COLOURS
 	var depth := _depth(i, front)
 	var value := _values[i] if i < _values.size() else 0.3
 	if lv >= 7:
@@ -4404,7 +4481,8 @@ func _plan_shops(i: int, lv: int, front: Vector2i, rng: RandomNumberGenerator,
 		for along: float in [-12.5, 12.5]:
 			var spot := _place(i, front, along, 3.0, 23.0, 18.0)
 			_add_block(spot, 23.0, 18.0, rng.randi_range(3, 4) * 3.2 + 0.6,
-				colours[rng.randi_range(0, colours.size() - 1)], STYLE_SHOP, 0.0, SLATE,
+				colours[rng.randi_range(0, colours.size() - 1)], STYLE_SHOP, 0.0,
+				(CLAY_TILE if rng.randf() < 0.6 else CLAY_DARK) if CALIFORNIA else SLATE,
 				wall_list, roof_list)
 		park_from = 21.0
 	else:

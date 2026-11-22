@@ -2,7 +2,7 @@
 // driveways, yards. COLOR.rgb is the surface's colour; COLOR.a says what it is
 // made of, so it gets the right texture (see world3d.gd SURFACE_...):
 //   1.0 plain   0.8 tarmac (patched, oil-stained)   0.6 paving slabs
-//   0.4 block paving (drives)   0.2 concrete in bays
+//   0.4 block paving (drives)   0.2 concrete in bays   0.05 a swimming pool
 shader_type spatial;
 render_mode diffuse_burley, specular_schlick_ggx;
 
@@ -52,6 +52,10 @@ void fragment() {
 		vec2 q = p / vec2(0.2, 0.1);
 		q.x += floor(q.y) * 0.5;
 		col = base * (0.9 + 0.16 * hash(floor(q))) * (1.0 - 0.25 * joints(q * vec2(0.2, 0.1), vec2(0.2, 0.1), px));
+	} else if (kind < 0.1) {
+		// A swimming pool: bright, glossy, with soft ripples and a pale tiled edge.
+		col = base * (0.85 + 0.3 * n2.b) * (1.0 + 0.25 * smoothstep(0.6, 0.9, texture(noise_tex, p / 2.3 + TIME * 0.02).r));
+		rough = 0.06;
 	} else if (kind > 0.1 && kind < 0.3) {
 		// Concrete bays with stains.
 		col = base * (1.0 - 0.3 * joints(p, vec2(5.0), px)) * (0.9 + 0.2 * n1.b);
