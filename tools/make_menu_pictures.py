@@ -315,21 +315,46 @@ def ground(kind="grass", sea=False, road=True):
 
 # ------------------------------------------------------------------ the items
 
+STUCCO_WHITE = (0.93, 0.91, 0.86)
+STUCCO_CREAM = (0.90, 0.84, 0.70)
+STUCCO_SAND = (0.84, 0.74, 0.58)
+STUCCO_PEACH = (0.90, 0.74, 0.62)
+CLAY_TILE = (0.70, 0.36, 0.24)
+SHINGLE_GREY = (0.40, 0.40, 0.40)
+OFFICE_GLASS = (0.30, 0.38, 0.46)
+
+
+def palm(along, back, h=12.0):
+    """A Californian fan palm: a slim trunk and a tuft of drooping fronds (the game's TreeKind.PALM)."""
+    cylinder(along, back, 0.32, h, (0.42, 0.34, 0.25), taper=0.7, srgb=False)
+    y = _y(back, 0)
+    for k in range(8):
+        a = 2 * math.pi * k / 8
+        bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=1.0,
+                                              location=(along + math.cos(a) * 1.5, y + math.sin(a) * 1.5, h - 0.4))
+        o = bpy.context.active_object
+        o.scale = (2.0, 0.45, 0.22)
+        o.rotation_euler = (0.0, math.radians(18), a)
+        o.data.materials.append(material("plain", (0.13, 0.24, 0.08), 0.9))
+
+
 def homes_0():
+    # Californian homes, as the game draws low-density plots: a ranch house, a
+    # Spanish revival villa, a Spanish bungalow and a modern house.
     ground()
-    names = ["villa", "villa_b", "villa_c", "villa_b"]
+    names = ["ranch", "ca_villa", "mission", "ca_modern"]
+    walls = [STUCCO_CREAM, STUCCO_WHITE, STUCCO_PEACH, STUCCO_WHITE]
+    roofs = [SHINGLE_GREY, CLAY_TILE, CLAY_TILE, SHINGLE_GREY]
     for k, along in enumerate((-17.25, -5.75, 5.75, 17.25)):
-        w = 7.4
+        w = 8.0 if names[k] in ("ranch", "mission") else 7.4
         house = along - 5.3 + w / 2
-        model(names[k], house, 6.0, w, 8.0, 9.0, [BLONDE_SANDSTONE, RED_SANDSTONE, CREAM_RENDER, BLONDE_SANDSTONE][k],
-              r=0.17 * k + 0.1)
+        model(names[k], house, 6.0, w, 8.0, None, walls[k], roofs[k], r=0.17 * k + 0.1)
         slab(along - 5.3 + w + 1.5, 0.0, 2.6, 14.0, DRIVEWAY)
         if k % 2 == 0:
             car(along - 5.3 + w + 1.5, 1.0, CAR_PAINT[k])
-        hedge(house, 0.3, w, 0.8)
+        if k % 2 == 1:
+            palm(house - w / 2 + 0.5, 2.0, 11.0 + k)
         tree(along + 1.5, 24.0, 8.0)
-    for edge in (-11.5, 0.0, 11.5):
-        hedge(edge, 0.3, 0.7, 45.0, 1.4)
 
 
 def homes_1():
@@ -370,15 +395,23 @@ def homes_2():
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
 
 
+def car_park_front(from_back, to_back):
+    """The car park in front of a set-back strip mall or office, palms at its corners (world3d _front_car_park)."""
+    slab(0.0, from_back, 46.0, to_back - from_back, CAR_PARK)
+    for k in range(7):
+        car(-18 + k * 6, from_back + 2.8, CAR_PAINT[k % 5])
+    for k in range(5):
+        car(-14 + k * 7, to_back - 3.0, CAR_PAINT[(k + 2) % 5])
+    for along in (-20.5, 20.5):
+        palm(along, from_back + 1.5, 11.0)
+
+
 def shops_0():
+    # A strip mall set back behind its car park (the game's small shops).
     ground()
-    for k, along in enumerate((-16.5, 0.0, 16.5)):
-        model(("shop1", "shop1_b", "shop1")[k], along, 3.0, 15.5, 13.0, 4.6,
-              (WHITE_RENDER, (0.62, 0.72, 0.78), BLONDE_SANDSTONE)[k], r=0.2 + k * 0.3)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
-    slab(0.0, 17.0, 47.0, 31.0, CAR_PARK)
-    for k in range(8):
-        car(-18 + k * 5.5, 20.0, CAR_PAINT[k % 5])
+    car_park_front(3.5, 20.5)
+    model("strip_mall", 0.0, 21.0, 46.0, 17.0, 8.0, STUCCO_CREAM, CLAY_TILE, r=0.3)
 
 
 def shops_1():
@@ -401,15 +434,12 @@ def shops_2():
 
 
 def offices_0():
+    # A low glass office set back behind its car park (the game's small offices).
     ground()
-    model("classical2", -12.5, 3.0, 21.0, 13.0, 13.1, BLONDE_SANDSTONE, r=0.3)
-    model("classical2", 12.5, 3.0, 21.0, 13.0, 13.1, HONEY_STONE, r=0.6)
     slab(0.0, 0.0, 49.0, 3.0, PAVEMENT)
-    slab(0.0, 22.0, 44.0, 26.0, CAR_PARK)
-    for k in range(7):
-        car(-17 + k * 6, 26.0, CAR_PAINT[(k + 1) % 5])
-    for along in (-23.4, 23.4):
-        tree(along, 26.0, 7.0)
+    car_park_front(3.5, 18.5)
+    model("glass_office2", 0.0, 19.5, 40.0, 18.0, 10.0, OFFICE_GLASS, MODERN_WHITE, r=0.4)
+    slab(0.0, 39.5, 44.0, 8.0, CAR_PARK)
 
 
 def offices_1():

@@ -1286,7 +1286,7 @@ func _build_help() -> void:
 			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
 			"Education (Build menu): a college, then a university (drag out a campus) and a research park beside it. They turn residents into tech workers, which the big companies want before they'll come; a research park makes them keener. Students need homes, and universities are costly to run.",
 			"Data centres: Amazon, Microsoft or Google write once you have %s people and open land in a Tech zone. Pick a size, then drag out its site in the Tech zone. They pay well and bring a little work, but use power and water like a small town; on a stretched grid everyone's bills go up." % "1,500",
-			"Low density grows villas and terraces; medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
+			"Low density grows ranch houses and villas (with strip malls and office parks); medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
 		var p := _label(para, 13, TEXT_DIM)
 		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		p.custom_minimum_size = Vector2(400, 0)

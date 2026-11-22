@@ -1134,9 +1134,9 @@ const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"
 	["transport", "Transport"], ["education", "Education"], ["landmarks", "Landmarks"], ["districts", "Districts"]]
 # One-line descriptions for the menu (the hover tooltip has the full story).
 const SHORT := {
-	"homes_0": "Villas and terraces", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
-	"shops_0": "Corner shops", "shops_1": "Parades, shops with flats", "shops_2": "Big stores and hotels",
-	"offices_0": "Small offices", "offices_1": "Office blocks", "offices_2": "Office towers",
+	"homes_0": "Ranch houses and villas", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
+	"shops_0": "Strip malls", "shops_1": "Strip malls up to shops with flats", "shops_2": "Big stores and hotels",
+	"offices_0": "Office parks", "offices_1": "Office blocks", "offices_2": "Office towers",
 	"industry": "Works and factories", "road": "Joined-up streets", "grid": "Streets in 100 m blocks",
 	"avenue": "Wide and tree-lined: more traffic", "motorway": "Fast, for traffic across town",
 	"bulldoze": "Clear anything", "park": "Trees and open space",
@@ -1216,12 +1216,12 @@ func _menu_items() -> Array:
 			var level_word: String = ["Low-density", "Medium-density", "High-density"][density]
 			item_name = "%s %s" % [level_word, "homes" if tool_id == Tool.HOMES else (
 				"shops" if tool_id == Tool.SHOPS else "offices")]
-			about = ["Villas and corner shops; never more than 2 storeys",
+			about = ["Ranch houses, villas and strip malls; never more than 2 storeys",
 				"Terraces and tenements; mansion flats when space runs short",
 				"Flats, towers and big stores, as high as land value allows (skyscrapers in a CBD)"][density]
 			var costs: Array = Settings.HOMES_COSTS if tool_id == Tool.HOMES else Settings.SHOPS_COSTS
 			if tool_id == Tool.OFFICES:
-				about = ["Small offices, two storeys at most",
+				about = ["Office parks, two storeys at most",
 					"Office blocks; taller when space runs short",
 					"Office towers, as high as land value allows (skyscrapers in a CBD)"][density] \
 					+ ". Clean, well-paid jobs for a bigger town with schools near its homes; offices take workers from industry"
@@ -1872,11 +1872,11 @@ static func _rounded_trips(n: float) -> int:
 
 func _stage_words(t: int, s: int) -> String:
 	# What the buildings on a plot are, for the hover text.
-	var homes := ["", "villas", "villas and terraces", "tenements", "mansion flats", "modern flats", "towers",
+	var homes := ["", "houses", "houses and terraces", "tenements", "mansion flats", "modern flats", "towers",
 		"skyscraper apartments", "landmark tower"]
-	var shops := ["", "corner shops", "shop parade", "shops with flats", "big stores", "department stores",
+	var shops := ["", "strip mall", "strip mall", "shops with flats", "big stores", "department stores",
 		"shopping centre and hotel", "hotel skyscraper", "landmark hotel tower"]
-	var offices := ["", "small offices", "offices", "office chambers", "office blocks", "modern offices",
+	var offices := ["", "office park", "office park", "office chambers", "office blocks", "modern offices",
 		"office tower", "office skyscraper", "landmark office tower"]
 	var works := ["", "small works", "factory", "large factory"]
 	var words: String = ""
