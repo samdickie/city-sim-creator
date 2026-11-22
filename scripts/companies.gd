@@ -277,10 +277,22 @@ static func scale_terms(scale: Dictionary) -> String:
 		asks.append("no tax for %d years" % years)
 	if bool(scale.get("priority", false)):
 		asks.append("power before homes when it runs short")
-	return "%d tiles · %d power · %d water · %d jobs · %s tax a month · %s invested%s" % [
-		int(scale["tiles"]), int(scale["power"]), int(scale["water"]), int(scale["jobs"]),
+	return "%d tiles · %s power (as much as %s people use) · %s water (%s people's) · %s jobs · %s tax a month · %s invested%s" % [
+		int(scale["tiles"]), _num(int(scale["power"])), _people(int(scale["power"])), _num(int(scale["water"])),
+		_people(int(scale["water"])), _num(int(scale["jobs"])),
 		_pounds(int(scale["tax"])), _pounds(int(scale["investment"])),
 		("\nAsks for: " + ", ".join(asks)) if not asks.is_empty() else ""]
+
+
+static func _num(n: int) -> String:
+	return _pounds(n).trim_prefix("£")
+
+
+static func _people(units: int) -> String:
+	# Power or water units as the people who'd use as much, rounded: "14,000".
+	var n := units * Settings.PEOPLE_PER_UNIT
+	var step := 1000 if n >= 10000 else 100
+	return _pounds(maxi(roundi(float(n) / step) * step, step)).trim_prefix("£")
 
 
 static func deal_news(kind: String, deal: Dictionary) -> String:

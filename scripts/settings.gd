@@ -217,12 +217,20 @@ const LETTER_LOG_MAX := 200         # the Records window keeps this many letters
 const DC_POP := 1500
 const DC_CHANCE := 0.08             # at best this chance a month (x investor appetite, spare power, the Tech zone's tax)
 const DC_PLACE_MONTHS := 6          # months to find a site before the company gives up
+# Power and water (checked against real figures, Nov 2026): one unit of either is
+# what about PEOPLE_PER_UNIT residents use (the example towns: 11-15). A real
+# hyperscale data centre draws 200-600 MW and an AI campus up to a gigawatt or
+# more, far more than a town; here they're scaled down with everything else but
+# keep their shape: a Mega one uses as much power as a town of 14,000. Water was
+# cut by 70% (it was half the power): evaporative cooling uses about 2 litres a
+# kWh, so water is about 0.15 of power; many newer sites use far less.
+const PEOPLE_PER_UNIT := 12
 const DC_SCALES := [
-	{"name": "Small", "tiles": 4, "power": 160, "water": 80, "jobs": 12, "tax": 400, "investment": 5000,
+	{"name": "Small", "tiles": 4, "power": 160, "water": 24, "jobs": 12, "tax": 400, "investment": 5000,
 		"break_years": 0, "priority": false},
-	{"name": "Standard", "tiles": 12, "power": 480, "water": 240, "jobs": 40, "tax": 1500, "investment": 20000,
+	{"name": "Standard", "tiles": 12, "power": 480, "water": 72, "jobs": 40, "tax": 1500, "investment": 20000,
 		"break_years": 5, "priority": false},
-	{"name": "Mega", "tiles": 30, "power": 1200, "water": 600, "jobs": 120, "tax": 4000, "investment": 60000,
+	{"name": "Mega", "tiles": 30, "power": 1200, "water": 180, "jobs": 120, "tax": 4000, "investment": 60000,
 		"break_years": 10, "priority": true},
 ]
 # Tesla's Gigafactory (Elon Musk): thousands of factory jobs (from outside: they
@@ -270,11 +278,11 @@ const LAUNCH_NEWS_EVERY := 5        # a news line every this many launches (and 
 # and it uses more (and pays AI_TAX_STEP more tax), up to AI_POWER_MAX x; say no
 # AI_REFUSALS times (or leave the letter) and OpenAI leaves.
 const AI_SCALES := [
-	{"name": "Small", "tiles": 16, "power": 1000, "water": 500, "jobs": 60, "tax": 6000, "investment": 100000,
+	{"name": "Small", "tiles": 16, "power": 1000, "water": 150, "jobs": 60, "tax": 6000, "investment": 100000,
 		"break_years": 5, "priority": false},
-	{"name": "Standard", "tiles": 36, "power": 2500, "water": 1200, "jobs": 150, "tax": 15000, "investment": 300000,
+	{"name": "Standard", "tiles": 36, "power": 2500, "water": 375, "jobs": 150, "tax": 15000, "investment": 300000,
 		"break_years": 10, "priority": true},
-	{"name": "Mega", "tiles": 64, "power": 6000, "water": 3000, "jobs": 400, "tax": 40000, "investment": 1000000,
+	{"name": "Mega", "tiles": 64, "power": 6000, "water": 900, "jobs": 400, "tax": 40000, "investment": 1000000,
 		"break_years": 15, "priority": true},
 ]
 const AI_POWER_STEP := 0.25
