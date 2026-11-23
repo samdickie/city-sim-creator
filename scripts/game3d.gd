@@ -435,13 +435,16 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_M:
 				hud.toggle_build_menu()
 			KEY_ESCAPE:
-				_cancel_drag()
+				if hud.help_panel.visible:
+					hud.close_help()
+				else:
+					_cancel_drag()
 			KEY_SPACE:
 				_set_speed(1 if speed == 0 else 0)
 			KEY_F:
 				_set_speed(Settings.FAST_SPEED)
 			KEY_H:
-				hud.help_panel.visible = not hud.help_panel.visible
+				hud.toggle_help()
 			KEY_O:
 				_set_overlay((world.overlay + 1) % WorldView.Overlay.size())
 			KEY_C:
@@ -1174,6 +1177,18 @@ func _tool_label() -> String:
 	return tool_name
 
 
+func _tool_hint() -> String:
+	# How to use the tools that work in a less obvious way ("" for the rest).
+	if current_tool == Tool.ROAD:
+		return "Drag straight across the water, shore to shore, to build a bridge."
+	if current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
+		if not sim.has_bridge(Settings.GOLDEN_GATE_MIN_TILES):
+			return "First build a bridge with the Road tool, dragged straight across at least %d m of water, then click it." \
+				% roundi(Settings.GOLDEN_GATE_MIN_TILES * cell_size_m)
+		return "Click one of your bridges to turn it into the Golden Gate."
+	return ""
+
+
 func _set_item(index: int, announce: bool = true) -> void:
 	# Pick one building from the current group (or a district type).
 	if not _has_picker():
@@ -1199,10 +1214,10 @@ const BUILD_CATEGORIES := [["all", "All"], ["zones", "Zones"], ["roads", "Roads"
 	["transport", "Transport"], ["education", "Education"], ["landmarks", "Landmarks"], ["districts", "Districts"]]
 # One-line descriptions for the menu (the hover tooltip has the full story).
 const SHORT := {
-	"homes_0": "Ranch houses and villas", "homes_1": "Terraces up to tenements", "homes_2": "Flats and towers",
+	"homes_0": "Ranch houses and villas", "homes_1": "Townhouses up to apartments", "homes_2": "Flats and towers",
 	"shops_0": "Strip malls", "shops_1": "Strip malls up to shops with flats", "shops_2": "Big stores and hotels",
 	"offices_0": "Office parks", "offices_1": "Office blocks", "offices_2": "Office towers",
-	"industry": "Works and factories", "road": "Joined-up streets", "grid": "Streets in 100 m blocks",
+	"industry": "Works and factories", "road": "Streets; drag across water to bridge", "grid": "Streets in 100 m blocks",
 	"avenue": "Wide and tree-lined: more traffic", "motorway": "Fast, for traffic across town",
 	"bulldoze": "Clear anything", "park": "Trees and open space",
 	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
@@ -1223,7 +1238,7 @@ const SHORT := {
 	"eiffel": "The iron tower", "empire_state": "The art deco skyscraper",
 	"painted_ladies": "Postcard Row's Victorian houses", "coit_tower": "The column on Telegraph Hill",
 	"ferry_building": "The clock tower on the waterfront", "fine_arts": "The rotunda by the lagoon",
-	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "golden_gate": "Turns a bridge red, with towers", "alcatraz": "The old prison on its rock", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
+	"transamerica": "The white pyramid", "salesforce_tower": "The tallest tower in town", "golden_gate": "Click one of your bridges to turn it red", "alcatraz": "The old prison on its rock", "college": "Turns residents into tech workers", "university": "Graduates, students and land value",
 	"research_park": "Labs that draw big companies", "cbd": "Skyscrapers allowed", "tech_zone": "Offices and industry, any density", "conservation": "Keeps the old town low",
 	"normal": "The usual height rules",
 }
@@ -1285,7 +1300,7 @@ func _menu_items() -> Array:
 			item_name = "%s %s" % [level_word, "homes" if tool_id == Tool.HOMES else (
 				"shops" if tool_id == Tool.SHOPS else "offices")]
 			about = ["Ranch houses, villas and strip malls; never more than 2 storeys",
-				"Terraces and tenements; mansion flats when space runs short",
+				"Townhouses and garden apartments; mansion flats when space runs short",
 				"Flats, towers and big stores, as high as land value allows (skyscrapers in a CBD)"][density]
 			var costs: Array = Settings.HOMES_COSTS if tool_id == Tool.HOMES else Settings.SHOPS_COSTS
 			if tool_id == Tool.OFFICES:
@@ -1312,7 +1327,7 @@ func _menu_items() -> Array:
 			elif sim.is_service(t):
 				about = ["Police: in a bigger town, homes and shops without police grow at half speed",
 					"Fire: stops buildings nearby burning down",
-					"Schools: in a bigger town, families need one nearby to move into anything bigger than terraces",
+					"Schools: in a bigger town, families need one nearby to move into anything bigger than townhouses",
 					"Hospitals: in a bigger town, homes without one grow at half speed"][sim.service_of(t)]
 				if sim.service_small(t):
 					about += ". A small one: cheap, but it reaches about half as far"
@@ -1321,7 +1336,7 @@ func _menu_items() -> Array:
 				price += " / tile"
 		elif tool_id == Tool.ROAD:
 			item_name = Settings.ROAD_NAMES[e[4]]
-			about = ["Roads run straight and can turn one corner",
+			about = ["Roads run straight and can turn one corner. Drag one straight across the water, from shore to shore, to build a bridge",
 				"Two lanes each way with trees down the middle: takes nearly three times the traffic of a road, and drivers prefer it. Drag over a road to widen it",
 				"Three lanes each way: takes eight times the traffic of a road and is the quickest way across town. Plots can't open onto it, so join it to ordinary roads; it's noisy to live beside"][e[4]]
 			price = Hud.money_text(Settings.ROAD_COSTS[e[4]]) + " / tile"
@@ -1367,7 +1382,9 @@ func _choose_item(id: String) -> void:
 		if e[4] >= 0:
 			_choice[tool_id] = e[4]
 		_select_tool(tool_id)
-		hud.flash("%s: %s" % ["Painting" if tool_id == Tool.DISTRICT else "Building", _menu_name(id)])
+		var hint := _tool_hint()
+		hud.flash("%s: %s%s" % ["Painting" if tool_id == Tool.DISTRICT else "Building", _menu_name(id),
+			". " + hint if hint != "" else ""])
 		return
 
 
@@ -1521,13 +1538,13 @@ func _service_note(s: int) -> String:
 	var second := ""
 	var from := sim.service_needed_from(s)
 	if sim.population < from:
-		second = ["homes and shops need police", "fires can start", "homes need a school to grow past terraces",
+		second = ["homes and shops need police", "fires can start", "homes need a school to grow past townhouses",
 			"homes need a hospital to grow at full speed"][s] + " from %s people" % Hud.thousands(from)
 	else:
 		var what: String = ["%d %s at half speed without one" % [held, "plot grows" if held == 1 else "plots grow"],
 			"%d %s no fire cover (%s burn down)" % [held, "building has" if held == 1 else "buildings have",
 				"it could" if held == 1 else "they could"],
-			"%d %s past terraces without one" % [held, "home can't grow" if held == 1 else "homes can't grow"],
+			"%d %s past townhouses without one" % [held, "home can't grow" if held == 1 else "homes can't grow"],
 			"%d %s at half speed without one" % [held, "home grows" if held == 1 else "homes grow"]][s]
 		second = what
 	return "%s  ·  %s" % [first, second]
@@ -1731,7 +1748,8 @@ func _update_info() -> void:
 	if hud.info_label == null:
 		return
 	if not _in_map(hover):
-		hud.show_info("%s selected. Point at the map to see what's there." % _tool_label())
+		var hint := _tool_hint()
+		hud.show_info("%s selected. %s" % [_tool_label(), hint if hint != "" else "Point at the map to see what's there."])
 		return
 	var i := hover.y * map_w + hover.x
 	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
@@ -1974,7 +1992,7 @@ static func _rounded_trips(n: float) -> int:
 
 func _stage_words(t: int, s: int) -> String:
 	# What the buildings on a plot are, for the hover text.
-	var homes := ["", "houses", "houses and terraces", "tenements", "mansion flats", "modern flats", "towers",
+	var homes := ["", "houses", "houses and townhouses", "garden apartments", "mansion flats", "modern flats", "towers",
 		"skyscraper apartments", "landmark tower"]
 	var shops := ["", "strip mall", "strip mall", "shops with flats", "big stores", "department stores",
 		"shopping centre and hotel", "hotel skyscraper", "landmark hotel tower"]

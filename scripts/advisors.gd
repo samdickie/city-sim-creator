@@ -231,7 +231,7 @@ static func tips(sim: Simulation) -> Array[Dictionary]:
 		var text := "Families need a school: build one" if schools == 0 \
 			else "%d %s a school nearby to grow" % [school, "plot needs" if school == 1 else "plots need"]
 		_add(out, "school", WARNING, text,
-			"In a town of over %d people, homes won't grow past terraces without " % Settings.SCHOOL_NEEDED_POP
+			"In a town of over %d people, homes won't grow past townhouses without " % Settings.SCHOOL_NEEDED_POP
 			+ "a school nearby. The Services view shows them in red.", services_kind, Simulation.Service.SCHOOL)
 	var police := _n(stuck, "police")
 	if police >= 5:

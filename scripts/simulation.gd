@@ -307,6 +307,14 @@ func is_bridge(i: int) -> bool:
 	return tiles[i] == Tile.ROAD and water[i] == 1
 
 
+func has_bridge(min_tiles: int = 1) -> bool:
+	# Is there a bridge at least this many tiles long? (For the Golden Gate's hint.)
+	for i: int in tiles.size():
+		if is_bridge(i) and bridge_run(i).size() >= min_tiles:
+			return true
+	return false
+
+
 func bridge_run(i: int) -> Array[int]:
 	# The straight run of bridge tiles through i (along the bridge), in order.
 	var out: Array[int] = []

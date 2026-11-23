@@ -388,11 +388,11 @@ func _layout() -> void:
 	if new_city_panel.visible:
 		new_city_panel.size = Vector2.ZERO
 		new_city_panel.position = ((view - new_city_panel.size) * 0.5).floor()
-	# Help: centred, and never taller than the window.
+	# The guide: a fixed size (smaller on a small screen), centred.
 	if help_panel.visible:
-		var want := _help_columns.get_combined_minimum_size()
-		_help_scroll.custom_minimum_size = Vector2(minf(want.x + 16.0, view.x - EDGE * 2.0 - 28.0),
-			minf(want.y, view.y - 220.0))
+		var w := minf(GUIDE_W, view.x - EDGE * 2.0 - 32.0)
+		var h := minf(GUIDE_H, view.y - EDGE * 2.0 - 140.0)
+		_guide_body.custom_minimum_size = Vector2(w, h)
 		help_panel.size = Vector2.ZERO
 		help_panel.position = ((view - help_panel.size) * 0.5).floor()
 
@@ -501,7 +501,7 @@ func _menu_chosen(id: String) -> void:
 		"load":
 			load_pressed.emit()
 		"help":
-			help_panel.visible = not help_panel.visible
+			toggle_help()
 
 
 func _close_menu() -> void:
@@ -1232,91 +1232,518 @@ func set_overlay(kind: int, legend: Array, filter: int = -1, title: String = "",
 		_open(_legend_section, on)
 
 
-# ------------------------------------------------------------------ help
+# ------------------------------------------------------------------ the guide
+# "How to play" as a small book: topics down the left, one page at a time on
+# the right. Each page opens with an "In short" box, then headed sections of
+# short points ([b]bold[/b] for the words to look for). Numbers are read from
+# Settings, so the guide stays right when the rules are tuned. The pages
+# themselves are in _guide_pages().
+
+const GUIDE_W := 980.0          # the window at its biggest (smaller on a small screen)
+const GUIDE_H := 700.0
+const GUIDE_TEXT := 15          # body text
+const GUIDE_LINE := 4           # extra space between lines of a point
+const GUIDE_BODY := Color(0.82, 0.85, 0.90)   # body text (bold words are white)
+
+var _guide_topics := {}         # page id -> its button down the left
+var _guide_page := "start"      # the page showing (kept while the game runs)
+var _guide_box: VBoxContainer   # the page's contents
+var _guide_body: HBoxContainer
+var _guide_bold: SystemFont      # bold in the guide's text (heavier than the interface's)
+
 
 func _build_help() -> void:
-	help_panel = _panel(_root)
+	help_panel = _panel(_root, 18.0)
 	help_panel.visible = false
-	var box := _vbox(help_panel, 10)
-	var head := _hbox(box, 8)
+	var box := _vbox(help_panel, 12)
+	var head := _hbox(box, 10)
+	head.add_child(_icon_rect("help", 22, ACCENT))
 	var title := _label("How to play", 20, TEXT, true)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
+	head.add_child(_label("H or Esc closes", 12, TEXT_FAINT))
 	var close := _icon_button("close", "Close (H)", false)
 	close.theme_type_variation = "Flat"
-	close.pressed.connect(func(): help_panel.visible = false)
+	close.pressed.connect(close_help)
 	head.add_child(close)
+	box.add_child(_divider())
 
+	_guide_body = _hbox(box, 18)
+	_guide_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# Down the left: the topics.
+	var topics := _vbox(_guide_body, 2)
+	topics.custom_minimum_size.x = 214.0
+	for page: Dictionary in _guide_pages():
+		var id: String = page["id"]
+		var b := _guide_topic_button(page["title"], page["icon"])
+		b.pressed.connect(func(): show_help_page(id))
+		topics.add_child(b)
+		_guide_topics[id] = b
+	# On the right: the page, scrolling if it's long.
 	_help_scroll = ScrollContainer.new()
 	_help_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	box.add_child(_help_scroll)
-	_help_columns = _hbox(null, 28)
-	_help_scroll.add_child(_help_columns)
+	_help_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_help_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_guide_body.add_child(_help_scroll)
+	var pad := MarginContainer.new()
+	pad.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pad.add_theme_constant_override("margin_right", 14)
+	_help_scroll.add_child(pad)
+	_guide_box = _vbox(pad, 14)
+	_guide_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_help_columns = _guide_body
+	show_help_page(_guide_page)
 
-	# Left: the controls, as a key / what-it-does table.
-	var left := _vbox(_help_columns, 6)
-	left.add_child(_caption("Controls"))
-	var keys := GridContainer.new()
-	keys.columns = 2
-	keys.add_theme_constant_override("h_separation", 14)
-	keys.add_theme_constant_override("v_separation", 5)
-	left.add_child(keys)
-	for pair: Array in [
-			["Build", "Press, drag to see a preview and the cost, release to build (Esc cancels)"],
-			["Roads", "Roads and power lines run straight and can turn one corner"],
-			["Zones", "Zones, parks and woodland: drag a box. Start the drag ON a road to zone both sides of every road in the box, two plots deep"],
-			["9", "Street grid: drag a box to lay streets with 100 m blocks"],
-			["Tab", "Low, medium or high density for homes and shops; the next building in Power, Utilities, Leisure and Transport"],
-			["1-0, -, =", "Tools (5 or B bulldozes, Z paints districts)"],
-			["M", "Show or hide the Build menu"],
-			["Space, F", "Pause or play; fast"],
-			["O", "Next map view"],
-			["C", "Services view: all four services, then police, fire, schools and hospitals one at a time"],
-			["T", "Cars and people on the streets on or off"],
-			["H", "This help"],
-			["Ctrl/Cmd S, L", "Save, load"],
-			["Ctrl/Cmd Z", "Undo the last build (up to 20, for a year); you get the money back"],
-			["Move", "Two-finger scroll, middle-drag, or WASD"],
-			["Turn", "Right-drag, or Q / E (rotate and tilt)"],
-			["Zoom", "Pinch or scroll wheel"]]:
-		var k := _label(pair[0], 13, TEXT, true)
-		k.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-		keys.add_child(k)
-		var v := _label(pair[1], 13, TEXT_DIM)
-		v.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		v.custom_minimum_size = Vector2(290, 0)
-		keys.add_child(v)
 
-	# Right: how the town works.
-	var right := _vbox(_help_columns, 8)
-	right.add_child(_caption("How the town works"))
-	for para: String in [
-			"Pick what to build in the Build menu, bottom left: categories down its side, the items beside them. Homes and shops come in low, medium and high density.",
-			"Zones grow when a road is within %d tiles and they have power. Red icon = no road nearby; yellow lightning = no power. Power travels through roads, buildings and power lines that share an edge." % Settings.ROAD_REACH,
-			"Power (6), Utilities (7), Leisure (-) and Transport (=) each have several buildings: pick one with Tab. Anything bigger than a first-level plot needs water (pumps and towers; it travels like power). Towns over 400 people need rubbish collected. Some buildings unlock as the town grows.",
-			"Services (0): police, fire stations, schools and hospitals cover the area around them. They need a road and power. Bigger towns grow slowly without them; fires break out where there's no fire station. Funding (- / + under the Services list) changes how far they reach. While you place one, the map shows how far it would reach.",
-			"Services view: the chips (or C) show one service at a time: green where it reaches, red where plots are held back without it, orange where it's missing but not holding them back yet. Pointing at a plot shows which services reach it.",
-			"Taxes: people accept higher taxes when they get good services for them. High taxes with poor services stop growth, and eventually people leave (worst-served areas first). Change them in the City panel: click the strip, top right.",
-			"Money: a new city starts Easy (%s), Normal (%s) or Hard (%s); harder levels also cost more to run and pay more interest. Short of money? Borrow in the City panel. Loans are paid back a little each month over about %d years, with interest; repay early to save interest. With no money left you can't build until taxes bring some in." % [
-				money_text(_level_money(0)), money_text(_level_money(1)), money_text(_level_money(2)),
-				roundi(Settings.LOAN_MONTHS / 12.0)],
-			"Happiness (top right) sums it all up: taxes, services, jobs, homes, rubbish, power, water, polluted air and leisure. Below 50% people stop moving in; below 33% they leave.",
-			"Advisors (top centre) point out what needs attention, most urgent first. Click a tip to see the problem on the map (click again to go back to the normal view).",
-			"Map views (bottom right, or O): land value, power, roads, growth, services, water, districts, pollution and traffic, each with a colour key. They're always shown in daylight, so the colours read at night too.",
-			"Districts (Z): paint a CBD where high-density plots can become skyscrapers (8,000 people and a station or bus depot nearby), a Tech zone whose offices and industry (any density) pay their own tax rate (set it in the City panel; below the town's draws firms in; start-ups want its empty office plots, big companies its open land), or a conservation area kept low-rise.",
-			"Letters (the envelope, top left): companies write when your town has something they want. Start-ups ask for a small grant and an empty office plot in your Tech zone; each year they may grow, fold or get bought (your stake pays out). Answer within %d months or they go elsewhere." % Settings.LETTER_MONTHS,
-			"Education (Build menu): a college, then a university (drag out a campus) and a research park beside it. They turn residents into tech workers, which the big companies want before they'll come; a research park makes them keener. Students need homes, and universities are costly to run.",
-			"Data centres: Amazon, Microsoft or Google write once you have %s people and open land in a Tech zone. Pick a size, then drag out its site in the Tech zone. They pay well and bring a little work, but use power and water like a small town; on a stretched grid everyone's bills go up." % "1,500",
-			"Low density grows ranch houses and villas (with strip malls and office parks); medium up to tenements, and mansion flats when space runs short; high density builds upwards to towers on valuable land. Land is worth more by the sea, near parks and shops, and less near industry and power plants. Scarce homes push prices up."]:
-		var p := _label(para, 13, TEXT_DIM)
-		p.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		p.custom_minimum_size = Vector2(400, 0)
-		right.add_child(p)
+func open_help(page: String = "") -> void:
+	if page != "":
+		show_help_page(page)
+	_open(help_panel, true)
 
-	var ok := _button("Got it", false)
-	ok.size_flags_horizontal = Control.SIZE_SHRINK_END
-	ok.pressed.connect(func(): help_panel.visible = false)
-	box.add_child(ok)
+
+func close_help() -> void:
+	if help_panel.visible:
+		_open(help_panel, false)
+
+
+func toggle_help() -> void:
+	if help_panel.visible:
+		close_help()
+	else:
+		open_help()
+
+
+func help_page() -> String:
+	return _guide_page
+
+
+func show_help_page(id: String) -> void:
+	var pages := _guide_pages()
+	var at := 0
+	for k: int in pages.size():
+		if pages[k]["id"] == id:
+			at = k
+	var page: Dictionary = pages[at]
+	_guide_page = page["id"]
+	for topic: String in _guide_topics:
+		(_guide_topics[topic] as Button).set_pressed_no_signal(topic == _guide_page)
+	for child: Node in _guide_box.get_children():
+		_guide_box.remove_child(child)
+		child.queue_free()
+	var heading := _hbox(_guide_box, 10)
+	heading.add_child(_icon_rect(page["icon"], 26, ACCENT))
+	heading.add_child(_label(page["title"], 22, TEXT, true))
+	_guide_box.add_child(_guide_short(page["short"]))
+	if page.has("steps"):
+		var n := 0
+		for step: String in page["steps"]:
+			n += 1
+			_guide_box.add_child(_guide_point(step, str(n)))
+	if page.has("keys"):
+		# Two columns: the first group on the left, the rest on the right.
+		var cols := _hbox(_guide_box, 28)
+		var left := _vbox(cols, 10)
+		var right := _vbox(cols, 10)
+		var groups: Array = page["keys"]
+		for k: int in groups.size():
+			var col := left if k == 0 else right
+			var group: Array = groups[k]
+			if k > 1:
+				col.add_child(_spacer(4))
+			col.add_child(_guide_heading(group[0]))
+			col.add_child(_guide_keys(group[1]))
+	for section: Array in page.get("sections", []):
+		var part := _vbox(_guide_box, 8)
+		part.add_child(_guide_heading(section[0]))
+		for point: String in section[1]:
+			part.add_child(_guide_point(point))
+	# Back and next, so the guide can be read straight through.
+	_guide_box.add_child(_divider())
+	var foot := _hbox(_guide_box, 8)
+	if at > 0:
+		var back_id: String = pages[at - 1]["id"]
+		var back := _button("‹  %s" % pages[at - 1]["title"], false)
+		back.theme_type_variation = "Flat"
+		back.pressed.connect(func(): show_help_page(back_id))
+		foot.add_child(back)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	foot.add_child(gap)
+	if at < pages.size() - 1:
+		var next_id: String = pages[at + 1]["id"]
+		var next := _button("Next: %s  ›" % pages[at + 1]["title"], false)
+		next.pressed.connect(func(): show_help_page(next_id))
+		foot.add_child(next)
+	else:
+		var done := _button("Got it", false)
+		done.pressed.connect(close_help)
+		foot.add_child(done)
+	if _help_scroll:
+		_help_scroll.scroll_vertical = 0
+
+
+func _guide_topic_button(text: String, icon_id: String) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.icon = _line_icon(icon_id, 36)
+	b.expand_icon = false
+	b.toggle_mode = true
+	b.focus_mode = Control.FOCUS_NONE
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.add_theme_constant_override("h_separation", 10)
+	b.add_theme_constant_override("icon_max_width", 18)
+	b.add_theme_font_size_override("font_size", 14)
+	var plain := _soft_box(Color(1, 1, 1, 0.0), 9)
+	var hover := _soft_box(Color(1, 1, 1, 0.09), 9)
+	var chosen := _soft_box(Color(ACCENT, 0.32), 9)
+	for s: StyleBoxFlat in [plain, hover, chosen]:
+		s.content_margin_left = 10
+		s.content_margin_right = 10
+		s.content_margin_top = 7
+		s.content_margin_bottom = 7
+	b.add_theme_stylebox_override("normal", plain)
+	b.add_theme_stylebox_override("hover", hover)
+	b.add_theme_stylebox_override("pressed", chosen)
+	b.add_theme_stylebox_override("hover_pressed", chosen)
+	b.add_theme_color_override("font_color", TEXT_DIM)
+	b.add_theme_color_override("font_hover_color", TEXT)
+	b.add_theme_color_override("font_pressed_color", TEXT)
+	b.add_theme_color_override("font_hover_pressed_color", TEXT)
+	b.add_theme_color_override("icon_normal_color", TEXT_FAINT)
+	b.add_theme_color_override("icon_pressed_color", TEXT)
+	b.add_theme_color_override("icon_hover_color", TEXT)
+	b.add_theme_color_override("icon_hover_pressed_color", TEXT)
+	return b
+
+
+func _guide_text(text: String, size: int, colour: Color) -> RichTextLabel:
+	# Wrapped text with [b]bold[/b] for the words that matter.
+	var r := RichTextLabel.new()
+	r.bbcode_enabled = true
+	r.fit_content = true
+	r.scroll_active = false
+	r.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	r.mouse_filter = Control.MOUSE_FILTER_PASS
+	r.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	r.add_theme_font_size_override("normal_font_size", size)
+	r.add_theme_font_size_override("bold_font_size", size)
+	if _guide_bold == null:
+		_guide_bold = SystemFont.new()
+		_guide_bold.font_names = (_bold as SystemFont).font_names
+		_guide_bold.font_weight = 700
+		_guide_bold.antialiasing = TextServer.FONT_ANTIALIASING_GRAY
+	r.add_theme_font_override("bold_font", _guide_bold)
+	r.add_theme_color_override("default_color", colour)
+	r.add_theme_constant_override("line_separation", GUIDE_LINE)
+	# The words that matter: heavier and pure white against the softer text.
+	r.text = text.replace("[b]", "[b][color=#ffffff]").replace("[/b]", "[/color][/b]")
+	return r
+
+
+func _guide_short(text: String) -> Control:
+	# "In short": the page in a sentence or two, in a lightly lit box.
+	var card := PanelContainer.new()
+	var style := _soft_box(Color(ACCENT, 0.14), 10)
+	style.content_margin_left = 14
+	style.content_margin_right = 14
+	style.content_margin_top = 10
+	style.content_margin_bottom = 11
+	style.border_width_left = 3
+	style.border_color = ACCENT
+	card.add_theme_stylebox_override("panel", style)
+	card.add_child(_guide_text(text, GUIDE_TEXT + 1, TEXT))
+	return card
+
+
+func _spacer(h: float) -> Control:
+	var c := Control.new()
+	c.custom_minimum_size.y = h
+	c.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return c
+
+
+func _guide_heading(text: String) -> Label:
+	var l := _label(text, 16, TEXT, true)
+	return l
+
+
+func _guide_point(text: String, number: String = "") -> Control:
+	# One point: a dot (or a step number) and its text.
+	var row := _hbox(null, 10)
+	var mark := _label(number if number != "" else "•", GUIDE_TEXT if number != "" else GUIDE_TEXT + 2,
+		ACCENT, number != "")
+	mark.custom_minimum_size.x = 18.0 if number != "" else 12.0
+	mark.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT if number != "" else HORIZONTAL_ALIGNMENT_CENTER
+	mark.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	row.add_child(mark)
+	row.add_child(_guide_text(text, GUIDE_TEXT, GUIDE_BODY))
+	return row
+
+
+func _guide_keys(pairs: Array) -> Control:
+	# Keys drawn as keycaps beside what they do.
+	var grid := GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", 16)
+	grid.add_theme_constant_override("v_separation", 8)
+	for pair: Array in pairs:
+		var keys := _hbox(grid, 4)
+		keys.custom_minimum_size.x = 104.0
+		for key: String in (pair[0] as String).split(" "):
+			if key == "/" or key == "or":
+				keys.add_child(_label(key, 13, TEXT_FAINT))
+				continue
+			var cap := _label(key.replace("_", " "), 13, TEXT, true)
+			var style := _soft_box(Color(1, 1, 1, 0.12), 6)
+			style.content_margin_left = 8
+			style.content_margin_right = 8
+			style.content_margin_top = 2
+			style.content_margin_bottom = 3
+			style.border_width_bottom = 2
+			style.border_color = Color(1, 1, 1, 0.18)
+			cap.add_theme_stylebox_override("normal", style)
+			cap.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+			keys.add_child(cap)
+		var what := _guide_text(pair[1], GUIDE_TEXT - 1, GUIDE_BODY)
+		what.custom_minimum_size.x = 220.0
+		grid.add_child(what)
+	return grid
+
+
+func _guide_pages() -> Array:
+	# The guide's pages, in reading order. Numbers come from Settings.
+	var p := func(key: String) -> String: return thousands(int(Settings.PROJECTS[key]["pop"]))
+	var unlock := func(key: String) -> String: return thousands(int(Settings.BUILDINGS[key].get("unlock", 0)))
+	var reach_m := func(s: int) -> String: return thousands(int(Settings.SERVICE_RADIUS[s]) * 50)
+	var views: Array = OVERLAY_NAMES.slice(1)
+	return [
+		{"id": "start", "title": "Getting started", "icon": "build",
+		"short": "Lay roads, zone land for homes, shops and work, and give it power and water. The town builds itself: your job is to keep people [b]happy[/b] and the books [b]balanced[/b].",
+		"steps": [
+			"[b]Lay a road[/b] (press 1): press, drag and let go. Roads run straight and can turn one corner. Press 9 and drag a box to lay a whole street grid.",
+			"[b]Zone homes, shops and industry[/b] beside it (2, 3 and 4): drag a box. Start the drag on a road to zone both sides of every road in the box. Tab picks low, medium or high density.",
+			"[b]Build a power plant[/b] (6) touching a road. Power runs along roads, buildings and power lines that touch each other.",
+			"[b]Start the clock[/b] with Space (F for fast). Zoned plots become building sites, then homes, shops and works.",
+			"[b]Watch the demand bars[/b] in the strip at the top right. A bar above the line means that zone is wanted: zone more of it.",
+			"[b]Add water[/b] (7, a pump) before plots grow past their first stage, and [b]collect rubbish[/b] (7, a landfill) once the town passes %s people." % thousands(Settings.RUBBISH_START_POP),
+			"[b]Add services[/b] (0): police, fire stations, schools and hospitals near the homes. Bigger towns need them to keep growing.",
+			"[b]Point at anything[/b] to see what it is and what it's waiting for. The advisors (top centre) say what needs doing next."],
+		"sections": [
+			["If you get stuck", [
+				"[b]Ctrl/Cmd Z[/b] undoes your last build and gives the money back (your last %d builds, for up to a year)." % Settings.UNDO_STEPS,
+				"Short of money? [b]Borrow[/b] in the City panel: click the strip at the top right.",
+				"Want to see a finished town? ☰ > [b]Example cities[/b] loads a village, a town or a city to explore. Your own save is untouched until you press Save."]]]},
+
+		{"id": "controls", "title": "Controls", "icon": "all",
+		"short": "Build with the mouse: [b]press, drag to see a preview and the cost, let go to build[/b]. Esc cancels. Every tool also has a key.",
+		"keys": [
+			["Building", [
+				["1", "Roads (avenues and motorways are in the Build menu)"],
+				["2 3 4", "Homes, shops, industry (Tab: density)"],
+				["9", "Street grid: drag a box"],
+				["5 or B", "Bulldoze"],
+				["6 7", "Power, utilities (Tab: the next building)"],
+				["8 - =", "Parks, leisure, transport"],
+				["0", "Services"],
+				["Z", "Paint districts"],
+				["M", "Show or hide the Build menu"],
+				["Esc", "Cancel a drag"],
+				["Ctrl/Cmd Z", "Undo the last build"]]],
+			["Time and views", [
+				["Space", "Pause or play"],
+				["F", "Fast"],
+				["O", "Next map view"],
+				["C", "Services view, one service at a time"],
+				["T", "Cars and people on or off"],
+				["H", "This guide"]]],
+			["Camera", [
+				["W A S D", "Move (or two-finger scroll, or middle-drag)"],
+				["Q E", "Turn and tilt (or right-drag)"],
+				["Scroll", "Zoom (or pinch)"]]],
+			["Saving", [
+				["Ctrl/Cmd S", "Save"],
+				["Ctrl/Cmd L", "Load"]]]]},
+
+		{"id": "zones", "title": "Zones and growth", "icon": "zones",
+		"short": "Zoned land builds itself when people or firms want it [b]and[/b] the plot has what it needs. Point at a plot to see what it's waiting for.",
+		"sections": [
+			["Four zones", [
+				"[b]Homes[/b] house your people.",
+				"[b]Shops[/b] serve residents and visitors, and give jobs.",
+				"[b]Industry[/b] gives jobs, but pollutes and lowers land value nearby.",
+				"[b]Offices[/b] give clean jobs. They're wanted from %s people, more as the town grows, and more with schools and tech workers." % thousands(Settings.OFFICE_START_POP)]],
+			["Three densities", [
+				"[b]Low[/b]: houses, strip malls and office parks.",
+				"[b]Medium[/b]: townhouses, then garden apartments, then mansion flats where space runs short.",
+				"[b]High[/b]: blocks of flats and offices, rising to towers on valuable land (and skyscrapers in a CBD).",
+				"Density sets [b]how tall[/b] a plot may grow, not how fast."]],
+			["What a plot needs to grow", [
+				"[b]A road[/b] within %d tiles (a red icon means none)." % Settings.ROAD_REACH,
+				"[b]Power[/b] (a yellow lightning bolt means none).",
+				"[b]Water[/b] to grow past its first stage.",
+				"[b]A school[/b] nearby to grow past townhouses, once the town has %s people." % thousands(Settings.SCHOOL_NEEDED_POP),
+				"[b]Demand[/b] for that zone, and people happy enough to move in."]],
+			["When things go wrong", [
+				"Plots nobody wants, or in an unhappy town, [b]decline[/b] a stage at a time.",
+				"After %d months in decline a building may be [b]abandoned[/b] (boarded up), which lowers land value round it. Fix the cause and the area recovers." % Settings.ABANDON_MONTHS]]]},
+
+		{"id": "demand", "title": "Demand and happiness", "icon": "smile",
+		"short": "[b]Demand[/b] says what the town wants more of. [b]Happiness[/b] decides whether people move in or leave.",
+		"sections": [
+			["The demand bars (top right)", [
+				"One bar per zone: [b]above the line[/b] it's wanted, [b]below[/b] there's too much.",
+				"Point at the bars for the numbers: how many people or jobs are wanted, the room left on plots you've zoned, and roughly how many more plots each density would need.",
+				"[b]Homes[/b] are wanted when there are jobs and the town is a good place to live. Students add a few.",
+				"[b]Shops[/b] follow your residents, plus visitors brought by stations, the airport and landmarks.",
+				"[b]Offices[/b] and [b]industry[/b] take the rest of the workers. Tech workers want offices."]],
+			["Happiness (top right)", [
+				"Built from [b]taxes against services[/b], services, jobs, homes, rubbish, power, water, pollution and leisure (and, with big tech, fairness, bills and the cost of living).",
+				"Below [b]50%[/b] nobody moves in. Below [b]33%[/b] people start to leave, the worst-served areas first.",
+				"Open the City panel (click the strip, top right) to see which parts are pulling it down."]]]},
+
+		{"id": "money", "title": "Money", "icon": "pound",
+		"short": "Taxes come in every month and running costs go out. Keep the balance above zero: with no money left you can't build.",
+		"sections": [
+			["Taxes", [
+				"Set the rate in the [b]City panel[/b] (it starts at %d%%)." % roundi(Settings.DEFAULT_TAX_RATE * 100.0),
+				"People accept [b]higher taxes when services are good[/b]. High taxes with poor services stop growth, then drive people away."]],
+			["Running costs", [
+				"Every building and road has monthly upkeep. Services cost more at higher funding.",
+				"Bridges cost %d times a road to build and %d times to run." % [Settings.BRIDGE_COST_X, Settings.BRIDGE_UPKEEP_X]]],
+			["Difficulty", [
+				"A new city starts [b]Easy[/b] (%s), [b]Normal[/b] (%s) or [b]Hard[/b] (%s). Harder levels also cost more to run and pay more interest." % [
+					money_text(_level_money(0)), money_text(_level_money(1)), money_text(_level_money(2))]]],
+			["Loans", [
+				"Borrow in the City panel. Loans are paid back a little each month over about %d years, with interest. Repay early to save interest." % roundi(Settings.LOAN_MONTHS / 12.0)]]]},
+
+		{"id": "utilities", "title": "Power, water and rubbish", "icon": "power",
+		"short": "Every building needs [b]power[/b]; anything past its first stage needs [b]water[/b]; towns over %s people need their [b]rubbish[/b] collected." % thousands(Settings.RUBBISH_START_POP),
+		"sections": [
+			["Power", [
+				"[b]Coal[/b] is cheap but smoky. [b]Gas[/b] (from %s people) is cleaner, [b]nuclear[/b] (from %s) is huge, and [b]wind[/b] and [b]solar[/b] are clean but small (drag them out as farms)." % [unlock.call("gas"), unlock.call("nuclear")],
+				"Power travels through [b]roads, buildings and power lines that touch[/b]. A gap leaves part of the town dark.",
+				"The power meter at the top right shows how much you use. Big company sites use power like a small town: on a stretched grid everyone's bills go up."]],
+			["Water", [
+				"[b]Pumps[/b] and [b]water towers[/b] supply it, and it travels like power.",
+				"Without it, plots stay at their first stage."]],
+			["Rubbish", [
+				"A [b]landfill[/b] (drag out a box) is cheap but nobody wants to live by it. A [b]recycling centre[/b] (from %s people) is clean. An [b]incinerator[/b] (from %s) takes a lot on one plot but smokes." % [unlock.call("recycling"), unlock.call("incinerator")],
+				"Point at one to see how full it is."]]]},
+
+		{"id": "services", "title": "Services", "icon": "services",
+		"short": "Police, fire stations, schools and hospitals [b]cover the area round them[/b]. Bigger towns grow slowly without them.",
+		"sections": [
+			["The four services", [
+				"[b]Police[/b] (reach about %s m) keep crime down." % reach_m.call(0),
+				"[b]Fire stations[/b] (about %s m): fires break out where there's none." % reach_m.call(1),
+				"[b]Schools[/b] (about %s m): families won't move into bigger homes without one, and pupils become tech workers." % reach_m.call(2),
+				"[b]Hospitals[/b] (about %s m) keep people healthy and happy." % reach_m.call(3),
+				"The [b]small versions[/b] (police office, small fire station, clinic) cost less and reach about half as far.",
+				"Every service needs a road and power."]],
+			["Funding", [
+				"The [b]- / +[/b] under the Services list in the Build menu changes how far they reach, and what they cost."]],
+			["Seeing where they reach", [
+				"The [b]Services view[/b] (press C to go through them): green where a service reaches, [b]red[/b] where plots are held back without it, orange where it's missing but not holding them back yet.",
+				"While you place one, a disc shows how far it would reach and the card says what it would cover.",
+				"Point at a plot to see which services reach it."]]]},
+
+		{"id": "land", "title": "Land value and pollution", "icon": "value",
+		"short": "Valuable land builds taller and dearer homes. [b]Pollution[/b] lowers land value and holds homes back.",
+		"sections": [
+			["What land is worth", [
+				"[b]Raised by[/b] the sea, parks, woodland, shops, landmarks and being in a CBD.",
+				"[b]Lowered by[/b] industry, power plants, pollution, landfill, motorway noise and abandoned buildings.",
+				"Homes within %d m of a [b]data centre[/b] are worth less: its cooling fans hum day and night." % (Settings.DC_HUM_RADIUS * 50),
+				"Scarce homes push prices up; a big tech campus pushes them up further."]],
+			["Pollution", [
+				"Comes from [b]industry, coal and gas power, landfill, the harbour, incinerators and chip factories[/b].",
+				"[b]Parks and woodland[/b] clean the air nearby (plant a belt of trees between works and homes).",
+				"The [b]Pollution view[/b] shows where the air is dirty."]]]},
+
+		{"id": "roads", "title": "Roads and transport", "icon": "roads",
+		"short": "Roads give plots access and carry the traffic. Wider roads carry more, and bus stations and railways carry people further.",
+		"sections": [
+			["Kinds of road", [
+				"[b]Road[/b]: cheap; plots open onto it.",
+				"[b]Avenue[/b]: tree-lined, takes nearly three times the traffic.",
+				"[b]Motorway[/b]: takes eight times the traffic and is quickest, but nothing opens onto it and it's noisy.",
+				"Drag one kind over another to change it. Drivers take the quickest way."]],
+			["Bridges", [
+				"Drag a road [b]straight across the water from shore to shore[/b]: the water part becomes a bridge, up to %s km long." % str(Settings.BRIDGE_MAX_TILES * 50 / 1000.0),
+				"If the drag stops in the water or turns, the info line says why."]],
+			["Traffic", [
+				"The [b]Traffic view[/b] shows how busy each road is, from quiet to jammed. Point at a road for its trips a day.",
+				"For now jams only show; they don't hold the town back."]],
+			["Transport", [
+				"A [b]bus depot[/b] or [b]railway station[/b] serves the area round it; skyscrapers need one nearby.",
+				"A [b]harbour[/b] (by the sea) and an [b]airport[/b] (drag out a big box) bring visitors and jobs."]]]},
+
+		{"id": "districts", "title": "Districts", "icon": "districts",
+		"short": "Paint districts with [b]Z[/b] to give parts of town their own rules. The Districts view shows them.",
+		"sections": [
+			["CBD", [
+				"High-density plots can rise two more stages, into [b]skyscrapers[/b].",
+				"Skyscrapers need %s people and a working station or bus depot within %d tiles." % [thousands(Settings.SKYSCRAPER_POP), Settings.SKYSCRAPER_TRANSIT],
+				"Land in a CBD is worth a little more."]],
+			["Tech zone", [
+				"Its [b]offices and industry[/b] (any density) pay their own tax rate: set it in the City panel.",
+				"About %d points below the town's rate draws outside firms in. Start-ups want its empty office plots; big companies want its open land." % roundi(Settings.TECH_PULL_GAP * 100.0),
+				"A big tax break for firms can make residents feel it's [b]unfair[/b]."]],
+			["Conservation area", [
+				"Kept low-rise (up to garden apartments), with a little extra land value for its character."]]]},
+
+		{"id": "tech", "title": "Tech and companies", "icon": "mail",
+		"short": "Companies [b]write to you[/b] (the envelope, top left) when your town has what they want. Every letter is a deal with a catch.",
+		"sections": [
+			["Letters", [
+				"A new letter opens a card and pauses the game. Answer within [b]%d months[/b] or the company goes elsewhere." % Settings.LETTER_MONTHS,
+				"[b]Records[/b] (in the inbox) keeps every letter and start-up, with what each has paid."]],
+			["Start-ups", [
+				"From %s people, with an empty office plot in a Tech zone. They ask for a grant of %s to %s." % [thousands(Settings.STARTUP_POP),
+					money_text(int(Settings.STARTUP_GRANTS[0])), money_text(int(Settings.STARTUP_GRANTS[-1]))],
+				"Each year one may grow (%d%%), go bust (%d%%) or be bought out (%d%%), paying back [b]%d times[/b] your grant. Until then you get its jobs and tax." % [
+					roundi(Settings.STARTUP_GROW * 100.0), roundi(Settings.STARTUP_FOLD * 100.0),
+					roundi(Settings.STARTUP_ACQUIRED * 100.0), Settings.STARTUP_PAYOUT]]],
+			["Big companies", [
+				"[b]Data centre[/b] (Amazon, Microsoft or Google), from %s people: pays well, but uses power and water like a small town and hums." % p.call("data_centre"),
+				"[b]Gigafactory[/b] (Tesla), from %s: lots of jobs; wants a motorway." % p.call("gigafactory"),
+				"[b]Launch site[/b] (SpaceX), from %s: by the sea; nobody may live near it; launches bring tourists (and the odd explosion)." % p.call("launch_site"),
+				"[b]Campus[/b] (Google, Apple or Meta), from %s: well-paid jobs; wants schools; raises house prices." % p.call("campus"),
+				"[b]Chip factory[/b] (Nvidia), from %s: a huge thirst for water and a little pollution." % p.call("chip_factory"),
+				"[b]AI data centre[/b] (OpenAI), from %s: asks for more power every year; turn it down %d times and it leaves." % [p.call("ai_data_centre"), Settings.AI_REFUSALS],
+				"Pick a size (Small, Standard or Mega), agree the tax break, then [b]drag out its site[/b] in your Tech zone."]],
+			["Tech workers", [
+				"The bigger companies want [b]tech workers[/b] before they'll come. Schools make a few; a [b]college[/b] (from %s people), [b]university[/b] and [b]research park[/b] (from %s) make many more. The City panel shows how many you have." % [unlock.call("college"), unlock.call("university")]]],
+			["Watch out", [
+				"Raise the Tech zone tax after Elon has agreed a deal and he'll threaten to move Tesla and SpaceX out.",
+				"Meta may change what its campus is for. Apple won't open next to dirty air."]]]},
+
+		{"id": "leisure", "title": "Leisure and landmarks", "icon": "landmarks",
+		"short": "Parks, leisure and landmarks make the town [b]nicer to live in[/b] and bring [b]visitors[/b], who shop.",
+		"sections": [
+			["Parks and leisure", [
+				"[b]Parks[/b] (8) and [b]woodland[/b] (drag out a forest) raise land value nearby and clean the air.",
+				"A library, museum, stadium, marina, golf course and town hall each add happiness and land value."]],
+			["Landmarks", [
+				"San Francisco's landmarks unlock as the town grows. You can build one of each.",
+				"Their [b]tourists[/b] want shops, and they make the town more appealing."]],
+			["Over the water", [
+				"[b]Golden Gate Bridge[/b] (from %s people): pick it, then click one of your bridges at least %d m long." % [unlock.call("golden_gate"), Settings.GOLDEN_GATE_MIN_TILES * 50],
+				"[b]Alcatraz[/b] (from %s): out on the water, at least %d m from any shore. It draws more visitors if you have the Ferry Building." % [unlock.call("alcatraz"), Settings.ALCATRAZ_OFFSHORE * 50]]]]},
+
+		{"id": "views", "title": "Map views and advisors", "icon": "eye",
+		"short": "When something's wrong, the [b]advisors[/b] say what, and the [b]map views[/b] show where.",
+		"sections": [
+			["Advisors (top centre)", [
+				"The most urgent problem comes first. [b]Click a tip[/b] to see it on the map; click again to go back."]],
+			["Map views (bottom right, or O)", [
+				"%s." % ", ".join(PackedStringArray(views)),
+				"Each has a colour key. They're always shown in daylight, so the colours read at night too."]],
+			["Pointing at things", [
+				"The card at the bottom says what anything is, how it's doing and [b]what it's waiting for[/b]."]],
+			["The City panel (click the strip, top right)", [
+				"Taxes, the month's budget, loans, your people and jobs, and what's making people unhappy."]]]},
+	]
 
 
 # ------------------------------------------------------------- New city dialog

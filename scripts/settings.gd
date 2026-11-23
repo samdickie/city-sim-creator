@@ -19,7 +19,7 @@ const DIFFICULTIES := [
 # Ready-made cities in the game menu: examples/<id>.json, made by tools/make_examples.sh.
 const EXAMPLES := [
 	{"id": "village", "name": "Village", "about": "A small seaside village with room to grow"},
-	{"id": "town", "name": "Town", "about": "A busy harbour town with terraces, shops and a works"},
+	{"id": "town", "name": "Town", "about": "A busy bayside town with townhouses, shops and a works"},
 	{"id": "city", "name": "City", "about": "A large, mature city with a skyline, parks and every service"},
 ]
 const DEFAULT_DIFFICULTY := 1     # Normal (also what saves from before difficulty load as)
@@ -483,7 +483,7 @@ const BUILDINGS := {
 	# Golden Gate: red, with two towers and cables (sim.golden_gate).
 	"golden_gate": {"name": "Golden Gate Bridge", "cost": 60000, "upkeep": 150, "unlock": 15000, "only_one": true,
 		"landmark": true, "no_road": true, "appeal": 0.05, "visitors": 0.010,
-		"about": "Turn one of your bridges into the Golden Gate: red towers and cables over the Bay. Tourists come from all over: shop demand and appeal"},
+		"about": "Pick it, then click one of your bridges (at least 400 m over the water) to turn it into the Golden Gate: red towers and cables over the Bay. Build the bridge first with the Road tool. Tourists come from all over: shop demand and appeal"},
 	# Alcatraz: out on the water on its own rock (on_water: at least ALCATRAZ_OFFSHORE
 	# tiles from land), reached by ferry: no road, power or water. Half as many
 	# visitors again with a Ferry Building in town.

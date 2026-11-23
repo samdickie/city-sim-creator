@@ -1201,8 +1201,10 @@ func _campus() -> void:
 	sim.recount()
 	check(sim.schooled_share() >= 0.6 and sim.project_chance("campus") > no_schools * 3.0,
 		"campus: with schools near %d%% of homes, Google is keener" % roundi(sim.schooled_share() * 100.0))
+	# (A campus letter comes about once in 150 months here, and only one in three
+	# is Google's: 600 tries failed about a third of the time, so give it plenty.)
 	var tries := 0
-	while not sim.call("_has_letter", "campus") and tries < 600:
+	while not sim.call("_has_letter", "campus") and tries < 6000:
 		sim.call("_update_letters")
 		for letter: Dictionary in sim.letters.duplicate():
 			if String(letter["kind"]) != "campus" or String(letter["company"]) != "Google":   # (Google's first)
@@ -2373,7 +2375,33 @@ func _wheel_over_panels() -> void:
 	await _wait(0.3)
 	check(absf(rig.distance - dist) < 0.5, "the wheel over the help doesn't zoom")
 	await _shot("p05_help")
+	# The guide: topics down the left, one page at a time, Next and Back, Esc closes.
+	var topics: Dictionary = hud.get("_guide_topics")
+	check(topics.size() >= 12, "the guide has its topics down the left (%d)" % topics.size())
+	await _click(topics["money"])
+	await _wait(0.2)
+	check(hud.help_page() == "money" and (topics["money"] as Button).button_pressed,
+		"clicking a topic shows its page")
+	var page_text := _texts(hud.get("_guide_box"))
+	check(page_text.contains("Loans") and page_text.contains("Taxes"),
+		"the Money page has its sections")
+	var next_button: Button = null
+	for b: Node in (hud.get("_guide_box") as Node).find_children("*", "Button", true, false):
+		if (b as Button).text.begins_with("Next:"):
+			next_button = b
+	check(next_button != null, "a page has a Next button")
+	if next_button:
+		await _click(next_button)
+		await _wait(0.2)
+		check(hud.help_page() == "utilities", "Next goes to the next topic (%s)" % hud.help_page())
+	await _key(KEY_ESCAPE)
+	await _wait(0.3)
+	check(not hud.help_panel.visible, "Esc closes the guide")
 	await _key(KEY_H)
+	await _wait(0.2)
+	check(hud.help_panel.visible and hud.help_page() == "utilities", "H opens the guide where you left off")
+	await _key(KEY_H)
+	await _wait(0.3)
 	check(not hud.help_panel.visible, "H closes the help")
 	# The info card and the map views.
 	await _wheel(hud.get("_info_panel").get_global_rect().get_center(), false, 2)
@@ -3778,7 +3806,7 @@ func _services() -> void:
 			title.text, " / ".join(rows), hud.legend_note.text])
 	await _click(chips[2])
 	var note := hud.legend_note.text
-	check(note.contains("%d homes can't grow past terraces" % held) and note.begins_with("Schools reach"),
+	check(note.contains("%d homes can't grow past townhouses" % held) and note.begins_with("Schools reach"),
 		"services: the Schools key counts them: \"%s\"" % note)
 	check(_legend_rows()[2].contains("no school") and _legend_rows()[4].begins_with("School"),
 		"services: the Schools key: %s" % " / ".join(_legend_rows()))

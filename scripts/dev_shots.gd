@@ -627,6 +627,12 @@ func _shot_list() -> Array[Dictionary]:
 			"hud": true, "prep": _prep_small, "size": SMALL_SIZE},
 		{"name": "17_hud_help", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
 			"hud": true, "prep": _prep_help},
+		{"name": "17b_hud_help_controls", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_help.bind("controls")},
+		{"name": "17c_hud_help_tech", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_help.bind("tech")},
+		{"name": "17d_hud_help_small", "at": Vector2(55, 58), "yaw": -40.0, "pitch": 38.0, "dist": 1700.0,
+			"hud": true, "prep": _prep_help.bind("zones"), "size": SMALL_SIZE},
 		{"name": "18_hud_query", "at": Vector2(52, 50), "yaw": -35.0, "pitch": 32.0, "dist": 480.0,
 			"hud": true, "prep": _prep_query, "hover": true},
 		# Money: the New city dialog (from the menu; and on a small window, as when
@@ -948,10 +954,11 @@ func _prep_small() -> void:
 	hud.get("_city_button").button_pressed = true
 
 
-func _prep_help() -> void:
+func _prep_help(page: String = "start") -> void:
 	_hud_reset()
 	hud.set_build_open(false)
 	game.call("_set_overlay", WorldView.Overlay.NONE)
+	hud.show_help_page(page)
 	hud.help_panel.visible = true
 
 

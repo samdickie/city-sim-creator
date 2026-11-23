@@ -2076,7 +2076,7 @@ func _service_legend(s: int) -> Array:
 	var building: String = Settings.SERVICE_NAMES[s]
 	var held: String = ["Homes and shops growing at half speed: no police",
 		"Buildings that could burn down: no fire cover",
-		"Homes that can't grow past terraces: no school",
+		"Homes that can't grow past townhouses: no school",
 		"Homes growing at half speed: no hospital"][s]
 	var missing: String = ["Homes and shops with no police (not holding them back yet)",
 		"Plots with no fire cover (no risk yet: empty, or a small town)",
