@@ -1,8 +1,27 @@
 # Silicon City
 
-A SimCity-style city builder on the real terrain of Menlo Park and the San Francisco Bay, with a Silicon Valley twist: big tech companies write to the mayor asking to build. Made in [Godot](https://godotengine.org) (free).
+I've finally built the game I've always wanted to play. It blends my two nerdy interests: urban planning and business technology. Think SimCity, but in Silicon Valley.
+
+It's set on the real land around Menlo Park and the San Francisco Bay. You start with an empty map and grow it into a city: lay roads, zone homes and shops, keep the lights on and the taps running, and keep people happy enough to stay.
+
+Then the tech giants come calling.
+
+Letters land on the mayor's desk from the biggest names in tech. Each wants to build a data centre, a chip factory, a gigafactory or a sprawling campus. Say yes, and you get jobs, investment and tax. You also get:
+
+- power and water demand that can drain your grid
+- a hum that knocks value off nearby homes
+- campuses that push house prices out of reach
+- the odd billionaire threatening to leave if you don't cut his taxes
+
+Closer to home, you can back local start-ups, and watch them get bought or go bust.
+
+It's a very current game about the socio-economic trade-offs of big tech: energy, water, gentrification, and who really pays for growth.
+
+Welcome to Silicon City.
 
 ![San Francisco downtown in the Bay Area example city](docs/readme/downtown.jpg)
+
+Made in [Godot](https://godotengine.org) (free).
 
 **Status:** a full game in 3D, still being played and tuned. See `CLAUDE.md` for progress and `GAME_DESIGN.md` for the design.
 
