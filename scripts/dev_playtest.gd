@@ -1908,7 +1908,7 @@ func _examples() -> void:
 	check(sim.visitor_share <= Settings.VISITOR_SHOP_MAX + 0.0001 and said.contains("Offices:") and said.contains("Shops:")
 		and (said.contains("low ") or said.contains("about right")) and not said.contains("steady"),
 		"demand: visitors' shopping capped (%.3f), and the bars' hover gives numbers and density:\n%s" % [sim.visitor_share, said])
-	# The last one is the big city: a year on, it's still growing richer.
+	# The last one is the biggest city: a year on, it's still growing richer.
 	var money := sim.money
 	var people := sim.population
 	for m: int in 12:
@@ -1917,6 +1917,10 @@ func _examples() -> void:
 		"a year on, the example city has more money (%d -> %d) and has kept its people (%d -> %d)" % [
 		money, sim.money, people, sim.population])
 	await _shot("p23_example_city")
+	# Back to the City for the checks that follow (offices, landmarks, the airport):
+	# the Bay Area comes last in the menu now.
+	game.call("_load_example", "city")
+	await _wait(0.5)
 
 
 # ------------------------------------------------------------------ checks

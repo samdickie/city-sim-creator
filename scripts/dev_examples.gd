@@ -14,6 +14,7 @@ extends "res://scripts/dev_shots.gd"
 ## loaded back as a check, and pictures of it are saved to the picture dir.
 
 const Advisors = preload("res://scripts/advisors.gd")
+const Companies = preload("res://scripts/companies.gd")
 
 const SETTLE_MONTHS := 24             # months run on the city's own money before saving
 
@@ -72,6 +73,17 @@ func _plans() -> Array[Dictionary]:
 				{"name": "city_9_pollution", "at": Vector2(58, 62), "yaw": -40.0, "pitch": 55.0, "dist": 3200.0, "hud": true,
 					"prep": _prep_view.bind(WorldView.Overlay.POLLUTION)},
 			]},
+		{"id": "bay", "level": 1, "months": 144, "money": 400000, "build": _build_bay,
+			"shots": [
+				{"name": "bay_1_overview", "at": Vector2(100, 80), "yaw": -30.0, "pitch": 42.0, "dist": 7000.0},
+				{"name": "bay_2_downtown", "at": Vector2(104, 36), "yaw": -40.0, "pitch": 26.0, "dist": 1300.0},
+				{"name": "bay_3_golden_gate", "at": Vector2(122, 26), "yaw": -20.0, "pitch": 24.0, "dist": 1500.0},
+				{"name": "bay_4_city", "at": Vector2(88, 40), "yaw": -40.0, "pitch": 34.0, "dist": 2600.0},
+				{"name": "bay_5_valley", "at": Vector2(118, 118), "yaw": -40.0, "pitch": 36.0, "dist": 2600.0},
+				{"name": "bay_6_stanford", "at": Vector2(50, 108), "yaw": -40.0, "pitch": 34.0, "dist": 1200.0},
+				{"name": "bay_7_night", "at": Vector2(104, 36), "yaw": -40.0, "pitch": 28.0, "dist": 1800.0, "time": NIGHT},
+				{"name": "bay_8_hud", "at": Vector2(100, 70), "yaw": -30.0, "pitch": 42.0, "dist": 5000.0, "hud": true},
+			]},
 	]
 
 
@@ -117,6 +129,11 @@ func _run() -> void:
 		print("[examples] %s saved to %s in %.1f s" % [id, path, (Time.get_ticks_msec() - t0) / 1000.0])
 		for shot: Dictionary in plan["shots"]:
 			await _shoot(shot)
+		# How fast it draws, from its first two views (the whole city, then close up).
+		for shot: Dictionary in (plan["shots"] as Array).slice(0, 2):
+			await _shoot(shot)
+			var m := measure(get_viewport(), 30)
+			print("[examples]   speed at %s: %s" % [String(shot["name"]), perf_line("", m)])
 	print("[examples] done in %.1f s, %d problems" % [(Time.get_ticks_msec() - started) / 1000.0, _problems])
 	get_tree().quit(1 if _problems > 0 or _failed > 0 else 0)
 
@@ -328,6 +345,9 @@ func _report_example(id: String) -> void:
 			why_empty[key] = int(why_empty.get(key, 0)) + 1
 	for key: String in why_empty:
 		print("[examples]   empty plots, %d x %s" % [int(why_empty[key]), key])
+	print("[examples]   power networks' spare: %s; deals: %s" % [str(sim.get("_net_spare")),
+		", ".join(sim.deals.map(func(d: Dictionary) -> String: return "%s %s%s" % [d["company"], sim.deal_kind(d),
+			"" if sim.deal_working(sim.deal_by_id(int(d["id"]))) else " (not working: %s)" % sim.deal_problem(sim.deal_by_id(int(d["id"])))]))])
 	traffic_report(sim, "[examples]")
 	if sim.abandoned_count > 0:
 		_problem("%d abandoned plots" % sim.abandoned_count)
@@ -346,3 +366,297 @@ func _check_load(id: String) -> void:
 	else:
 		print("[examples]   loads back the same (%d people, checksum %d)" % [sim.population, int(after[5])])
 	game.call("_set_speed", 0)
+
+
+# ------------------------------------------------- the Bay Area (SF and Silicon Valley)
+# A loose San Francisco and Silicon Valley on the Menlo Park map (the Bay is to
+# the north and east, with a far shore to the north-east): San Francisco on the
+# north-east point, its downtown a CBD by the water with the Transamerica Pyramid
+# and Salesforce Tower, the Ferry Building on the waterfront, Coit Tower on the
+# point, the Painted Ladies among the row houses, the Palace of Fine Arts on the
+# north shore, the Golden Gate Bridge out to the far shore and Alcatraz in the
+# Bay. An airport by the Bay south of the city (SFO), then Highway 101 (a
+# motorway) and El Camino (an avenue) running south through the suburbs to
+# Silicon Valley: Stanford (university and research park) in the foothills, and
+# a Tech zone with Google's, Apple's and Meta's campuses, Nvidia's chip factory
+# and Amazon's and OpenAI's data centres. The companies come as letters the
+# mayor says yes to, once the town is big enough, and their sites are dragged
+# out with the game's own tool.
+
+var _deals_pending: Array = []      # [pop, kind, company, size, from, to]
+var _plants_pending: Array = []     # [pop, near, id]: plants built as the town needs them, by a road
+var _bay := false                   # building the Bay Area (the other examples are left as they were)
+
+
+func _build_bay() -> void:
+	_bay = true
+	sim.money = RICH
+	# --- Roads: San Francisco's grids, Highway 101 and El Camino, the suburbs.
+	_build("grid", Vector2i(62, 26), Vector2i(88, 62))       # the Richmond, the Haight, the Sunset
+	_build("grid", Vector2i(88, 18), Vector2i(117, 46))      # downtown and North Beach
+	_build("grid", Vector2i(88, 46), Vector2i(117, 62))      # SoMa and the Mission
+	_build("motorway", Vector2i(100, 62), Vector2i(100, 150))   # Highway 101
+	_build("road", Vector2i(100, 46), Vector2i(100, 62))
+	_build("avenue", Vector2i(76, 62), Vector2i(76, 150))    # El Camino Real
+	_build("grid", Vector2i(60, 63), Vector2i(99, 96))       # the Peninsula's suburbs
+	_build("grid", Vector2i(101, 74), Vector2i(121, 94))     # the works by the Bay (South City)
+	_build("grid", Vector2i(56, 97), Vector2i(99, 139))      # Palo Alto, Mountain View, Cupertino
+	# The Valley by the Bay: office parks and East Palo Alto on streets, then big
+	# blocks (8 x 7 tiles inside) with room for the companies' sites.
+	_build("grid", Vector2i(101, 97), Vector2i(119, 137))
+	for x: int in [128, 137, 146]:
+		_build("road", Vector2i(x, 97), Vector2i(x, 137))
+	for y: int in [97, 105, 113, 121, 129, 137]:
+		_build("road", Vector2i(119, y), Vector2i(146, y))
+	# Cupertino: one big block for Apple.
+	_build("road", Vector2i(57, 139), Vector2i(57, 147))
+	_build("road", Vector2i(66, 139), Vector2i(66, 147))
+	_build("road", Vector2i(57, 147), Vector2i(76, 147))
+	_build("road", Vector2i(71, 139), Vector2i(71, 147))
+	for y: int in [70, 84, 104, 120, 136]:
+		_build("road", Vector2i(99, y), Vector2i(101, y))    # on and off 101
+	# The Golden Gate: a long bridge east from the point to the far shore.
+	_build("road", Vector2i(107, 24), Vector2i(142, 24))
+	_build("road", Vector2i(142, 24), Vector2i(150, 24))
+	# Stanford's road up into the foothills.
+	_build("road", Vector2i(40, 102), Vector2i(56, 102))
+	_build("road", Vector2i(40, 102), Vector2i(40, 116))
+	_build("road", Vector2i(40, 116), Vector2i(56, 116))
+
+	# --- Zones.
+	for z: Array in [
+		["homes_1", Vector2i(63, 27), Vector2i(87, 50)],       # row houses
+		["homes_0", Vector2i(63, 57), Vector2i(87, 61)],       # the Sunset
+		["homes_2", Vector2i(89, 19), Vector2i(99, 39)],       # North Beach, Nob Hill
+		["offices_2", Vector2i(101, 27), Vector2i(116, 40)],   # the Financial District
+		["shops_2", Vector2i(89, 40), Vector2i(116, 45)],      # Union Square, Market Street
+		["homes_2", Vector2i(101, 19), Vector2i(112, 26)],
+		["shops_1", Vector2i(89, 47), Vector2i(116, 50)],      # the Mission's shops
+		["offices_1", Vector2i(101, 51), Vector2i(116, 61)],   # SoMa's offices
+		["homes_1", Vector2i(89, 51), Vector2i(99, 61)],
+		["homes_0", Vector2i(61, 64), Vector2i(98, 95)],       # Daly City to San Mateo
+		["shops_0", Vector2i(77, 64), Vector2i(78, 95)],       # strip malls along El Camino
+		["industry", Vector2i(102, 75), Vector2i(120, 93)],    # South City's works
+		["homes_0", Vector2i(57, 98), Vector2i(98, 138)],      # Palo Alto to Cupertino
+		["homes_0", Vector2i(67, 140), Vector2i(75, 146)],
+		["shops_0", Vector2i(77, 98), Vector2i(78, 138)],
+		["shops_1", Vector2i(80, 112), Vector2i(91, 114)],     # University Avenue
+		["offices_0", Vector2i(102, 98), Vector2i(118, 112)],  # office parks along 101
+		["offices_1", Vector2i(102, 114), Vector2i(118, 120)],
+		["homes_1", Vector2i(102, 122), Vector2i(118, 136)],   # East Palo Alto
+	]:
+		_build(z[0], z[1], z[2])
+	_build("cbd", Vector2i(88, 18), Vector2i(117, 46))
+	# The Tech zone: the office parks and open land kept for the big companies.
+	_build("tech_zone", Vector2i(101, 97), Vector2i(146, 121))
+	_build("tech_zone", Vector2i(119, 121), Vector2i(146, 137))
+	_build("tech_zone", Vector2i(57, 139), Vector2i(66, 147))
+	# Parks: Golden Gate Park, the Presidio, Dolores Park, and the Baylands.
+	_build("park", Vector2i(63, 51), Vector2i(87, 56))
+	_build("park", Vector2i(63, 27), Vector2i(66, 32))
+	_build("park", Vector2i(93, 53), Vector2i(95, 56))
+	_build("woodland", Vector2i(101, 64), Vector2i(119, 64))
+	_build("woodland", Vector2i(101, 94), Vector2i(121, 95))
+	# The Baylands (woodland by the water) and a golf course in the Valley's spare blocks.
+	_build("woodland", Vector2i(138, 98), Vector2i(145, 112))
+	_build("woodland", Vector2i(138, 114), Vector2i(145, 128))
+	_build("woodland", Vector2i(120, 122), Vector2i(136, 128))
+	_build("park", Vector2i(129, 98), Vector2i(132, 103))
+
+	# --- Power, water, rubbish: by the works.
+	_build("coal", Vector2i(117, 90))
+	_build("coal", Vector2i(117, 87))
+	for p: Vector2i in [Vector2i(103, 76), Vector2i(106, 76), Vector2i(109, 76), Vector2i(103, 79), Vector2i(106, 79),
+			Vector2i(109, 79), Vector2i(70, 30), Vector2i(95, 30), Vector2i(70, 66), Vector2i(90, 66), Vector2i(70, 90),
+			Vector2i(90, 90), Vector2i(60, 110), Vector2i(90, 120), Vector2i(60, 135), Vector2i(90, 135),
+			Vector2i(104, 112), Vector2i(138, 112), Vector2i(104, 130), Vector2i(120, 136)]:
+		var at := _nearest_spot("water_pump", p, 3)
+		if at.x >= 0:
+			_build("water_pump", at)
+	_build("landfill", Vector2i(112, 76), Vector2i(119, 80))
+	_later("recycling", Vector2i(112, 83))
+	_later("gas", Vector2i(114, 90))
+	_later("gas", Vector2i(114, 87))
+	_later("nuclear", Vector2i(110, 90))
+	_later("nuclear", Vector2i(106, 90))
+	_later("nuclear", Vector2i(108, 87))
+	_later("nuclear", Vector2i(104, 87))
+	for p: Vector2i in [Vector2i(138, 130), Vector2i(145, 130), Vector2i(138, 136), Vector2i(145, 136)]:
+		_later("nuclear", p)                                 # the Valley's own power, by the Bay
+	for item: Array in [[16000, Vector2i(105, 82)], [16000, Vector2i(111, 81)], [24000, Vector2i(106, 92)],
+			[24000, Vector2i(118, 92)]]:
+		_plants_pending.append([item[0], item[1], "nuclear"])   # more as OpenAI asks for more
+	# Water for the companies: a pump on a corner of each big block.
+	for bx: int in [127, 136]:
+		for by: int in [104, 112, 120, 136]:
+			_build("water_pump", Vector2i(bx, by))
+	_later("incinerator", Vector2i(119, 83))
+	for p: Vector2i in [Vector2i(116, 80), Vector2i(104, 84), Vector2i(126, 103), Vector2i(105, 96), Vector2i(115, 96)]:
+		_plants_pending.append([4000, p, "incinerator"])
+	_later("solar", Vector2i(120, 130), Vector2i(135, 135))      # solar farms in the Valley
+	for p: Vector2i in [Vector2i(62, 70), Vector2i(62, 82), Vector2i(62, 94), Vector2i(62, 104), Vector2i(62, 116),
+			Vector2i(62, 128), Vector2i(98, 104), Vector2i(98, 116), Vector2i(98, 128), Vector2i(64, 40), Vector2i(86, 58)]:
+		var at := _nearest_spot("water_pump", p, 3)
+		if at.x >= 0:
+			_build("water_pump", at)
+
+	# --- Services, spread over every neighbourhood.
+	# (Services are added as the homes are built: see _build_unlocked.)
+	_build("college", _nearest_spot("college", Vector2i(86, 120), 4))
+	_later("university", Vector2i(41, 103), Vector2i(48, 110))   # Stanford
+	_later("research_park", Vector2i(49, 103), Vector2i(55, 108))
+	_later("bus_depot", Vector2i(92, 47))
+	_later("bus_depot", Vector2i(80, 33))
+	_later("station", Vector2i(99, 43))                      # Caltrain, downtown
+	_later("station", Vector2i(80, 116))                     # ...and Palo Alto
+	_later("bus_depot", Vector2i(80, 80))
+	_later("airport", Vector2i(102, 65), Vector2i(120, 72))  # SFO
+
+	# --- San Francisco's landmarks, as soon as the city is big enough for each.
+	_later("painted_ladies", Vector2i(75, 38))               # Alamo Square
+	_later("coit_tower", Vector2i(95, 20))                   # on the point
+	_later("ferry_building", Vector2i(117, 38), Vector2i(117, 38), true)
+	_later("fine_arts", Vector2i(70, 29))                    # by the north shore
+	_later("alcatraz", Vector2i(76, 15))                     # out in the Bay
+	_later("transamerica", Vector2i(105, 32))
+	_later("salesforce_tower", Vector2i(109, 38))
+	_later("golden_gate", Vector2i(125, 24))
+	_later("library", Vector2i(95, 44))
+	_later("museum", Vector2i(80, 54))                       # in Golden Gate Park
+	_later("town_hall", Vector2i(92, 44))
+	_later("stadium", Vector2i(113, 53))
+
+	# --- Silicon Valley's companies: letters the mayor says yes to, sites dragged out.
+	_deals_pending = [
+		[5000, "campus", "Meta", 1, Vector2i(120, 98), Vector2i(124, 101)],           # Menlo Park, by the Bay
+		[9000, "campus", "Google", 1, Vector2i(120, 106), Vector2i(124, 109)],        # Mountain View
+		[12000, "data_centre", "Amazon", 1, Vector2i(129, 106), Vector2i(132, 108)],
+		[16000, "chip_factory", "Nvidia", 1, Vector2i(120, 114), Vector2i(124, 117)], # Santa Clara
+		[20000, "campus", "Apple", 0, Vector2i(58, 140), Vector2i(60, 142)],          # Cupertino
+		[25000, "ai_data_centre", "OpenAI", 0, Vector2i(129, 114), Vector2i(132, 117)],
+	]
+
+
+func _build_unlocked() -> void:
+	super()
+	if not _bay:
+		return
+	# Every few months, services where the built homes are least covered (as a
+	# player would, with the Services view), while there's power to spare.
+	if sim.month % 3 == 0:
+		_cover_homes("police", 0, 0.75)
+		_cover_homes("fire", 1, 0.75)
+		_cover_homes("school", 2, 0.8)
+		_cover_homes("hospital", 3, 0.7)
+	# The mayor's post: yes when OpenAI asks for more power, no to everything else.
+	for letter: Dictionary in sim.letters.duplicate():
+		sim.answer_letter(int(letter["id"]), String(letter.get("kind", "")) == "more_power")
+	var later_plants: Array = []
+	for item: Array in _plants_pending:
+		if sim.population >= int(item[0]):
+			var what: String = item[2]
+			var at := _nearest_spot(what, item[1], 5)
+			if at.x >= 0:
+				_build(what, at)
+				print("[examples]   month %d: %s at %s" % [sim.month, what, at])
+		else:
+			later_plants.append(item)
+	_plants_pending = later_plants
+	var still: Array = []
+	for item: Array in _deals_pending:
+		if sim.population >= int(item[0]):
+			_company(item[1], item[2], item[3], item[4], item[5])
+		else:
+			still.append(item)
+	_deals_pending = still
+
+
+func _company(kind: String, company: String, size: int, from: Vector2i, to: Vector2i) -> void:
+	# The company writes, the mayor says yes (size: Small, Standard or Mega), and
+	# its site is dragged out in the Tech zone, as a player would.
+	var busy: Array = []
+	for c: String in ["Amazon", "Microsoft", "Google", "Apple", "Meta"]:
+		if c != company:
+			busy.append(c)
+	var letter: Dictionary = Companies.project_letter(kind, sim.get("_rng"), busy)
+	if letter.is_empty() or String(letter["company"]) != company:
+		_problem("no %s letter from %s" % [kind, company])
+		return
+	var id: int = sim.call("_send_letter", letter)
+	var said: Dictionary = sim.answer_letter(id, true, size)
+	if not bool(said["ok"]):
+		_problem("%s: %s" % [company, said["text"]])
+		return
+	game.call("_start_placing", id)
+	game.set("drag_start", from)
+	var plan: Array[Vector2i] = game.call("_plan_tiles", from, to)
+	game.set("drag_plan", plan)
+	var short: String = game.call("_too_small")
+	game.call("_finish_drag")
+	var k: int = sim.deal_by_id(id)
+	if short != "" or k < 0 or (sim.deals[k]["tiles"] as Array).is_empty():
+		_problem("%s's %s didn't go at %s: %s" % [company, kind, from, short])
+		return
+	print("[examples]   month %d, %d people: %s's %s at %s" % [sim.month, sim.population, company, kind, from])
+
+
+func _nearest_spot(id: String, near: Vector2i, reach: int) -> Vector2i:
+	game.call("_choose_item", id)
+	var best := Vector2i(-1, -1)
+	var best_d := 1 << 30
+	for y: int in range(near.y - reach, near.y + reach + 1):
+		for x: int in range(near.x - reach, near.x + reach + 1):
+			if x < 0 or y < 0 or x >= sim.w or y >= sim.h:
+				continue
+			var i := y * sim.w + x
+			var here: int = sim.tiles[i]
+			if not (here == Simulation.Tile.EMPTY or (sim.is_zone(here) and sim.levels[i] == 0)) or not sim.near_road(i):
+				continue
+			# Touching a street, so power reaches it as well as the road.
+			var touches := false
+			for n: Vector2i in [Vector2i(x - 1, y), Vector2i(x + 1, y), Vector2i(x, y - 1), Vector2i(x, y + 1)]:
+				if n.x >= 0 and n.y >= 0 and n.x < sim.w and n.y < sim.h \
+						and sim.tiles[n.y * sim.w + n.x] == Simulation.Tile.ROAD:
+					touches = true
+			if not touches:
+				continue
+			if String(game.call("_why_cant_build", Vector2i(x, y), false)) != "":
+				continue
+			var d := (Vector2i(x, y) - near).length_squared()
+			if d < best_d:
+				best = Vector2i(x, y)
+				best_d = d
+	return best
+
+
+func _cover_homes(id: String, service: int, want: float) -> void:
+	# Put this service where the homes are least covered, again and again,
+	# until every home zone has at least `want` cover.
+	var skip := {}
+	var placed := 0
+	var size: int = sim.w * sim.h
+	for n: int in 6:
+		var spare := 0
+		for left: int in sim.get("_net_spare"):
+			spare += left
+		if spare < 60:
+			break
+		sim.set("_coverage_dirty", true)
+		sim.call("_update_coverage")
+		var worst := -1
+		var worst_c := want
+		for i: int in size:
+			if sim.tiles[i] == Simulation.Tile.HOMES and sim.levels[i] > 0 and not skip.has(i):
+				var c: float = sim.coverage[service * size + i]
+				if c < worst_c:
+					worst_c = c
+					worst = i
+		if worst < 0:
+			break
+		var spot := _nearest_spot(id, Vector2i(worst % sim.w, worst / sim.w), 4)
+		if spot.x < 0 or _build(id, spot) == 0:
+			skip[worst] = true
+			continue
+		placed += 1
+	if placed > 0:
+		print("[examples]   month %d: %d x %s where homes were least covered" % [sim.month, placed, id])

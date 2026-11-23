@@ -21,6 +21,7 @@ const EXAMPLES := [
 	{"id": "village", "name": "Village", "about": "A small seaside village with room to grow"},
 	{"id": "town", "name": "Town", "about": "A busy bayside town with townhouses, shops and a works"},
 	{"id": "city", "name": "City", "about": "A large, mature city with a skyline, parks and every service"},
+	{"id": "bay", "name": "Bay Area", "about": "San Francisco and Silicon Valley: every landmark, the Golden Gate and the big tech campuses"},
 ]
 const DEFAULT_DIFFICULTY := 1     # Normal (also what saves from before difficulty load as)
 const LOW_MONEY := 2000           # below this the money shows red and the advisors suggest a loan
