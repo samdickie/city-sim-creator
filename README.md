@@ -43,6 +43,13 @@ Made in [Godot](https://godotengine.org) (free).
 
 ## Play it
 
+**Download** the game for Mac or Windows from the [Releases page](https://github.com/samdickie/city-sim-creator/releases/latest), unzip it and double-click **Silicon City**. It isn't signed by Apple or Microsoft, so the first time:
+
+- **Mac:** if it says it can't be opened, go to System Settings → Privacy & Security, scroll down and click **Open Anyway**.
+- **Windows:** if it says Windows protected your PC, click **More info**, then **Run anyway**.
+
+### Or run it in Godot
+
 1. Install **Godot 4.7** (free) from https://godotengine.org/download.
 2. In Godot's Project Manager, choose **Import**, pick this folder's `project.godot`, then **Import & Edit**.
 3. Press **Play** (▶, top right) or F5.

@@ -23,6 +23,7 @@ The earlier Palo Alto map is still in `map/`.
 | `tools/playtest.sh` | Plays the game with real mouse and key presses: about 500 checks |
 | `tools/make_examples.sh` | Rebuilds the example cities |
 | `tools/make_promo.sh` | Films a 27-second promo video |
+| `tools/make_builds.sh` | Builds the Mac and Windows downloads into `builds/` (needs Godot's export templates; settings in `export_presets.cfg`). Attach the two zips to a GitHub Release |
 | `python tools/make_buildings.py assets/models` | Builds the building models (needs Blender's `bpy`) |
 | `python tools/make_menu_pictures.py ...` | Renders the Build menu pictures from the same models |
 

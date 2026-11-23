@@ -13,3 +13,6 @@ _to_delete/
 # Screenshots from tools/screenshots.sh
 screenshots/
 map/.terrain_cache/
+
+# Downloadable builds from tools/make_builds.sh
+builds/

@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://dso6ixfkau07l"
 path.s3tc="res://.godot/imported/slate.jpg-843bb3db83fd74aa36e10d7c4fae71f4.s3tc.ctex"
+path.etc2="res://.godot/imported/slate.jpg-843bb3db83fd74aa36e10d7c4fae71f4.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/slate.jpg"
-dest_files=["res://.godot/imported/slate.jpg-843bb3db83fd74aa36e10d7c4fae71f4.s3tc.ctex"]
+dest_files=["res://.godot/imported/slate.jpg-843bb3db83fd74aa36e10d7c4fae71f4.s3tc.ctex", "res://.godot/imported/slate.jpg-843bb3db83fd74aa36e10d7c4fae71f4.etc2.ctex"]
 
 [params]
 

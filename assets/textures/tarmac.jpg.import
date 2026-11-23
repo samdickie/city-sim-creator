@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://ch5y2igrb6xpa"
 path.s3tc="res://.godot/imported/tarmac.jpg-c6fd4de265571012e73ef434af22d93f.s3tc.ctex"
+path.etc2="res://.godot/imported/tarmac.jpg-c6fd4de265571012e73ef434af22d93f.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/tarmac.jpg"
-dest_files=["res://.godot/imported/tarmac.jpg-c6fd4de265571012e73ef434af22d93f.s3tc.ctex"]
+dest_files=["res://.godot/imported/tarmac.jpg-c6fd4de265571012e73ef434af22d93f.s3tc.ctex", "res://.godot/imported/tarmac.jpg-c6fd4de265571012e73ef434af22d93f.etc2.ctex"]
 
 [params]
 

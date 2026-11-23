@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://jbondq46xemu"
 path.s3tc="res://.godot/imported/sandstone.jpg-0c376f81b80d4febbbc8da8404dc7542.s3tc.ctex"
+path.etc2="res://.godot/imported/sandstone.jpg-0c376f81b80d4febbbc8da8404dc7542.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/sandstone.jpg"
-dest_files=["res://.godot/imported/sandstone.jpg-0c376f81b80d4febbbc8da8404dc7542.s3tc.ctex"]
+dest_files=["res://.godot/imported/sandstone.jpg-0c376f81b80d4febbbc8da8404dc7542.s3tc.ctex", "res://.godot/imported/sandstone.jpg-0c376f81b80d4febbbc8da8404dc7542.etc2.ctex"]
 
 [params]
 
