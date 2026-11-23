@@ -97,7 +97,7 @@ func _run() -> void:
 		get_window().size, get_window().content_scale_factor, roundi(get_viewport().scaling_3d_scale * 100.0)])
 	# The player's own save must come through untouched: the game saves to its
 	# dev file while a dev tool runs it (game3d.gd DEV_SAVE_FILE).
-	var players := "user://troon_save.json"
+	var players := "user://city_save.json"
 	var players_time := FileAccess.get_modified_time(players) if FileAccess.file_exists(players) else 0
 	check(String(game.get("save_file")) != players, "the play test saves to its own file (%s), never the player's" % game.get("save_file"))
 	await _wait(1.0)
@@ -2797,7 +2797,7 @@ func _woodland() -> void:
 	old["map"] = game.get("map_name")
 	old["width"] = sim.w
 	old["height"] = sim.h
-	var path := "user://troon_playtest_pre_woodland.json"
+	var path := "user://playtest_pre_woodland.json"
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(JSON.stringify(old))
 	f.close()
@@ -3093,7 +3093,7 @@ func _old_save() -> void:
 	data["map"] = game.get("map_name")
 	data["width"] = sim.w
 	data["height"] = sim.h
-	var path := "user://troon_playtest_old_save.json"
+	var path := "user://playtest_old_save.json"
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	f.store_string(JSON.stringify(data))
 	f.close()
@@ -3111,13 +3111,13 @@ func _old_save() -> void:
 	check(is_equal_approx(sim.upkeep_scale(), 1.0), "an old save's running costs are as before (x1)")
 	var budget: Label = hud.get("_budget_caption")
 	check(budget.text.ends_with("NORMAL"), "the City panel's budget says \"%s\"" % budget.text)
-	# A city built on another map (Troon's, before the map was Palo Alto) is refused.
+	# A city built on another map (Palo Alto's, before the map was Menlo Park) is refused.
 	var other := sim.to_save()
-	other["map"] = "Troon"
+	other["map"] = "Palo Alto"
 	other["width"] = sim.w
 	other["height"] = sim.h
 	other["money"] = 999
-	var other_path := "user://troon_playtest_other_map.json"
+	var other_path := "user://playtest_other_map.json"
 	var fo := FileAccess.open(other_path, FileAccess.WRITE)
 	fo.store_string(JSON.stringify(other))
 	fo.close()
@@ -3125,7 +3125,7 @@ func _old_save() -> void:
 	game.call("_load_game", other_path)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(other_path))
 	var toast: Label = hud.get("message_label")
-	check(sim.money == money_now and toast.text.contains("built on Troon's map"),
+	check(sim.money == money_now and toast.text.contains("built on Palo Alto's map"),
 		"a city from another map isn't loaded (%s)" % toast.text)
 
 

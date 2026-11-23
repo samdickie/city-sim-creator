@@ -28,7 +28,7 @@ import sys
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from make_troon_map import find_sea, save   # (the same sea rule and file format as the Troon map)
+from map_common import find_sea, save   # (the sea rule and the map file format)
 
 try:
     from PIL import Image

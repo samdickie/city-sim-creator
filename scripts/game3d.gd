@@ -1,5 +1,5 @@
 extends Node3D
-## Troon City in 3D — the game.
+## Silicon City in 3D — the game.
 ## Loads the map, runs the game clock, turns mouse and keyboard into building,
 ## and keeps the 3D world and the interface up to date.
 ## The city's rules live in simulation.gd; tuning numbers in settings.gd.
@@ -17,8 +17,8 @@ const DevExamples = preload("res://scripts/dev_examples.gd")   # dev tool: tools
 const DevPromo = preload("res://scripts/dev_promo.gd")   # dev tool: tools/make_promo.sh
 const DevPlaytest = preload("res://scripts/dev_playtest.gd")   # dev tool: tools/playtest.sh
 
-const MAP_FILE := "res://map/menlo_park_map.json"    # (Palo Alto's and Troon's are still in map/: make one MAP_FILE to play there)
-const SAVE_FILE := "user://troon_save.json"           # the player's own city
+const MAP_FILE := "res://map/menlo_park_map.json"    # (Palo Alto's is still in map/: make it MAP_FILE to play there)
+const SAVE_FILE := "user://city_save.json"            # the player's own city
 const DEV_SAVE_FILE := "user://dev_tools_save.json"   # what Save and Load use when a dev tool runs the game
 const EXAMPLES_DIR := "res://examples"   # ready-made cities (the game menu's Example cities)
 const SAVE_VERSION := 4               # 4: difficulty and loans (older saves load as Normal with no loans)

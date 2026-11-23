@@ -199,8 +199,8 @@ def _mesh_object(name, builder, materials):
     return obj
 
 
-# The Bay Area's versions of the Scottish models (as world3d.gd CALIFORNIA and
-# MODEL_VARIANTS), so the menu matches the game. Empty it for the Troon look.
+# The Bay Area's versions of the sandstone models (as world3d.gd CALIFORNIA and
+# MODEL_VARIANTS), so the menu matches the game. Empty it for the old look.
 CALIFORNIA_MODELS = {"terrace": "ca_townhouse", "terrace_b": "ca_townhouse_b",
                      "tenement3": "ca_apartments3", "tenement4": "ca_apartments4"}
 

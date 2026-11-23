@@ -1,4 +1,4 @@
-"""Builds the Troon building models (.glb) for the game, in Blender.
+"""Builds the building models (.glb) for the game, in Blender.
 
 Run with Blender's Python (pip package "bpy"):
     python tools/make_buildings.py assets/models [preview_folder]
@@ -497,7 +497,7 @@ def glass_office(storeys):
 
 # ------------------------------------- Californian medium and high density
 # Stucco ("render", the wall colour) under clay tile ("roof", the roof colour), in
-# the same declared sizes as the Scottish terraces, tenements, shops with flats and
+# the same declared sizes as the sandstone terraces, tenements, shops with flats and
 # classical blocks, so the game fits them to the same plots.
 
 def face_prism(mb, f, poly, b0, b1, mat):
@@ -1971,7 +1971,7 @@ def portal(mb, x0, x1, y, h):
 
 
 def coal_plant():
-    # A big Scottish coal station (Cockenzie, Longannet): a long clad turbine hall
+    # A big coal station: a long clad turbine hall
     # facing the road, the tall boiler house behind in the darker cladding,
     # the precipitator on stilts, twin concrete chimneys with dark tops, the coal
     # stockpile at the back fed up a sloping conveyor, and a switchyard in front.

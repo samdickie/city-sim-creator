@@ -1,4 +1,4 @@
-# Troon City
+# Silicon City
 
 A SimCity-style city builder on the real terrain of Menlo Park and the San Francisco Bay, with a Silicon Valley twist: big tech companies write to the mayor asking to build. Made in [Godot](https://godotengine.org) (free).
 
@@ -68,7 +68,7 @@ The game loads `map/menlo_park_map.json`:
 - **Heights:** USGS and NOAA data, from AWS's free Terrain Tiles.
 - **How it's made:** `tools/make_bay_map.py`, which works for any place (`--centre`, `--size`).
 
-The earlier maps of Palo Alto and Troon (Scotland, where the game started) are still in `map/`.
+The earlier Palo Alto map is still in `map/`.
 
 ## Tools for building the game
 
@@ -107,6 +107,5 @@ The test tools never touch your own saved city.
 ## Credits
 
 - **Heights:** USGS 3DEP and NOAA, via the AWS Terrain Tiles open data set.
-- **The old Troon map:** contains OS data © Crown copyright and database right (Open Government Licence).
 - **Textures and sky:** [Poly Haven](https://polyhaven.com) (CC0).
 - **Company letters:** satire of public personas. Names only, no logos.

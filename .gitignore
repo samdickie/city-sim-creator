@@ -4,9 +4,6 @@
 .DS_Store
 __pycache__/
 
-# OS height data download (large; the game only needs map/troon_map.json)
-terr50_gagg_gb/
-
 # Original texture downloads (the game uses the copies in assets/textures)
 assets/downloads/
 

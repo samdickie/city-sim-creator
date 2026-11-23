@@ -341,8 +341,8 @@ func _coast_spot(id: String, near: Vector2i) -> Vector2i:
 
 
 func _coast_with_road(id: String, near: Vector2i) -> Vector2i:
-	# No seaside spot by the town's roads (the layouts were drawn for Troon, with
-	# the sea to the west): take the seaside spot nearest `near` anywhere, and lay
+	# No seaside spot by the town's roads (the layouts were drawn for an earlier map,
+	# with the sea to the west): take the seaside spot nearest `near` anywhere, and lay
 	# a road to it from the nearest road, as a player would.
 	var best := Vector2i(-1, -1)
 	var best_d := 1 << 30

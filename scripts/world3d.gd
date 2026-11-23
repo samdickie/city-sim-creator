@@ -1,5 +1,5 @@
 extends Node3D
-## Draws Troon in 3D: terrain from the real heights, the sea, sky and sunlight,
+## Draws the map in 3D: terrain from the real heights, the sea, sky and sunlight,
 ## and the city on top (roads, power lines, buildings).
 ## It only reads the simulation; it never changes the city.
 
@@ -75,12 +75,12 @@ const MODEL_DIMS := {
 # Other designs with the same size as a model above; one is picked for each building.
 const MODEL_VARIANTS := {
 	# Palo Alto: Californian homes (ranch, Spanish bungalow, Spanish revival, modern) in
-	# place of the Scottish villas and bungalows (["villa", "villa_b", "villa_c"] and
-	# ["bungalow", "bungalow_b"]: put those back for the Troon look).
+	# place of the sandstone villas and bungalows (["villa", "villa_b", "villa_c"] and
+	# ["bungalow", "bungalow_b"]: put those back for the old sandstone look).
 	"villa": ["ca_villa", "ca_modern"], "bungalow": ["ranch", "mission"],
 	"strip_mall": ["strip_mall", "strip_mall_b"],
 	# The Bay Area: townhouses, garden apartments and main-street blocks in place of
-	# terraces, tenements and sandstone shops with flats (for Troon: ["terrace",
+	# terraces, tenements and sandstone shops with flats (for the old look: ["terrace",
 	# "terrace_b"], ["tenement3", "tenement3_b"], ["tenement4", "tenement4_b"] and no
 	# shopflats entries, with CALIFORNIA false).
 	"terrace": ["ca_townhouse", "ca_townhouse_b"], "tenement3": ["ca_apartments3", "ca_apartments3_b"],
@@ -132,7 +132,7 @@ const ZONE_TINTS := {
 	Tile.OFFICES: Color(0.10, 0.72, 0.68),
 }
 
-# Troon's building materials.
+# Building materials: sandstone, render, slate.
 const RED_SANDSTONE := Color(0.60, 0.34, 0.27)
 const BLONDE_SANDSTONE := Color(0.80, 0.69, 0.52)
 const WHITE_RENDER := Color(0.90, 0.89, 0.85)
@@ -420,7 +420,7 @@ const LOOK_EXPOSURE_NIGHT := 1.25
 const LOOK_CONTRAST := 1.12             # colour grade on top of the tone mapping
 const LOOK_SATURATION := 1.0
 const SUN_ENERGY := 2.1                 # the warm key light
-const SUN_DAY_COLOUR := Color(1.0, 0.92, 0.78)   # California's warm sun (Troon: 1.0, 0.94, 0.84; energy 2.0)
+const SUN_DAY_COLOUR := Color(1.0, 0.92, 0.78)   # California's warm sun (the old cooler light: 1.0, 0.94, 0.84; energy 2.0)
 const SUN_LOW_COLOUR := Color(1.0, 0.52, 0.26)   # at sunrise and sunset
 const SUN_MAX_ELEVATION := 46.0         # degrees, at noon
 const AMBIENT_DAY := 0.38               # cool fill from the sky (lower = deeper shadows)
@@ -798,9 +798,9 @@ const FIELD_COL := 225.0                # average field length
 const FIELD_JITTER := 0.55              # how unevenly the fields are cut (share of a length)
 const FIELD_WOBBLE := 9.0               # metres the boundaries meander
 const FIELD_SPLIT := 0.35               # chance a field is cut in two
-const FIELD_HEDGE := 0.15               # chance a boundary is a hedge (otherwise a fence; Troon had 0.72)
-const CALIFORNIA := true                 # Bay Area medium and high density (false: Troon's sandstone; see MODEL_VARIANTS)
-const GOLDEN := 1.0                     # Palo Alto: open grass and fields dried to gold (0 = Troon's green)
+const FIELD_HEDGE := 0.15               # chance a boundary is a hedge (otherwise a fence; the old green look had 0.72)
+const CALIFORNIA := true                 # Bay Area medium and high density (false: the old sandstone look; see MODEL_VARIANTS)
+const GOLDEN := 1.0                     # Palo Alto: open grass and fields dried to gold (0 = green)
 const PLANT_CHANCE := 0.06              # chance a field on high ground is a conifer plantation
 const PLANT_MIN_HEIGHT := 35.0          # metres
 const FARM_MAX_HEIGHT := 105.0          # rough grazing above this
@@ -3753,8 +3753,8 @@ const BROWN_TILE := Color(0.36, 0.24, 0.18)
 const GREY_TILE := Color(0.32, 0.32, 0.33)
 const HOUSE_AREA := 3
 # Palo Alto's streets: stucco in white, cream, sand, peach, sage and pale yellow,
-# under clay-tile or grey and brown shingle roofs. (Troon's were sandstone, render
-# and brick under slate: SCOTTISH_HOUSE_PALETTES.)
+# under clay-tile or grey and brown shingle roofs. (The old look's were sandstone,
+# render and brick under slate: SANDSTONE_HOUSE_PALETTES.)
 const STUCCO_WHITE := Color(0.93, 0.91, 0.86)
 const STUCCO_CREAM := Color(0.90, 0.84, 0.70)
 const STUCCO_SAND := Color(0.84, 0.74, 0.58)
@@ -3773,7 +3773,7 @@ const HOUSE_PALETTES := [
 	{"walls": [STUCCO_SAND, STUCCO_CREAM, STUCCO_PEACH, STUCCO_WHITE], "roofs": [CLAY_DARK, SHINGLE_BROWN]},
 ]
 const HOUSE_PALETTE_ODDS := [0, 0, 1, 1, 2, 3]   # how often each palette comes up
-const SCOTTISH_HOUSE_PALETTES := [
+const SANDSTONE_HOUSE_PALETTES := [
 	{"walls": [RED_SANDSTONE, RED_SANDSTONE_DEEP, RED_SANDSTONE, BLONDE_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
 	{"walls": [BLONDE_SANDSTONE, HONEY_STONE, BLONDE_SANDSTONE, RED_SANDSTONE], "roofs": [SLATE, SLATE_DARK]},
 	{"walls": [WHITE_RENDER, CREAM_RENDER, WHITE_RENDER, OCHRE_RENDER], "roofs": [SLATE, SLATE_DARK, SLATE]},
@@ -4127,7 +4127,7 @@ const GLASS_TINTS := [Color(0.24, 0.38, 0.52), Color(0.26, 0.44, 0.42), Color(0.
 const SPANDRELS := [Color(0.88, 0.88, 0.85), Color(0.20, 0.21, 0.23), Color(0.64, 0.34, 0.24),
 	Color(0.72, 0.58, 0.32), Color(0.30, 0.40, 0.48)]                              # white, charcoal, terracotta, gold, slate blue
 # ...stone and brick for art deco towers, concrete for grids, render for towers of flats.
-# (San Francisco's downtown: pale granite and buff terracotta in place of Troon's red
+# (San Francisco's downtown: pale granite and buff terracotta in place of the old red
 # sandstone (0.60, 0.34, 0.27) and brick (0.55, 0.28, 0.20).)
 const TOWER_STONES := [Color(0.86, 0.82, 0.72), Color(0.84, 0.71, 0.50), Color(0.76, 0.74, 0.70),
 	Color(0.82, 0.72, 0.58), Color(0.80, 0.78, 0.74)]                             # limestone, honey, granite, buff, Portland
@@ -6382,7 +6382,7 @@ func _set_tree_range(distance: float) -> void:
 
 func _wood_kind(woods: float, clump: float, rng: RandomNumberGenerator) -> int:
 	# Mostly broadleaf (oak, ash, sycamore) with birch at the edges; stands of
-	# Scots pine and spruce where the clump noise says so.
+	# Pine and spruce where the clump noise says so.
 	var r := rng.randf()
 	if woods > 0.6 and clump > 0.62 and r < 0.7:
 		return TreeKind.SPRUCE if r < 0.45 else TreeKind.PINE
@@ -6475,7 +6475,7 @@ func _tree(at: Vector2, tall: float, kind: int, rng: RandomNumberGenerator, slim
 			blobs.append(_blob(spin, base + Vector3.UP * tall * 0.72, Vector3(w * 0.8, tall * 0.45, w * 0.8),
 				_leaf_colour(green, rng)))
 		TreeKind.PINE:
-			# Scots pine: a tall bare reddish trunk with flat clumps at the top.
+			# Pine: a tall bare reddish trunk with flat clumps at the top.
 			trunk_h = tall * 0.78
 			thick = 0.3 + tall * 0.03
 			bark = PINE_BARK
