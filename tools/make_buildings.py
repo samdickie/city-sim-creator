@@ -511,8 +511,8 @@ def face_prism(mb, f, poly, b0, b1, mat):
     mb._add(pts, faces, mat)
 
 
-def arch(mb, f, a, z0, w, h, mat="glass"):
-    """A round-headed opening: the opening, then stucco filling its top corners."""
+def arch(mb, f, a, z0, w, h, mat="glass", fill="render"):
+    """A round-headed opening: the opening, then stucco (or stone) filling its top corners."""
     r = w / 2
     hs = z0 + h - r
     f.slab(mb, a - r, a + r, z0, z0 + h, -0.03, 0.01, mat)
@@ -521,7 +521,7 @@ def arch(mb, f, a, z0, w, h, mat="glass"):
         for k in range(1, 6):
             t = math.pi / 2 * k / 6
             poly.append((a + side * r * math.sin(t), hs + r * math.cos(t)))
-        face_prism(mb, f, poly, 0.0, 0.04, "render")
+        face_prism(mb, f, poly, 0.0, 0.04, fill)
 
 
 def tile_hip(mb, x0, x1, y0, y1, z, rise, over=0.5, mat="roof"):
@@ -845,6 +845,219 @@ def ca_classical(storeys, kind):
                 arch(mb, fc, a, h + 2.0, 1.1, 1.9, "glass")
         tile_hip(mb, x0, x1, y0, y1, h + 4.3, 1.5, over=0.45)
     return mb, (w, d, h + 0.9, 4.0)
+
+
+# ------------------------------------------- Californian campus (college, university, research park)
+
+def arcade(mb, f, a0, a1, top, bays, deep=3.0, spring=2.6, mat="stone"):
+    """An open arcade along a wall face: round arches on square piers, a deep
+    walkway behind them (its ceiling and floor), and a lean-to tile roof on top.
+    f is the face of the arcade's front; the wall it shelters stands deep behind."""
+    s = (a1 - a0) / bays
+    pier = min(0.9, s * 0.25)
+    t = 0.7                                                   # the arcade wall's thickness
+    for k in range(bays + 1):
+        a = a0 + k * s
+        f.slab(mb, max(a0, a - pier / 2), min(a1, a + pier / 2), 0.0, top, -t, 0.0, mat)
+    r = (s - pier) / 2
+    for k in range(bays):
+        c = a0 + (k + 0.5) * s
+        f.slab(mb, c - r, c + r, spring + r, top, -t, 0.0, mat)
+        for side in (-1, 1):
+            poly = [(c + side * r, spring), (c + side * r, spring + r), (c, spring + r)]
+            for n in range(1, 6):
+                q = math.pi / 2 * n / 6
+                poly.append((c + side * r * math.sin(q), spring + r * math.cos(q)))
+            face_prism(mb, f, poly, -t, 0.0, mat)
+    f.slab(mb, a0, a1, top - 0.35, top, -deep, 0.0, mat)       # ceiling
+    f.slab(mb, a0, a1, -0.2, 0.08, -deep, 0.15, "stone")      # floor
+    pent(mb, f, a0 - 0.2, a1 + 0.2, top + 0.9 + deep * 0.15, 0.5, 0.9 + deep * 0.15 - 0.1)
+    p = [f.point(a0 - 0.2, -deep, top + 0.9), f.point(a1 + 0.2, -deep, top + 0.9),
+         f.point(a1 + 0.2, 0.3, top), f.point(a0 - 0.2, 0.3, top)]
+    mb.hexa(p + [(q[0], q[1], q[2] + 0.12) for q in p], "roof")
+
+
+def stone_arch_window(mb, f, a, z, w, h):
+    """A deep-set round-headed window in a sandstone wall."""
+    arch(mb, f, a, z, w, h, "glass", fill="stone")
+    f.slab(mb, a - w / 2 - 0.15, a + w / 2 + 0.15, z - 0.18, z, 0.0, 0.12, "stone")
+
+
+def ca_quad():
+    # A Stanford-style quad: three ranges of buff sandstone round a courtyard open
+    # at the back, under low red clay-tile roofs. The front range (two storeys)
+    # has an arcade of round arches along the street and a gabled gateway in the
+    # middle; the two wings have arcades facing the courtyard, and so does the
+    # front range's inner side. Walls in "stone" (the game's sandstone colour),
+    # roofs in the roof colour.
+    w, d = 40.0, 34.0
+    hf, hw = 9.0, 7.6                                        # front range, wings
+    mb = Builder()
+    yf0, yf1 = 7.0, d / 2 - 3.0                              # the front range behind its arcade
+    mb.box(-w / 2, w / 2, yf0, yf1, -0.3, hf, "stone")
+    for x0, x1 in ((-w / 2, -w / 2 + 10.0), (w / 2 - 10.0, w / 2)):
+        mb.box(x0, x1, -d / 2, yf0, -0.3, hw, "stone")
+    # The street arcade, either side of the gateway.
+    fa = Face((0, d / 2, 0), (1, 0, 0), (0, 1, 0))
+    arcade(mb, fa, -w / 2, -4.0, 4.6, 6)
+    arcade(mb, fa, 4.0, w / 2, 4.6, 6)
+    fw = Face((0, yf1, 0), (1, 0, 0), (0, 1, 0))
+    for k in range(12):
+        a = -w / 2 + 1.5 + k * ((w - 3.0) / 11)
+        if abs(a) < 5.0:
+            continue
+        fw.slab(mb, a - 0.5, a + 0.5, 0.0, 2.5, -0.02, 0.02, "door" if k % 4 == 1 else "glass")
+        stone_arch_window(mb, fw, a, 5.6, 1.2, 2.2)
+    # The gateway: a gable over a big arch, standing proud of the arcades.
+    gx = 4.0
+    mb.box(-gx, gx, yf1 - 0.5, d / 2 + 0.4, -0.3, hf + 1.0, "stone")
+    fg = Face((0, d / 2 + 0.4, 0), (1, 0, 0), (0, 1, 0))
+    arch(mb, fg, 0.0, 0.0, 4.6, 6.4, "metal", fill="stone")
+    for a in (-2.6, 2.6):
+        fg.slab(mb, a - 0.35, a + 0.35, 6.9, 8.6, -0.02, 0.02, "glass")
+    fg.slab(mb, -gx - 0.1, gx + 0.1, hf + 0.7, hf + 1.0, 0.0, 0.15, "stone")       # band under the gable
+    mb.extrude_y([(-gx - 0.2, hf + 1.0), (gx + 0.2, hf + 1.0), (0.0, hf + 4.4)], yf0 + 2.0, d / 2 + 0.6, "roof")
+    mb.extrude_y([(-gx, hf + 1.0), (gx, hf + 1.0), (0.0, hf + 4.0)], yf0 + 2.0, d / 2 + 0.4, "stone")
+    # Roofs: the front range and the wings, low hips with deep eaves.
+    tile_hip(mb, -w / 2, w / 2, yf0, yf1, hf, 2.8, over=0.7)
+    for x0, x1 in ((-w / 2, -w / 2 + 10.0), (w / 2 - 10.0, w / 2)):
+        tile_hip(mb, x0, x1, -d / 2, yf0 - 0.3, hw, 2.5, over=0.6)
+    # Courtyard arcades: the front range's inner side and the wings' inner sides.
+    fi = Face((0, yf0 - 3.0, 0), (-1, 0, 0), (0, -1, 0))
+    arcade(mb, fi, -10.0, 10.0, 4.2, 6)
+    yc = yf0 - 3.0                                           # where the wings' arcades stop
+    arcade(mb, Face((-w / 2 + 13.0, 0, 0), (0, -1, 0), (1, 0, 0)), -yc, d / 2, 4.2, 7)
+    arcade(mb, Face((w / 2 - 13.0, 0, 0), (0, 1, 0), (-1, 0, 0)), -d / 2, yc, 4.2, 7)
+    # Windows on the outer walls.
+    for side in (-1, 1):
+        fo = Face((side * w / 2, 0, 0), (0, -side, 0), (side, 0, 0))
+        for k in range(9):
+            y = -d / 2 + 2.0 + k * 3.4
+            stone_arch_window(mb, fo, -side * y, 1.0, 1.1, 2.0)
+            stone_arch_window(mb, fo, -side * y, 4.6 if y < yf0 else 5.6, 1.0, 1.8)
+    fb = Face((0, -d / 2, 0), (-1, 0, 0), (0, -1, 0))
+    for x in (-w / 2 + 2.5, -w / 2 + 5.0, -w / 2 + 7.5, w / 2 - 2.5, w / 2 - 5.0, w / 2 - 7.5):
+        stone_arch_window(mb, fb, -x, 1.0, 1.1, 2.0)
+        stone_arch_window(mb, fb, -x, 4.6, 1.0, 1.8)
+    tile_chimney(mb, -w / 2 + 5.0, -d / 2 + 6.0, hw, hw + 3.2)
+    return mb, (w, d, hf + 1.0, 3.4)
+
+
+def ca_bell_tower():
+    # A tall sandstone tower on the campus lawn (after Stanford's Hoover Tower):
+    # a plain square shaft with recessed strips of narrow windows, a belfry of
+    # tall round arches, a band, and a low dome of red clay tile on a drum.
+    w = d = 10.0
+    s = 4.0                                                   # half the shaft's width
+    mb = Builder()
+    mb.box(-s - 0.6, s + 0.6, -s - 0.6, s + 0.6, -0.5, 4.0, "stone")   # the base
+    mb.box(-s, s, -s, s, 4.0, 40.0, "stone")
+    faces = [Face((0, s, 0), (1, 0, 0), (0, 1, 0)), Face((0, -s, 0), (-1, 0, 0), (0, -1, 0)),
+             Face((s, 0, 0), (0, -1, 0), (1, 0, 0)), Face((-s, 0, 0), (0, 1, 0), (-1, 0, 0))]
+    for f in faces:
+        f.slab(mb, -1.0, 1.0, 6.0, 37.0, -0.15, 0.0, "metal")             # the recessed strip
+        for z in range(8, 36, 3):
+            f.slab(mb, -0.5, 0.5, z, z + 1.8, -0.1, 0.01, "glass")
+        f.slab(mb, -s - 0.3, s + 0.3, 40.0, 40.6, 0.0, 0.35, "stone")      # band under the belfry
+    mb.box(-s + 0.3, s - 0.3, -s + 0.3, s - 0.3, 40.6, 47.0, "stone")
+    for f in faces:
+        fb = Face(f.point(0, -0.3, 0), f.u, f.out)
+        for a in (-1.8, 0.0, 1.8):
+            arch(mb, fb, a, 41.4, 1.2, 4.6, "metal", fill="stone")
+        fb.slab(mb, -s, s, 47.0, 47.7, 0.0, 0.5, "stone")                   # the cornice
+    revolve(mb, 0.0, 0.0, [(3.4, 47.7, "stone"), (3.4, 49.2, "stone")], 16)
+    revolve(mb, 0.0, 0.0, [(3.7, 49.2, "roof"), (3.5, 50.6, "roof"), (2.9, 51.9, "roof"),
+                           (1.9, 52.9, "roof"), (0.7, 53.5, "roof"), (0.15, 53.7, "roof")], 16)
+    revolve(mb, 0.0, 0.0, [(0.3, 53.7, "stone"), (0.3, 54.4, "stone"), (0.05, 55.4, "stone")], 8)
+    return mb, (w, d, 55.4, 0.0)
+
+
+def ca_college():
+    # A Mission revival college: a two-storey stucco hall behind an arcade, a
+    # curved Mission gable with a bell in its opening over the door, arched windows
+    # and a low clay-tile roof; a square tower at one end.
+    w, d, h = 26.0, 14.0, 8.0
+    mb = Builder()
+    y1 = d / 2 - 3.0
+    mb.box(-w / 2, w / 2, -d / 2, y1, -0.3, h, "render")
+    mb.box(-w / 2, w / 2, -d / 2 - 0.05, d / 2, -0.3, 0.25, "stone")
+    fa = Face((0, d / 2, 0), (1, 0, 0), (0, 1, 0))
+    arcade(mb, fa, -w / 2, -3.2, 4.0, 4, mat="render")
+    arcade(mb, fa, 3.2, w / 2 - 4.5, 4.0, 3, mat="render")
+    fw = Face((0, y1, 0), (1, 0, 0), (0, 1, 0))
+    for a in (-11.0, -8.0, -5.0, 6.0, 9.0):
+        ca_window(mb, fw, a, 0.9, 1.0, 1.6)
+        arch(mb, fw, a, 4.9, 1.0, 2.0, "glass")
+    # The middle: a gabled front with the door, and the curved Mission parapet.
+    mb.box(-3.2, 3.2, y1, d / 2 + 0.2, -0.3, h + 0.6, "render")
+    fg = Face((0, d / 2 + 0.2, 0), (1, 0, 0), (0, 1, 0))
+    arch(mb, fg, 0.0, 0.0, 2.2, 3.6, "door")
+    arch(mb, fg, 0.0, 4.8, 1.4, 2.2, "glass")
+    prof = [(-3.2, h + 0.6), (-3.2, h + 1.4)]
+    for n in range(7):                                        # the curved shoulders and top
+        q = math.pi * n / 6
+        prof.append((-3.2 + 1.2 * (1 - math.cos(q / 2)) + n * 0.12, h + 1.4 + 1.4 * math.sin(q / 2)))
+    prof += [(-1.4, h + 3.4), (-1.4, h + 4.6), (1.4, h + 4.6), (1.4, h + 3.4)]
+    right = [(-x, z) for x, z in prof[2:9]][::-1]
+    poly = prof + right + [(3.2, h + 1.4), (3.2, h + 0.6)]
+    face_prism(mb, fg, poly, -0.6, 0.0, "render")
+    fg2 = Face((0, d / 2 + 0.25, 0), (1, 0, 0), (0, 1, 0))
+    arch(mb, fg2, 0.0, h + 2.4, 1.2, 1.9, "metal")             # the bell's opening
+    revolve(mb, 0.0, d / 2 - 0.1, [(0.45, h + 2.6, "pot"), (0.35, h + 3.1, "pot"), (0.12, h + 3.5, "pot")], 8)
+    fg.slab(mb, -1.6, 1.6, h + 4.6, h + 4.8, -0.7, 0.1, "render")
+    # The tower at the east end.
+    tx0, tx1 = w / 2 - 4.5, w / 2
+    mb.box(tx0, tx1, y1 - 2.0, d / 2, -0.3, h + 5.0, "render")
+    ft = Face(((tx0 + tx1) / 2, d / 2, 0), (1, 0, 0), (0, 1, 0))
+    arch(mb, ft, 0.0, 1.0, 1.2, 2.4, "glass")
+    arch(mb, ft, 0.0, h + 1.6, 1.6, 2.6, "metal")
+    fs = Face((tx1, y1 - 1.0 + 1.5, 0), (0, -1, 0), (1, 0, 0))
+    arch(mb, fs, 0.0, h + 1.6, 1.6, 2.6, "metal")
+    tile_hip(mb, tx0, tx1, y1 - 2.0, d / 2, h + 5.0, 2.0, over=0.4)
+    fb = back(w, d)
+    for a in (-10.0, -6.0, -2.0, 2.0, 6.0, 10.0):
+        ca_window(mb, fb, a, 0.9, 1.1, 1.6)
+        ca_window(mb, fb, a, 4.8, 1.0, 1.6)
+    tile_hip(mb, -w / 2, w / 2, -d / 2, y1, h, 2.6, over=0.7)
+    return mb, (w, d, h + 5.0, 2.0)
+
+
+def ca_lab():
+    # A research park lab: two long low storeys, a recessed glass ground floor,
+    # the upper floor wrapped in white sun fins over ribbon glazing, a timber
+    # screen by the entrance (the roof colour), a pale roof with rows of solar
+    # panels and plant behind a screen.
+    w, d, storey = 30.0, 22.0, 4.2
+    h = 2 * storey
+    mb = Builder()
+    mb.box(-w / 2 + 1.5, w / 2 - 1.5, -d / 2 + 1.5, d / 2 - 1.5, 0.0, storey, "curtain")
+    mb.box(-w / 2, w / 2, -d / 2, d / 2, storey, h, "render")
+    for k in range(8):
+        x = -w / 2 + 1.0 + k * (w - 2.0) / 7
+        for y in (-d / 2 + 1.0, d / 2 - 1.0):
+            mb.box(x - 0.2, x + 0.2, y - 0.2, y + 0.2, 0.0, storey, "frame")
+    faces = [(front(w, d), w), (back(w, d), w), (left(w, d), d), (right(w, d), d)]
+    for f, span in faces:
+        f.slab(mb, -span / 2 + 0.6, span / 2 - 0.6, storey + 0.9, h - 0.8, -0.02, 0.03, "glass")
+        n = int((span - 1.2) / 1.2)
+        for k in range(n + 1):
+            a = -span / 2 + 0.6 + k * (span - 1.2) / n
+            f.slab(mb, a - 0.06, a + 0.06, storey + 0.5, h - 0.3, 0.0, 0.7, "frame")   # sun fins
+        f.slab(mb, -span / 2, span / 2, h - 0.35, h, 0.0, 0.8, "frame")
+    f = front(w, d)
+    f.slab(mb, -9.0, -3.0, 0.0, storey + 0.2, 1.4, 1.6, "accent")          # the timber screen
+    for k in range(13):
+        f.slab(mb, -9.0 + k * 0.5, -8.85 + k * 0.5, 0.0, storey, 1.6, 1.7, "accent")
+    f.slab(mb, -2.5, 2.5, 3.2, 3.5, 0.0, 3.0, "frame")                     # canopy
+    f.slab(mb, -1.2, 1.2, 0.0, 2.6, 1.5, 1.55, "door")
+    flat_top(mb, -w / 2, w / 2, -d / 2, d / 2, h, edge=0.3, up=0.45)
+    for row in range(4):                                                   # solar panels
+        y = -d / 2 + 3.0 + row * 3.4
+        p = [(-w / 2 + 2.0, y, h + 0.3), (w / 2 - 9.0, y, h + 0.3), (w / 2 - 9.0, y + 2.2, h + 1.1),
+             (-w / 2 + 2.0, y + 2.2, h + 1.1)]
+        mb.hexa(p + [(q[0], q[1], q[2] + 0.08) for q in p], "metal")
+    mb.box(w / 2 - 7.5, w / 2 - 1.5, -d / 2 + 2.5, d / 2 - 2.5, h, h + 2.0, "cladding")   # plant screen
+    return mb, (w, d, h + 2.0, 0.0)
 
 
 def terrace(variant="a"):
@@ -2913,6 +3126,7 @@ MODELS = {
     "launch_tower": launch_tower, "rocket": rocket,
     "dc_hall": dc_hall, "ai_hall": ai_hall, "gigafactory_bay": gigafactory_bay,
     "google_pavilion3": lambda: google_pavilion(3), "google_pavilion4": lambda: google_pavilion(4),
+    "ca_quad": ca_quad, "ca_bell_tower": ca_bell_tower, "ca_college": ca_college, "ca_lab": ca_lab,
 }
 for _n in range(2, 8):
     MODELS["classical%d" % _n] = (lambda n: lambda: classical(n, "plain"))(_n)

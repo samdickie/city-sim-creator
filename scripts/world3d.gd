@@ -43,6 +43,10 @@ const MODEL_DIMS := {
 	"dc_hall": Vector4(30.0, 40.0, 14.0, 0.0), "ai_hall": Vector4(30.0, 40.0, 19.5, 0.0),
 	"gigafactory_bay": Vector4(40.0, 60.0, 22.0, 0.0),
 	"google_pavilion3": Vector4(34.0, 22.0, 11.6, 0.0), "google_pavilion4": Vector4(34.0, 22.0, 15.2, 0.0),
+	# The Californian campus (CALIFORNIA): a Stanford-style sandstone quad, its bell
+	# tower, a Mission revival college and a research park lab.
+	"ca_quad": Vector4(40.0, 34.0, 10.0, 3.4), "ca_bell_tower": Vector4(10.0, 10.0, 55.4, 0.0),
+	"ca_college": Vector4(26.0, 14.0, 13.0, 2.0), "ca_lab": Vector4(30.0, 22.0, 10.4, 0.0),
 	"school": Vector4(38.0, 13.0, 9.0, 4.5), "hospital": Vector4(34.0, 22.0, 20.8, 0.0),
 	# Whole sites (power stations) and the remaining landmarks, placed at their built size.
 	"coal_plant": Vector4(44.0, 44.0, 66.0, 0.0), "gas_plant": Vector4(44.0, 44.0, 46.0, 0.0),
@@ -2890,6 +2894,30 @@ func _street_reach(i: int, front: Vector2i) -> float:
 	return 0.0
 
 
+func _campus_tower(tx: int, ty: int) -> bool:
+	# A university's bell tower stands on one of its lawns (the tiles between the
+	# quads) with campus all round it: the first such lawn, reading across then
+	# down, within 6 tiles, so a campus has one (a big one a few).
+	if not _campus_inner(tx, ty):
+		return false
+	for y: int in range(ty - 6, ty + 1):
+		for x: int in range(tx - 6, tx + 7):
+			if y == ty and x >= tx:
+				break
+			if (x + y) % 2 == 1 and _campus_inner(x, y):
+				return false   # an earlier lawn nearby has it
+	return true
+
+
+func _campus_inner(tx: int, ty: int) -> bool:
+	# University tiles all round (the tile itself and its eight neighbours).
+	for y: int in range(ty - 1, ty + 2):
+		for x: int in range(tx - 1, tx + 2):
+			if x < 0 or y < 0 or x >= map_w or y >= map_h or sim.tiles[y * map_w + x] != Tile.UNIVERSITY:
+				return false
+	return true
+
+
 func _place(i: int, front: Vector2i, along: float, back: float, w: float, d: float) -> Dictionary:
 	# Where something sits on its plot.
 	#   along: metres left/right of the plot centre, along the street
@@ -5488,9 +5516,14 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 			for k in 3:
 				_prop(i, front, -20.0 + k * 6.0, -1.5, 4.5, 2.4, 2.6, Color(0.30, 0.34, 0.38))   # generators
 		Tile.COLLEGE:
-			# A sandstone college with a newer glass wing, steps and trees.
+			# A sandstone college (in California a Mission revival one) with a newer
+			# glass wing, steps and trees.
 			var old_block := _place(i, front, -9.0, 4.0, 26.0, 14.0)
-			_add_block(old_block, 26.0, 14.0, 12.0, HONEY_STONE, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
+			if CALIFORNIA and _models.has("ca_college"):
+				var stucco := STUCCO_WHITE if (tile.x + tile.y) % 2 == 0 else STUCCO_CREAM
+				_add_model("ca_college", old_block, 26.0, 14.0, _model_total("ca_college"), stucco, CLAY_TILE)
+			else:
+				_add_block(old_block, 26.0, 14.0, 12.0, HONEY_STONE, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
 			var wing := _place(i, front, 14.0, 6.0, 16.0, 18.0)
 			_add_block(wing, 16.0, 18.0, 10.0, Color(0.55, 0.66, 0.74), STYLE_GLASS, 0.0, MODERN_WHITE, wall_list, roof_list)
 			for k in 3:
@@ -5500,29 +5533,46 @@ func _plan_building(i: int, t: int, wall_list: Array, roof_list: Array, chimney_
 		Tile.UNIVERSITY:
 			# Old colleges round quads: on every other tile a sandstone range of three
 			# sides round a lawn (a tower on some), the tiles between left as lawns with trees.
+			# In California: a Stanford-style quad (buff sandstone, arcades, red tile
+			# roofs), and on some of the lawns a tall bell tower.
 			var tx := i % map_w
 			var ty := i / map_w
+			var tower_here := (tx * 7 + ty * 3) % 5 == 0
+			var ca := CALIFORNIA and _models.has("ca_quad")
 			if (tx + ty) % 2 == 0:
-				var stone := HONEY_STONE if (tx / 2 + ty) % 2 == 0 else RED_SANDSTONE
-				var range_front := _place(i, front, 0.0, 3.0, 40.0, 10.0)
-				_add_block(range_front, 40.0, 10.0, 13.0, stone, STYLE_CLASSICAL, 5.0, SLATE, wall_list, roof_list)
-				for side: float in [-15.0, 15.0]:
-					var wing := _place(i, front, side, 13.0, 10.0, 24.0)
-					_add_block(wing, 10.0, 24.0, 11.0, stone, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
-				if (tx * 7 + ty * 3) % 5 == 0:
-					var tower := _place(i, front, 0.0, 2.0, 7.0, 7.0)
-					_add_block(tower, 7.0, 7.0, 30.0, stone, STYLE_CLASSICAL, 6.0, SLATE, wall_list, roof_list)
+				if ca:
+					var buff := HONEY_STONE if (tx / 2 + ty) % 2 == 0 else BLONDE_SANDSTONE
+					var roof := CLAY_TILE if (tx + ty / 2) % 3 != 0 else CLAY_DARK
+					var quad := _place(i, front, 0.0, 3.0, 40.0, 34.0)
+					_add_model("ca_quad", quad, 40.0, 34.0, _model_total("ca_quad"), buff, roof)
+				else:
+					var stone := HONEY_STONE if (tx / 2 + ty) % 2 == 0 else RED_SANDSTONE
+					var range_front := _place(i, front, 0.0, 3.0, 40.0, 10.0)
+					_add_block(range_front, 40.0, 10.0, 13.0, stone, STYLE_CLASSICAL, 5.0, SLATE, wall_list, roof_list)
+					for side: float in [-15.0, 15.0]:
+						var wing := _place(i, front, side, 13.0, 10.0, 24.0)
+						_add_block(wing, 10.0, 24.0, 11.0, stone, STYLE_CLASSICAL, 4.0, SLATE, wall_list, roof_list)
+					if tower_here:
+						var tower := _place(i, front, 0.0, 2.0, 7.0, 7.0)
+						_add_block(tower, 7.0, 7.0, 30.0, stone, STYLE_CLASSICAL, 6.0, SLATE, wall_list, roof_list)
 			else:
+				if ca and _campus_tower(tx, ty) and _models.has("ca_bell_tower"):
+					var bell := _place(i, front, 0.0, 18.0, 10.0, 10.0)
+					_add_model("ca_bell_tower", bell, 10.0, 10.0, _model_total("ca_bell_tower"), HONEY_STONE, CLAY_TILE)
 				for k in 4:
 					var at := _place(i, front, -15.0 + (k % 2) * 30.0, 10.0 + (k / 2) * 22.0, 1.0, 1.0)
 					var pos: Vector3 = at["pos"]
-					_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(9.0, 14.0), TreeKind.BROADLEAF])
+					var kind := TreeKind.PALM if ca and k < 2 else TreeKind.BROADLEAF
+					_extra_trees.append([Vector2(pos.x, pos.z), rng.randf_range(9.0, 14.0), kind])
 		Tile.RESEARCH_PARK:
 			# A low glass lab with a white frame and plant on the roof, on a lawn with trees.
 			var lab := _place(i, front, -4.0, 6.0, 30.0, 22.0)
-			_add_block(lab, 30.0, 22.0, 9.0, Color(0.62, 0.72, 0.78), STYLE_MODERN, 0.0, MODERN_WHITE, wall_list, roof_list)
-			for k in 3:
-				_prop(i, front, -12.0 + k * 9.0, 12.0, 5.0, 4.0, 2.2, Color(0.80, 0.82, 0.84), 9.1)
+			if CALIFORNIA and _models.has("ca_lab"):
+				_add_model("ca_lab", lab, 30.0, 22.0, _model_total("ca_lab"), MODERN_WHITE, TIMBER)
+			else:
+				_add_block(lab, 30.0, 22.0, 9.0, Color(0.62, 0.72, 0.78), STYLE_MODERN, 0.0, MODERN_WHITE, wall_list, roof_list)
+				for k in 3:
+					_prop(i, front, -12.0 + k * 9.0, 12.0, 5.0, 4.0, 2.2, Color(0.80, 0.82, 0.84), 9.1)
 			for k in 2:
 				var at := _place(i, front, 16.0, 8.0 + k * 16.0, 1.0, 1.0)
 				var pos: Vector3 = at["pos"]

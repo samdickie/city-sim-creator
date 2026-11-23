@@ -1074,9 +1074,10 @@ def conservation():
 
 
 def college():
+    # A Mission revival college with a newer glass wing.
     ground()
     slab(0.0, 0.0, 49.0, 4.0, PAVEMENT)
-    model("classical3", -9.0, 4.0, 26.0, 14.0, 16.0, HONEY_STONE, r=0.4)
+    model("ca_college", -9.0, 4.0, 26.0, 14.0, None, STUCCO_WHITE, CLAY_TILE)
     modern_block(14.0, 6.0, 16.0, 18.0, 3, (0.55, 0.66, 0.74), glassy=True)
     slab(0.0, 26.0, 46.0, 20.0, LAWN)
     for k in range(3):
@@ -1084,20 +1085,19 @@ def college():
 
 
 def university():
+    # A Stanford-style quad with palms on the lawn.
     ground()
     slab(0.0, 0.0, 50.0, 50.0, LAWN)
-    model("classical4", 0.0, 3.0, 40.0, 10.0, 18.0, HONEY_STONE, r=0.4)
-    for side in (-15.0, 15.0):
-        model("classical3", side, 13.0, 10.0, 24.0, 15.0, HONEY_STONE, r=0.4, turn=1)
-    box(0.0, 2.0, 7.0, 7.0, 30.0, HONEY_STONE)
-    for (a, b) in ((-8.0, 42.0), (8.0, 42.0)):
-        tree(a, b, 10.0)
+    model("ca_quad", 4.0, 3.0, 40.0, 34.0, None, HONEY_STONE, CLAY_TILE)
+    for (a, b) in ((-20.0, 40.0), (8.0, 44.0)):
+        palm(a, b, 12.0)
 
 
 def research_park():
+    # A low lab with sun fins and solar panels, on a lawn with trees.
     ground()
     slab(0.0, 0.0, 50.0, 50.0, LAWN)
-    modern_block(-4.0, 6.0, 30.0, 22.0, 3, (0.62, 0.72, 0.78), glassy=True)
+    model("ca_lab", -4.0, 6.0, 30.0, 22.0, None, MODERN_WHITE, TIMBER)
     for k in range(2):
         tree(16.0, 8.0 + k * 16.0, 9.0)
 
