@@ -550,6 +550,19 @@ def bulldoze():
     box(10.0, 4.0, 3.4, 1.0, 1.4, (0.25, 0.25, 0.25), 0.3)
 
 
+def reclaim():
+    """Reclaim land: sandy new land pushed out into the water, a dump truck tipping fill at its edge."""
+    ground((0.50, 0.38, 0.22), sea=True, road=False)                    # the new land, sand-coloured fill (linear)
+    slab(0.0, 0.0, 50.0, 14.0, (0.42, 0.56, 0.28))                      # the old shore at the front
+    for k, (a, b, s) in enumerate(((-15, 50, 2.6), (-5, 52, 2.2), (6, 50, 2.8), (16, 53, 2.0))):
+        box(a, b, s * 3, s * 2.6, s * 0.8 + 0.6, (0.74 + k * 0.02, 0.64, 0.47), -1.2)   # heaps tipped into the water
+    box(2.0, 30.0, 3.4, 4.0, 3.0, CRANE_YELLOW, 0.8)                    # dump truck: cab
+    box(2.0, 34.0, 3.6, 8.0, 1.6, (0.30, 0.30, 0.30), 0.6)              # chassis
+    box(2.0, 35.0, 3.4, 7.0, 2.4, CRANE_YELLOW, 2.0)                    # body
+    for (a, b) in ((0.2, 31.0), (3.8, 31.0), (0.2, 37.0), (3.8, 37.0)):
+        box(a, b, 0.8, 1.8, 1.8, (0.12, 0.12, 0.12), 0.0)               # wheels
+
+
 def park():
     ground()
     slab(0.0, 0.0, 3.0, 50.0, (0.72, 0.66, 0.52))
@@ -1120,7 +1133,7 @@ def normal():
 
 ITEMS = {
     "homes_0": homes_0, "homes_1": homes_1, "homes_2": homes_2, "shops_0": shops_0, "shops_1": shops_1,
-    "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "avenue": avenue, "motorway": motorway, "grid": grid, "bulldoze": bulldoze, "park": park,
+    "shops_2": shops_2, "offices_0": offices_0, "offices_1": offices_1, "offices_2": offices_2, "industry": industry, "road": road, "avenue": avenue, "motorway": motorway, "grid": grid, "bulldoze": bulldoze, "reclaim": reclaim, "park": park,
     "woodland": woodland,
     "coal": coal, "gas": gas, "nuclear": nuclear, "wind": wind, "solar": solar, "power_line": power_line,
     "water_pump": water_pump, "water_tower": water_tower, "landfill": landfill, "recycling": recycling, "incinerator": incinerator,

@@ -131,6 +131,7 @@ func _run() -> void:
 	await _traffic()
 	await _road_types()
 	await _bridges()
+	await _reclaim()
 	await _services()
 	await _feedback_fixes()
 	await _tech_zone()
@@ -3350,6 +3351,108 @@ func _bridges() -> void:
 	data = sim.to_save()
 	sim.from_save(data)
 	check(sim.tiles[offshore] == T.ALCATRAZ, "alcatraz: saved and loaded, still on the water")
+
+
+func _reclaim() -> void:
+	# Reclaim land (Nov 2026): Roads > Reclaim land, a box dragged out from the
+	# shore fills the water in as flat new land (RECLAIM_COST a tile). Open water
+	# not joined to land says so; undo, save and load, and a new city's coast.
+	var T := Simulation.Tile
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _wait(0.2)
+	game.call("_set_speed", 0)
+	var ends := _find_crossing(8)
+	check(ends.size() == 2, "reclaim: the map has a shore with water beside it (%s)" % str(ends))
+	if ends.size() < 2:
+		return
+	var a: Vector2i = ends[0]
+	var step := Vector2i(signi(ends[1].x - a.x), signi(ends[1].y - a.y))
+	var side := Vector2i(step.y, step.x)
+	var water: PackedByteArray = game.get("water")
+	sim.money = 500000
+	await _pick_item("roads", "reclaim")
+	var info: Label = hud.get("info_label")
+	var hint := String(game.call("_tool_hint"))
+	check(int(game.get("current_tool")) == 17 and hint.contains("Drag a box out from the shore"),
+		"reclaim: in the Roads menu, and it says how (%s)" % hint)
+	var c0 := a + step
+	var c1 := a + step * 4 + side * 2
+	await _look_at(a + step * 2 + side, PLAY_DISTANCE * 0.7, -40.0, 40.0, [a, c1])
+	# Open water out in the middle: not joined to land, so nothing.
+	var mid := Vector2i(-1, -1)
+	for k: int in range(2, roundi((ends[1] - a).length())):
+		if not bool(game.call("_beside_land", a + step * k)):
+			mid = a + step * k
+			break
+	var mid_i := mid.y * sim.w + mid.x
+	check(mid.x >= 0, "reclaim: open water away from the shore at %s" % mid)
+	if mid.x >= 0:
+		await _drag(_screen_of(mid), _screen_of(mid), MOUSE_BUTTON_LEFT, false)
+		check(info.text.contains("has to join land"), "reclaim: open water away from the shore says so (%s)" % info.text)
+		await _press(_screen_of(mid), MOUSE_BUTTON_LEFT, false)
+		await _frames(2)
+		check(water[mid_i] == 1, "reclaim: ...and stays water")
+	# A box out from the shore: all its water becomes land.
+	var want: Array[int] = []
+	for y: int in range(mini(c0.y, c1.y), maxi(c0.y, c1.y) + 1):
+		for x: int in range(mini(c0.x, c1.x), maxi(c0.x, c1.x) + 1):
+			if water[y * sim.w + x] == 1 and sim.tiles[y * sim.w + x] == T.EMPTY:
+				want.append(y * sim.w + x)
+	var money0: int = sim.money
+	hud.call("set_build_open", false)
+	await _look_at(a + step * 2 + side, PLAY_DISTANCE * 0.45, -45.0, 35.0, [])
+	await _shot("p60a_reclaim_before")
+	var t0 := Time.get_ticks_msec()
+	await _drag(_screen_of(c0), _screen_of(c1))
+	await _frames(3)
+	await _shot("p60b_reclaim_after")
+	var filled := 0
+	for i: int in want:
+		if water[i] == 0 and sim.is_reclaimed(i):
+			filled += 1
+	var spent: int = money0 - sim.money
+	check(want.size() >= 4 and filled == want.size() and spent == filled * Settings.RECLAIM_COST,
+		"reclaim: a box from the shore fills %d of %d water tiles for %s (%d ms with the redraw)" % [
+		filled, want.size(), Hud.money_text(spent), Time.get_ticks_msec() - t0])
+	var far := a + step * 4 + side
+	var far_i := far.y * sim.w + far.x
+	var ground: float = world.height_at(world.tile_centre(far).x, world.tile_centre(far).y)
+	var text := String(game.call("_tile_text", far_i))
+	check(ground >= Settings.RECLAIM_HEIGHT - 0.3 and ground < 30.0 and text.contains("Reclaimed land"),
+		"reclaim: the new land is %.1f m up and its hover says so (%s)" % [ground, text.get_slice("\n", 0)])
+	# Undo puts the water back, with the money.
+	await _key(KEY_Z, true)
+	await _frames(3)
+	check(water[far_i] == 1 and not sim.is_reclaimed(far_i) and sim.money == money0,
+		"reclaim: undo puts the water back and the money")
+	await _drag(_screen_of(c0), _screen_of(c1))
+	await _frames(3)
+	check(water[far_i] == 0, "reclaim: filled in again")
+	# Build on it: a road along it and homes beside.
+	await _pick_item("roads", "road")
+	await _drag(_screen_of(a + step * 4), _screen_of(a + step * 4 + side * 2))
+	_place("homes_0", a + step * 2, a + step * 3 + side * 2)
+	check(sim.tiles[far_i] == T.ROAD and not sim.is_bridge(far_i) and sim.tiles[(a + step * 2).y * sim.w + (a + step * 2).x] == T.HOMES,
+		"reclaim: a road and homes on the new land (an ordinary road, not a bridge)")
+	game.set("_buildings_dirty", true)
+	game.set("_ground_dirty", true)
+	game.call("_refresh_hud")
+	hud.call("set_build_open", false)
+	await _look_at(a + step * 2 + side, PLAY_DISTANCE * 0.45, -45.0, 35.0, [])
+	await _shot("p60_reclaim")
+	# Saved and loaded; a new city has the map's own coast.
+	var data := sim.to_save()
+	sim.from_save(data)
+	check(water[far_i] == 0 and sim.is_reclaimed(far_i) and sim.tiles[far_i] == T.ROAD, "reclaim: saved and loaded")
+	await _open_new_city_from_menu()
+	await _key(KEY_1)
+	await _key(KEY_ENTER)
+	await _frames(3)
+	check(water[far_i] == 1 and sim.reclaimed_tiles() == 0 and absf(world.height_at(world.tile_centre(far).x,
+		world.tile_centre(far).y)) > 0.5 and world.height_at(world.tile_centre(far).x, world.tile_centre(far).y) < 0.0,
+		"reclaim: a new city has the map's own coast again")
 
 
 func _road_types() -> void:

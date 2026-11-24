@@ -178,6 +178,10 @@ var _net_id := PackedInt32Array()     # which power network a tile is on (-1 = n
 var _net_spare: Array[int] = []       # spare power on each network
 var _power_dirty := true
 var watered := PackedByteArray()      # 1 = this tile has water
+var reclaimed := PackedByteArray()    # 1 = water filled in by the player (saved as a list of tiles)
+var _map_water := PackedByteArray()   # the map's own water, before any reclaiming
+var land_version := 0                 # goes up whenever the coast changes (game3d redraws the ground)
+var _sea_dirty := false               # _measure_sea() at the next recount
 var _wnet_id := PackedInt32Array()    # which water network a tile is on (-1 = none)
 var _wnet_spare: Array[int] = []
 var _water_dirty := true
@@ -203,7 +207,9 @@ var _access := PackedInt32Array()     # map tile -> the road node its trips star
 func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 	w = width
 	h = height
-	water = water_map
+	water = water_map                    # (shared with game3d and world3d: change it in place)
+	_map_water = water_map.duplicate()
+	reclaimed.resize(w * h)
 	tiles.resize(w * h)
 	levels.resize(w * h)
 	density.resize(w * h)
@@ -226,6 +232,7 @@ func setup(width: int, height: int, water_map: PackedByteArray) -> void:
 
 func reset(level: int = Settings.DEFAULT_DIFFICULTY) -> void:
 	# A blank map at this difficulty (see Settings.DIFFICULTIES).
+	_restore_coast([])
 	tiles.fill(Tile.EMPTY)
 	levels.fill(0)
 	density.fill(1)
@@ -302,6 +309,52 @@ func set_tile(i: int, t: int, new_density: int = 1) -> void:
 	layout_version += 1
 
 
+# --- Reclaimed land: water the player has filled in (Roads > Reclaim land).
+# water[] is the map's water less these tiles; the map's own is kept in _map_water.
+
+func can_reclaim(i: int) -> bool:
+	# Open water (not a bridge or Alcatraz) that could be filled in.
+	return water[i] == 1 and tiles[i] == Tile.EMPTY
+
+
+func reclaim(i: int) -> void:
+	# Fill in this water tile: it becomes empty land. Call recount() afterwards.
+	water[i] = 0
+	reclaimed[i] = 1
+	_coast_changed()
+
+
+func is_reclaimed(i: int) -> bool:
+	return reclaimed[i] == 1
+
+
+func reclaimed_tiles() -> int:
+	return reclaimed.count(1)
+
+
+func _restore_coast(filled: Array) -> void:
+	# The map's own coast, with these tiles filled in (a new city: none).
+	var before := water.duplicate()
+	for i in water.size():
+		water[i] = _map_water[i]
+	reclaimed.fill(0)
+	for v in filled:
+		var i := int(v)
+		if i >= 0 and i < water.size() and water[i] == 1:
+			water[i] = 0
+			reclaimed[i] = 1
+	if water != before:
+		_coast_changed()
+
+
+func _coast_changed() -> void:
+	_sea_dirty = true
+	land_version += 1
+	_roads_dirty = true
+	_value_dirty = true
+	layout_version += 1
+
+
 func is_bridge(i: int) -> bool:
 	# A road over water.
 	return tiles[i] == Tile.ROAD and water[i] == 1
@@ -368,7 +421,8 @@ func set_road(i: int, kind: int) -> void:
 
 func tile_state(i: int) -> PackedByteArray:
 	# Everything about one tile, so undo can put it back (see restore_tile).
-	return PackedByteArray([tiles[i], levels[i], density[i], district[i], road_kind[i], decline[i], abandoned[i]])
+	return PackedByteArray([tiles[i], levels[i], density[i], district[i], road_kind[i], decline[i], abandoned[i],
+		water[i], reclaimed[i]])
 
 
 func restore_tile(i: int, state: PackedByteArray) -> void:
@@ -380,6 +434,10 @@ func restore_tile(i: int, state: PackedByteArray) -> void:
 	road_kind[i] = state[4]
 	decline[i] = state[5]
 	abandoned[i] = state[6]
+	if state.size() > 8 and (water[i] != state[7] or reclaimed[i] != state[8]):
+		water[i] = state[7]              # (reclaimed land going back under the water)
+		reclaimed[i] = state[8]
+		_coast_changed()
 	_roads_dirty = true
 	_power_dirty = true
 	_water_dirty = true
@@ -2181,6 +2239,9 @@ static func _pounds(amount: int) -> String:
 # ------------------------------------------------------------- city numbers
 
 func recount() -> void:
+	if _sea_dirty:
+		_sea_dirty = false
+		_measure_sea()
 	_index_deals()
 	_update_area_groups()
 	population = 0
@@ -4440,6 +4501,7 @@ func to_save() -> Dictionary:
 		"startups": startups.duplicate(true),
 		"letter_log": letter_log.duplicate(true),
 		"golden_gate": golden_gate.duplicate(),
+		"reclaimed": _reclaimed_list(),
 		"empty_sites": empty_sites.duplicate(true),
 		"deals": deals.duplicate(true),
 		"investor_appetite": investor_appetite,
@@ -4460,7 +4522,16 @@ func to_save() -> Dictionary:
 	}
 
 
+func _reclaimed_list() -> Array:
+	var out: Array = []
+	for i in reclaimed.size():
+		if reclaimed[i] == 1:
+			out.append(i)
+	return out
+
+
 func from_save(data: Dictionary) -> void:
+	_restore_coast(data.get("reclaimed", []))     # (before the tiles: they check the water)
 	var saved_tiles: Array = data.get("tiles", [])
 	var saved_levels: Array = data.get("levels", [])
 	tiles.fill(Tile.EMPTY)

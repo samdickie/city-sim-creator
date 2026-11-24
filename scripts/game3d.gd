@@ -34,7 +34,7 @@ enum Tile { EMPTY, ROAD, HOMES, SHOPS, INDUSTRY, POWER_PLANT, POWER_LINE, PARK,
 	PAINTED_LADIES, COIT_TOWER, FERRY_BUILDING, FINE_ARTS, TRANSAMERICA, SALESFORCE_TOWER,
 	CHIP_FACTORY, GOLDEN_GATE, ALCATRAZ }   # same order as simulation.gd
 enum Tool { ROAD, HOMES, SHOPS, INDUSTRY, BULLDOZE, POWER, UTILITY, PARK, GRID, SERVICE, LEISURE, TRANSPORT,
-	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION }   # DEAL: placing a company's data centre (not in the Build menu)
+	DISTRICT, OFFICES, LANDMARK, DEAL, EDUCATION, RECLAIM }   # DEAL: placing a company's data centre (not in the Build menu)
 
 const TOOL_NAMES := {
 	Tool.ROAD: "Road",
@@ -54,6 +54,7 @@ const TOOL_NAMES := {
 	Tool.LANDMARK: "Landmarks",
 	Tool.DEAL: "Data centre",
 	Tool.EDUCATION: "Education",
+	Tool.RECLAIM: "Reclaim land",
 }
 const TOOL_KEYS := {
 	Tool.ROAD: "1", Tool.HOMES: "2", Tool.SHOPS: "3", Tool.INDUSTRY: "4", Tool.BULLDOZE: "5",
@@ -108,6 +109,7 @@ const TOOL_COLOURS := {
 	Tool.LANDMARK: Color(0.95, 0.78, 0.30),
 	Tool.DEAL: Color(0.16, 0.76, 0.78),
 	Tool.EDUCATION: Color(0.55, 0.45, 0.90),
+	Tool.RECLAIM: Color(0.86, 0.72, 0.42),
 }
 const TILE_NAMES := {
 	Tile.EMPTY: "Open land",
@@ -164,6 +166,9 @@ var hover := Vector2i(-1, -1)
 var _ground_dirty := false
 var _buildings_dirty := false
 var _layout_seen := -1                 # sim.layout_version last drawn
+var _land_seen := -1                   # sim.land_version last drawn (the coast: see _sync_land)
+var _map_heights := PackedFloat32Array()   # the map's own heights (reclaimed tiles are raised from these)
+var _reclaim_reach := {}               # the drag's water tiles that join land (see _reach_land)
 var _camera_seen := Transform3D()      # camera position last used to pick the hovered tile
 var _mouse_at := Vector2(-1, -1)       # where the mouse last moved to (map or interface)
 var fit_to_screen := true              # scale the interface and 3D picture to the screen (the screenshot tool turns it off)
@@ -184,12 +189,14 @@ func _ready() -> void:
 	assert(Hud.OVERLAY_NAMES.size() == WorldView.Overlay.size() and Hud.OVERLAY_TIPS.size() == WorldView.Overlay.size(),
 		"hud.gd OVERLAY_NAMES / OVERLAY_TIPS don't match world3d.gd's Overlay list")
 	_load_map()
+	_map_heights = heights.duplicate()
 	_compute_slopes()
 	sim.setup(map_w, map_h, water)
 
 	add_child(world)
 	world.setup(sim, map_w, map_h, cell_size_m, heights, water)
 	_layout_seen = sim.layout_version
+	_land_seen = sim.land_version
 
 	rig.bounds = Rect2(Vector2.ZERO, Vector2(map_w, map_h) * cell_size_m)
 	rig.ground_height = world.height_at
@@ -314,6 +321,36 @@ func _load_map() -> void:
 	for i in map_w * map_h:
 		heights[i] = float(h[i])
 		water[i] = int(w[i])
+
+
+func _sync_land() -> void:
+	# The coast has changed (land reclaimed, an undo, a city loaded or a new one):
+	# raise reclaimed tiles to RECLAIM_HEIGHT, put the rest back to the map's
+	# heights, and redraw the ground. (water[] is shared with sim and world.)
+	_land_seen = sim.land_version
+	# Each reclaimed tile takes the height of the nearest shore it was built out
+	# from (at least RECLAIM_HEIGHT), so the new land joins the old without a step.
+	var queue: Array[int] = []
+	for i in heights.size():
+		heights[i] = _map_heights[i]
+		if water[i] == 0 and not sim.is_reclaimed(i):
+			queue.append(i)
+	var seen := PackedByteArray()
+	seen.resize(heights.size())
+	for i: int in queue:
+		seen[i] = 1
+	var head := 0
+	while head < queue.size():
+		var i := queue[head]
+		head += 1
+		var x := i % map_w
+		for n: int in [i - 1 if x > 0 else -1, i + 1 if x < map_w - 1 else -1, i - map_w, i + map_w]:
+			if n >= 0 and n < heights.size() and seen[n] == 0 and sim.is_reclaimed(n):
+				seen[n] = 1
+				heights[n] = maxf(heights[i], Settings.RECLAIM_HEIGHT)
+				queue.append(n)
+	_compute_slopes()
+	world.reshape_ground(heights)
 
 
 func _compute_slopes() -> void:
@@ -535,6 +572,10 @@ func _process(delta: float) -> void:
 
 	# Redraw at most once a frame, however many tiles changed. Roads, power lines
 	# and woods only change when the layout does. (Traffic watches for itself.)
+	if sim.land_version != _land_seen:
+		_sync_land()
+		_ground_dirty = true
+		_buildings_dirty = true
 	if _ground_dirty:
 		_ground_dirty = false
 		var layout_changed := sim.layout_version != _layout_seen
@@ -585,6 +626,8 @@ func _update_drag() -> void:
 	var count := 0
 	var bridged := 0
 	var bridge_why := ""                  # (a road into the water: why it can't be a bridge)
+	if current_tool == Tool.RECLAIM:
+		_reclaim_reach = _reach_land(drag_plan)
 	for p in drag_plan:
 		var why := _why_cant_build(p, false)
 		if why == "-":
@@ -596,7 +639,7 @@ func _update_drag() -> void:
 			count += 1
 			if current_tool == Tool.ROAD and _is_water(p):
 				bridged += 1
-		elif current_tool == Tool.ROAD and _is_water(p) and bridge_why == "":
+		elif (current_tool == Tool.ROAD and _is_water(p) or current_tool == Tool.RECLAIM) and bridge_why == "":
 			bridge_why = why
 	# An airport (or a data centre) has a minimum size: the whole drag is red
 	# until it's big enough, then green.
@@ -670,6 +713,7 @@ func _finish_drag() -> void:
 			before[i] = state
 			spots.append(i)
 	drag_plan.clear()
+	_reclaim_reach.clear()
 	world.set_preview([], Color.WHITE)
 	if built > 0:
 		_remember(what, before, money_before - sim.money)
@@ -861,6 +905,7 @@ func _airport_too_small() -> String:
 func _cancel_drag() -> void:
 	painting = false
 	drag_plan.clear()
+	_reclaim_reach.clear()
 	world.set_preview([], Color.WHITE)
 	_update_info()
 
@@ -871,7 +916,7 @@ func _plan_tiles(a: Vector2i, b: Vector2i) -> Array[Vector2i]:
 			return _l_path(a, b)
 		Tool.GRID:
 			return _grid_tiles(a, b)
-		Tool.BULLDOZE, Tool.DISTRICT, Tool.DEAL:
+		Tool.BULLDOZE, Tool.DISTRICT, Tool.DEAL, Tool.RECLAIM:
 			return _box(a, b)
 	if GROUPS.has(current_tool):
 		# Power lines run like roads; farms, landfill, woodland and golf courses are dragged
@@ -973,6 +1018,8 @@ func _apply_tool(p: Vector2i) -> bool:
 		sim.set_district(i, _district_choice())
 	elif current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
 		sim.make_golden_gate(i)
+	elif current_tool == Tool.RECLAIM:
+		sim.reclaim(i)
 	elif current_tool == Tool.ROAD:
 		sim.set_road(i, _road_choice())
 	elif current_tool == Tool.GRID:
@@ -989,6 +1036,15 @@ func _why_cant_build(p: Vector2i, check_money: bool = true) -> String:
 	if current_tool == Tool.DEAL and here != _target_tile() and water[i] == 0 \
 			and sim.district[i] != Settings.TECH_ZONE:
 		return "It has to go in your Tech zone."
+	if current_tool == Tool.RECLAIM:
+		# Open water joined to land (bridges and Alcatraz stay as they are).
+		if not sim.can_reclaim(i):
+			return "-"
+		if not (_reclaim_reach.has(i) or _beside_land(p)):
+			return "New land has to join land: drag out from the shore."
+		if check_money and _tool_cost(p) > sim.money:
+			return "Not enough money: that costs %s." % Hud.money_text(_tool_cost(p))
+		return ""
 	if current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
 		# Not built on a tile: it turns the bridge under the mouse into the Golden Gate.
 		var gg := sim.golden_gate_problem(i)
@@ -1061,6 +1117,41 @@ func _bridge_problem(p: Vector2i) -> String:
 	return ""
 
 
+func _beside_land(p: Vector2i) -> bool:
+	for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n := p + d
+		if _in_map(n) and water[n.y * map_w + n.x] == 0:
+			return true
+	return false
+
+
+func _reach_land(plan: Array[Vector2i]) -> Dictionary:
+	# The water tiles in a Reclaim land drag that join land, through each other
+	# (so a box dragged out from the shore fills right across).
+	var open := {}
+	for p in plan:
+		var i := p.y * map_w + p.x
+		if sim.can_reclaim(i):
+			open[i] = p
+	var reach := {}
+	var queue: Array[int] = []
+	for i: int in open:
+		if _beside_land(open[i]):
+			reach[i] = true
+			queue.append(i)
+	var head := 0
+	while head < queue.size():
+		var p: Vector2i = open[queue[head]]
+		head += 1
+		for d: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var n := p + d
+			var k := n.y * map_w + n.x
+			if _in_map(n) and open.has(k) and not reach.has(k):
+				reach[k] = true
+				queue.append(k)
+	return reach
+
+
 func _is_water(p: Vector2i) -> bool:
 	return water[p.y * map_w + p.x] == 1
 
@@ -1083,6 +1174,8 @@ func _base_cost(tool_id: int) -> int:
 			return Settings.INDUSTRY_COST
 		Tool.BULLDOZE:
 			return Settings.BULLDOZE_COST
+		Tool.RECLAIM:
+			return Settings.RECLAIM_COST
 		Tool.PARK:
 			return Settings.PARK_COST
 		Tool.GRID:
@@ -1106,7 +1199,7 @@ func _cost_of(t: int) -> int:
 
 func _tool_cost(p: Vector2i) -> int:
 	var base := _base_cost(current_tool)
-	if current_tool == Tool.BULLDOZE:
+	if current_tool == Tool.BULLDOZE or current_tool == Tool.RECLAIM:
 		return base
 	var hill := 1.0 + slope[p.y * map_w + p.x] * Settings.SLOPE_COST_PER_METRE
 	if current_tool == Tool.ROAD and water[p.y * map_w + p.x] == 1:
@@ -1179,6 +1272,8 @@ func _tool_label() -> String:
 
 func _tool_hint() -> String:
 	# How to use the tools that work in a less obvious way ("" for the rest).
+	if current_tool == Tool.RECLAIM:
+		return "Drag a box out from the shore over the water: the water joined to land becomes new land."
 	if current_tool == Tool.ROAD:
 		return "Drag straight across the water, shore to shore, to build a bridge."
 	if current_tool == Tool.LANDMARK and _target_tile() == Tile.GOLDEN_GATE:
@@ -1219,7 +1314,7 @@ const SHORT := {
 	"offices_0": "Office parks", "offices_1": "Office blocks", "offices_2": "Office towers",
 	"industry": "Works and factories", "road": "Streets; drag across water to bridge", "grid": "Streets in 100 m blocks",
 	"avenue": "Wide and tree-lined: more traffic", "motorway": "Fast, for traffic across town",
-	"bulldoze": "Clear anything", "park": "Trees and open space",
+	"bulldoze": "Clear anything", "reclaim": "Fill in water to make new land", "park": "Trees and open space",
 	"coal": "Cheap power, but smoky", "gas": "Cleaner, twice the power", "nuclear": "Huge output",
 	"wind": "Clean power: drag a wind farm", "solar": "Quiet, clean power", "power_line": "Carries power",
 	"water_pump": "Water for 400 zone levels", "water_tower": "A small water supply",
@@ -1257,6 +1352,7 @@ func _menu_entries() -> Array:
 	for k in Settings.ROAD_IDS.size():
 		out.append([Settings.ROAD_IDS[k], "roads", Tool.ROAD, -1, k, Tile.ROAD])
 	out.append(["grid", "roads", Tool.GRID, -1, -1, Tile.ROAD])
+	out.append(["reclaim", "roads", Tool.RECLAIM, -1, -1, Tile.EMPTY])
 	out.append(["bulldoze", "roads", Tool.BULLDOZE, -1, -1, Tile.EMPTY])
 	var group_cats := {Tool.POWER: "power", Tool.UTILITY: "utilities", Tool.SERVICE: "services",
 		Tool.LEISURE: "leisure", Tool.TRANSPORT: "transport", Tool.LANDMARK: "landmarks", Tool.EDUCATION: "education"}
@@ -1346,6 +1442,7 @@ func _menu_items() -> Array:
 				Tool.ROAD: "Roads run straight and can turn one corner",
 				Tool.GRID: "Drag a box to lay streets every third tile",
 				Tool.BULLDOZE: "Clears anything you drag over",
+				Tool.RECLAIM: "Fills in water to make new land, level with the shore. Drag a box out from the shore: the new land has to join land. Bridges and Alcatraz stay on the water",
 				Tool.PARK: "Keeps its trees and gains more; raises land value"}[tool_id]
 			price = Hud.money_text(_base_cost(tool_id))
 			if tool_id != Tool.INDUSTRY:
@@ -1752,12 +1849,15 @@ func _update_info() -> void:
 		hud.show_info("%s selected. %s" % [_tool_label(), hint if hint != "" else "Point at the map to see what's there."])
 		return
 	var i := hover.y * map_w + hover.x
-	var ground := "Sea" if water[i] == 1 else "%.0f m above sea level" % heights[i]
+	var ground := "Sea" if water[i] == 1 else ("Reclaimed land, %.0f m above sea level" if sim.is_reclaimed(i)
+		else "%.0f m above sea level") % heights[i]
 	var problem := _why_cant_build(hover)
 	var action := "%s here costs %s" % [_tool_label(), Hud.money_text(_tool_cost(hover))]
 	var state := 0                     # (for the HUD: 0 can build, 1 can't, 2 nothing to do)
 	if problem == "-":
-		action = "Nothing to clear" if current_tool == Tool.BULLDOZE else "Already built"
+		action = "Nothing to clear" if current_tool == Tool.BULLDOZE else (
+			("Bridges and buildings stay on the water" if water[i] == 1 else "Already land")
+			if current_tool == Tool.RECLAIM else "Already built")
 		state = 2
 	elif problem != "":
 		action = problem
@@ -1838,7 +1938,8 @@ func _tile_text(i: int) -> String:
 			var where := "" if sim.district[i] == 0 else ", %s" % sim.district_name(i).to_lower()
 			if sim.pollution_band(i) >= 2:
 				where += ", %s" % sim.pollution_word(i)
-			return "Open land (land value %s%s)" % [sim.land_value_word(i), where]
+			return "%s (land value %s%s)" % ["Reclaimed land" if sim.is_reclaimed(i) else "Open land",
+				sim.land_value_word(i), where]
 		return TILE_NAMES[t]
 	var kind: String = TILE_NAMES[t]
 	if t != Tile.INDUSTRY:

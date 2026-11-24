@@ -51,6 +51,12 @@ const BRIDGE_COST_X := 25
 const BRIDGE_UPKEEP_X := 6
 const BRIDGE_MAX_TILES := 40
 const ALCATRAZ_OFFSHORE := 2         # Alcatraz goes at least this many tiles out from the shore
+# Reclaiming land (Roads > Reclaim land): water filled in to make new land, as
+# high as the shore it's built out from (at least RECLAIM_HEIGHT). Each new tile
+# has to join land, so it's dragged out from the shore; bridges and Alcatraz
+# stay on the water.
+const RECLAIM_COST := 500           # £ a tile
+const RECLAIM_HEIGHT := 1.0         # metres above the sea, at least
 const GOLDEN_GATE_MIN_TILES := 8      # a bridge at least this long (400 m) can become the Golden Gate
 const ROAD_CAPACITIES := [5000.0, 14000.0, 40000.0]   # trips a day before it's full
 const ROAD_STEPS := [12, 8, 5]                # time to drive across a tile (drivers take the quickest way)

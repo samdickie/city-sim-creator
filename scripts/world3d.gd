@@ -556,6 +556,8 @@ var built_image: Image                  # per map tile: R = built on (so fields 
 var built_texture: ImageTexture
 var _noise_tex: ImageTexture            # four smooth noises (terrain, paving)
 var terrain_root := Node3D.new()
+var _terrain_pieces: Array[MeshInstance3D] = []
+var _far_land: MeshInstance3D
 var sea_material: ShaderMaterial
 
 
@@ -632,10 +634,45 @@ func _build_terrain(ground: PackedFloat32Array) -> void:
 			piece.position = Vector3(_fine_origin.x + cx * span, 0.0, _fine_origin.y + cz * span)
 			piece.custom_aabb = AABB(Vector3(0.0, lo - 2.0, 0.0), Vector3(span, hi - lo + 4.0, span))
 			terrain_root.add_child(piece)
+			_terrain_pieces.append(piece)
 	_build_far_land()
 
 
-func _build_height_field(ground: PackedFloat32Array) -> void:
+func reshape_ground(ground: PackedFloat32Array) -> void:
+	# The coast has changed (land reclaimed from the water, or put back): work out
+	# the ground's heights and shore again (about half a second). The natural
+	# woods stay where they were; reclaimed land gets none. Things standing on
+	# the ground are placed again by the next refresh_ground/refresh_buildings.
+	var t0 := Time.get_ticks_msec()
+	for i in heights.size():
+		heights[i] = ground[i] if water[i] == 0 else minf(ground[i], SEA_FLOOR)
+	_build_height_field(ground, true)
+	terrain_material.set_shader_parameter("height_map", height_map_texture)
+	terrain_material.set_shader_parameter("land_map", land_map_texture)
+	_fit_terrain_pieces()
+	if _far_land:
+		_far_land.queue_free()        # (its inner edge matches the ground's edge, which may have moved)
+	_build_far_land()
+	print("[land] ground reshaped in %d ms" % (Time.get_ticks_msec() - t0))
+
+
+func _fit_terrain_pieces() -> void:
+	# Each ground piece's bounds, from the heights it covers (so it isn't culled wrongly).
+	var span := TERRAIN_CHUNK * _fine_step
+	for mi: MeshInstance3D in _terrain_pieces:
+		var cx := roundi((mi.position.x - _fine_origin.x) / span)
+		var cz := roundi((mi.position.z - _fine_origin.y) / span)
+		var lo := INF
+		var hi := -INF
+		for k in range(cz * TERRAIN_CHUNK, mini((cz + 1) * TERRAIN_CHUNK + 1, _fine_h)):
+			for j in range(cx * TERRAIN_CHUNK, mini((cx + 1) * TERRAIN_CHUNK + 1, _fine_w)):
+				var h: float = _fine[k * _fine_w + j]
+				lo = minf(lo, h)
+				hi = maxf(hi, h)
+		mi.custom_aabb = AABB(Vector3(0.0, lo - 2.0, 0.0), Vector3(span, hi - lo + 4.0, span))
+
+
+func _build_height_field(ground: PackedFloat32Array, keep_woods: bool = false) -> void:
 	# Works on the tiles plus the scenery beyond the map edge (the padding), then
 	# smooths up to the fine samples. Beyond the edge the coastline carries
 	# straight on and the hills are mirrored, so the land looks like it goes on.
@@ -757,7 +794,8 @@ func _build_height_field(ground: PackedFloat32Array) -> void:
 			var seaward := clampf((1.0 - wide[g]) * 2.2, 0.0, 1.0) * land[g] if reach[g] < 0.5 else 1.0
 			_land_info[g * 4] = damp
 			_land_info[g * 4 + 2] = seaward
-	_plan_woods(gw, gh, lift, land)
+	if not keep_woods:
+		_plan_woods(gw, gh, lift, land)
 	for gz in gh:
 		for gx in gw:
 			var g := gz * gw + gx
@@ -1009,6 +1047,7 @@ func _build_far_land() -> void:
 	far.material_override = terrain_material
 	far.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	terrain_root.add_child(far)
+	_far_land = far
 
 
 func _mirror(t: int, size: int) -> int:
@@ -1360,14 +1399,15 @@ func refresh_ground(layout_changed: bool = true) -> void:
 
 func _update_built_map(tiles: PackedByteArray) -> void:
 	# Fields, woods' dark ground and the wild look give way where anything is
-	# built (power lines just cross the fields). Planted woodland stays wild, and
+	# built (power lines just cross the fields), and on reclaimed land. Planted woodland stays wild, and
 	# (G) gets the woods' dark ground, as if the land map said woods there.
 	for y in map_h:
 		for x in map_w:
 			var i := y * map_w + x
 			var t := tiles[i]
 			var planted := t == Tile.WOODLAND
-			var built := (t != Tile.EMPTY and t != Tile.POWER_LINE and not planted) or _infill[i] != 0
+			var built: bool = (t != Tile.EMPTY and t != Tile.POWER_LINE and not planted) or _infill[i] != 0 \
+				or sim.is_reclaimed(i)          # (new land is plain ground: no fields or ditches)
 			built_image.set_pixel(x, y, Color(1.0 if built else 0.0, 1.0 if planted else 0.0, 0.0))
 	built_texture.update(built_image)
 

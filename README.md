@@ -29,7 +29,7 @@ Made in [Godot](https://godotengine.org) (free).
 
 - **Zones that build themselves:** homes, shops, industry and offices in three densities, growing from Californian ranch houses and townhouses to skyscrapers in a CBD.
 - **A town to run:** power and water networks, rubbish, police, fire, schools and hospitals, taxes, loans and happiness. Advisors tell you what's wrong.
-- **Traffic:** roads, avenues and motorways. Drivers take the quickest way, and a Traffic view shows where the jams are. You can build bridges across the Bay.
+- **Traffic:** roads, avenues and motorways. Drivers take the quickest way, and a Traffic view shows where the jams are. You can build bridges across the Bay, or fill it in to make new land.
 - **Map views:** land value, power, water, services, pollution, traffic, districts and more.
 - **The tech layer:**
   - Set up a Tech zone with its own tax rate.
